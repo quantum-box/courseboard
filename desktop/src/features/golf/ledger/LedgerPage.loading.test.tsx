@@ -1,7 +1,7 @@
 /* @vitest-environment jsdom */
 
 import { TooltipProvider } from '@tachyon-sdk/native-ui'
-import { act, cleanup, render, screen, waitFor } from '@testing-library/react'
+import { act, cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react'
 import { I18nextProvider } from 'react-i18next'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { clearResourceCache } from '../../../hooks/useResource'
@@ -118,6 +118,7 @@ beforeEach(async () => {
       return Promise.resolve({ golfCourseIds: ['course-east'] })
     }
     if (path.startsWith('/v1/course/reservation-products')) return Promise.resolve({ items: [] })
+    if (path.startsWith('/v1/course/player-tag-options')) return Promise.resolve({ items: [] })
     if (path.startsWith('/v1/course/booking-horizon')) {
       return Promise.resolve({
         bookableThrough: '2027-02-19',
@@ -172,6 +173,28 @@ function renderPage() {
 }
 
 describe('LedgerPage while the day is still loading', () => {
+  it('prioritizes the board and courses before auxiliary reads and loads plans on demand', async () => {
+    ledgerBody.columns[0]!.resourceId = 'resource-east'
+    renderPage()
+    await waitFor(() => expect(api.json).toHaveBeenCalledTimes(2))
+    expect(api.json.mock.calls.map(([path]) => path)).toEqual([
+      expect.stringContaining('/v1/course/tee-ledger'), '/v1/course/courses',
+    ])
+    releaseLedger?.()
+    await waitFor(() => expect(api.json.mock.calls.some(([path]) =>
+      path.startsWith('/v1/course/caddie-shifts'),
+    )).toBe(true))
+    expect(api.json.mock.calls.some(([path]) => path === '/v1/course/reservation-products')).toBe(false)
+    expect(api.json.mock.calls.some(([path]) => path === '/v1/course/player-tag-options')).toBe(false)
+    fireEvent.click(screen.getByRole('button', {
+      name: i18next.t('ledger:cell.remaining', { n: '2' }),
+    }))
+    await waitFor(() => {
+      expect(api.json.mock.calls.some(([path]) => path === '/v1/course/reservation-products')).toBe(true)
+      expect(api.json.mock.calls.some(([path]) => path === '/v1/course/player-tag-options')).toBe(true)
+    })
+  })
+
   it('keeps the date controls usable instead of blanking the page', async () => {
     // The board is one Field round trip per course plus the whole booking list.
     // Replacing the page with a spinner took the date away from the desk for as

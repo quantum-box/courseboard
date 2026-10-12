@@ -212,6 +212,9 @@ export function LedgerPage() {
   }, [date, courseIds], {
     cacheKey: `tee-ledger:${date}:${courseIds ?? 'all'}`,
   })
+  // Give the board priority over auxiliary reads that fan out into Field auth.
+  const boardReady = Boolean(ledger.data)
+  const bookingOpen = bookingTarget !== null
 
   const coursesResource = useResource(
     () =>
@@ -225,13 +228,13 @@ export function LedgerPage() {
   const horizonResource = useResource(
     () => courseboardApiJson<BookingHorizonStatusResponse>(`${COURSE_API}/booking-horizon`),
     [],
-    { cacheKey: 'course:booking-horizon' },
+    { cacheKey: 'course:booking-horizon', enabled: boardReady },
   )
 
   const orderResource = useResource(
     () => courseboardApiJson<{ golfCourseIds: string[] }>(`${COURSE_API}/course-order`),
     [],
-    { cacheKey: 'courses:order' },
+    { cacheKey: 'courses:order', enabled: boardReady },
   )
 
   const productsResource = useResource(
@@ -248,13 +251,13 @@ export function LedgerPage() {
         }>
       >(`${COURSE_API}/reservation-products`),
     [],
-    { cacheKey: 'reservation-products:list' },
+    { cacheKey: 'reservation-products:list', enabled: bookingOpen },
   )
 
   const playerTagResource = useResource(
     () => courseboardApiJson<{ items: string[] }>(`${COURSE_API}/player-tag-options`),
     [],
-    { cacheKey: 'course:player-tag-options' },
+    { cacheKey: 'course:player-tag-options', enabled: bookingOpen || editingReservationId !== null },
   )
 
   /**
@@ -269,7 +272,7 @@ export function LedgerPage() {
       `${COURSE_API}/caddie-course-supply?date=${encodeURIComponent(date)}`,
     ),
     [date],
-    { cacheKey: `caddie-course-supply:${date}` },
+    { cacheKey: `caddie-course-supply:${date}`, enabled: boardReady },
   )
 
   /** Today's caddie assignments, joined against the board to find rounds
@@ -282,7 +285,7 @@ export function LedgerPage() {
       `${COURSE_API}/caddie-assignments?from=${encodeURIComponent(addDays(date, -1))}&to=${encodeURIComponent(addDays(date, 1))}`,
     ),
     [date],
-    { cacheKey: `caddie-assignments:${date}` },
+    { cacheKey: `caddie-assignments:${date}`, enabled: boardReady },
   )
 
   /** Whether the day has at least one confirmed caddie shift (day-wide, not
@@ -292,7 +295,7 @@ export function LedgerPage() {
       `${COURSE_API}/caddie-shifts?from=${encodeURIComponent(date)}&to=${encodeURIComponent(date)}`,
     ),
     [date],
-    { cacheKey: `caddie-shifts:${date}:${date}` },
+    { cacheKey: `caddie-shifts:${date}:${date}`, enabled: boardReady },
   )
 
   const refreshAll = () => {
@@ -798,7 +801,7 @@ export function LedgerPage() {
 
       {/* Under the board, not on it: the slot is genuinely free again, and
           the desk still needs to know a group let it go this morning. */}
-      <DayCancellations date={date} />
+      {boardReady ? <DayCancellations date={date} /> : null}
 
       <SlotContextMenu
         target={contextTarget}
@@ -841,7 +844,7 @@ export function LedgerPage() {
         target={bookingTarget}
         date={date}
         plans={bookablePlans}
-        plansLoading={productsResource.loading}
+        plansLoading={productsResource.loading || (bookingOpen && !productsResource.data && !productsResource.error)}
         playerTagOptions={playerTagOptions}
         onClose={() => setBookingTarget(null)}
         onCreated={booking => {

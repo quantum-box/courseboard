@@ -1771,30 +1771,48 @@ where
         return Err(empty_course_store_error());
     }
     let url = format!("{base_url}{path_and_query}");
-    let mut request = field_request(client, method.clone(), &url, credentials).timeout(timeout);
-    if let Some(body) = body {
-        request = request.json(body);
+    let deadline = tokio::time::Instant::now() + timeout;
+    for attempt in 0..2 {
+        let remaining = deadline.saturating_duration_since(tokio::time::Instant::now());
+        let mut request =
+            field_request(client, method.clone(), &url, credentials).timeout(remaining);
+        if let Some(body) = body {
+            request = request.json(body);
+        }
+        let response = request
+            .send()
+            .await
+            .map_err(|error| map_field_request_error_with_timeout(error, timeout))?;
+        let status = response.status();
+        if !status.is_success() {
+            let body = response.text().await.unwrap_or_default();
+            let failure = FieldStatusFailure {
+                status,
+                code: field_error_code(&body),
+                body: &body,
+            };
+            // A slow Field auth gate can return a typed 503 before the data
+            // handler runs. Replay reads once, inside the original deadline;
+            // writes and real permission denials must never be replayed here.
+            if attempt == 0
+                && method == reqwest::Method::GET
+                && status == reqwest::StatusCode::SERVICE_UNAVAILABLE
+                && failure.code.as_deref() == Some("SERVICE_UNAVAILABLE")
+                && deadline.saturating_duration_since(tokio::time::Instant::now())
+                    > Duration::from_millis(200)
+            {
+                tokio::time::sleep(Duration::from_millis(200)).await;
+                continue;
+            }
+            return Err(
+                classify(&failure).unwrap_or_else(|| map_field_status_error(status, failure.body))
+            );
+        }
+        return response.json().await.map_err(|error| {
+            map_field_body_error_with_timeout(&method, path_and_query, error, timeout)
+        });
     }
-    let response = request
-        .send()
-        .await
-        .map_err(|error| map_field_request_error_with_timeout(error, timeout))?;
-    let status = response.status();
-    if !status.is_success() {
-        let body = response.text().await.unwrap_or_default();
-        let failure = FieldStatusFailure {
-            status,
-            code: field_error_code(&body),
-            body: &body,
-        };
-        return Err(
-            classify(&failure).unwrap_or_else(|| map_field_status_error(status, failure.body))
-        );
-    }
-    response
-        .json()
-        .await
-        .map_err(|error| map_field_body_error_with_timeout(&method, path_and_query, error, timeout))
+    unreachable!("Field read retry always returns on its final attempt")
 }
 
 /// Name the call that failed.
@@ -2240,6 +2258,70 @@ mod tests {
             axum::serve(listener, app).await.expect("serve mock Field");
         });
         (format!("http://{address}"), server)
+    }
+
+    #[tokio::test]
+    async fn json_reads_retry_typed_unavailability_once_but_never_replay_writes_or_denials() {
+        for (method, status, persistent, expected_calls) in [
+            (reqwest::Method::GET, 503, false, 2),
+            (reqwest::Method::GET, 503, true, 2),
+            (reqwest::Method::POST, 503, false, 1),
+            (reqwest::Method::GET, 401, false, 1),
+            (reqwest::Method::GET, 403, false, 1),
+        ] {
+            let calls = Arc::new(Mutex::new(Vec::new()));
+            let handler_calls = calls.clone();
+            let app = Router::new().route(
+                "/read",
+                axum::routing::any(move |headers: axum::http::HeaderMap| {
+                    let calls = handler_calls.clone();
+                    async move {
+                        let count = {
+                            let mut calls = calls.lock().unwrap();
+                            calls.push(headers);
+                            calls.len()
+                        };
+                        if count == 1 || persistent {
+                            (
+                                axum::http::StatusCode::from_u16(status).unwrap(),
+                                Json(json!({ "code": if status == 503 { "SERVICE_UNAVAILABLE" } else { "FORBIDDEN" } })),
+                            )
+                        } else {
+                            (axum::http::StatusCode::OK, Json(json!({ "read": true })))
+                        }
+                    }
+                }),
+            );
+            let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+            let base = format!("http://{}", listener.local_addr().unwrap());
+            let server = tokio::spawn(async move { axum::serve(listener, app).await.unwrap() });
+            let result: Result<Value, _> = field_send_json(
+                &reqwest::Client::new(),
+                &base,
+                method.clone(),
+                "/read",
+                schedule_credentials(),
+                None,
+            )
+            .await;
+            assert_eq!(
+                result.is_ok(),
+                method == reqwest::Method::GET && status == 503 && !persistent
+            );
+            let captured = calls.lock().unwrap();
+            assert_eq!(captured.len(), expected_calls);
+            for headers in captured.iter() {
+                assert_eq!(
+                    headers.get(AUTHORIZATION).unwrap(),
+                    schedule_credentials().authorization
+                );
+                assert_eq!(
+                    headers.get("x-operator-id").unwrap(),
+                    schedule_credentials().operator_id
+                );
+            }
+            server.abort();
+        }
     }
 
     #[tokio::test]
