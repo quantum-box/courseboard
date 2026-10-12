@@ -62,6 +62,8 @@ let generatedThrough: string | null = null
 let supplyFailure = false
 let supplyGetCount = 0
 let plansAvailable = false
+let releaseOrder: (() => void) | null = null
+let deferOrder = false
 let triggerReload: (() => false | Promise<void>) | null = null
 
 function ReloadBridge() {
@@ -77,6 +79,8 @@ beforeEach(async () => {
   supplyFailure = false
   supplyGetCount = 0
   plansAvailable = false
+  releaseOrder = null
+  deferOrder = false
   triggerReload = null
   ledgerBody = {
     date: '2026-07-20',
@@ -114,9 +118,14 @@ beforeEach(async () => {
       })
     }
     if (path.startsWith('/v1/course/courses')) {
-      return Promise.resolve({ items: [{ id: 'course-east', name: '東コース' }] })
+      return Promise.resolve({ items: ledgerBody.columns.map(column => ({
+        id: column.golfCourseId, name: column.courseName,
+      })) })
     }
     if (path.startsWith('/v1/course/course-order')) {
+      if (deferOrder) return new Promise(resolve => {
+        releaseOrder = () => resolve({ golfCourseIds: ['course-west', 'course-east'] })
+      })
       return Promise.resolve({ golfCourseIds: ['course-east'] })
     }
     if (path.startsWith('/v1/course/reservation-products')) return Promise.resolve({ items: plansAvailable ? [{
@@ -178,6 +187,22 @@ function renderPage() {
 }
 
 describe('LedgerPage while the day is still loading', () => {
+  it('shows the board but prevents column moves until its saved order is available', async () => {
+    deferOrder = true
+    ledgerBody.columns.unshift({ ...ledgerBody.columns[0]!, golfCourseId: 'course-west', courseName: '西コース' })
+    renderPage()
+    releaseLedger?.()
+    const move = await screen.findByRole('button', {
+      name: i18next.t('ledger:order.moveRight', { name: '西コース' }),
+    }) as HTMLButtonElement
+    expect(move.disabled).toBe(true)
+    fireEvent.click(move)
+    expect(api.json.mock.calls.some(([, init]) => init?.method === 'PUT')).toBe(false)
+    await waitFor(() => expect(releaseOrder).not.toBeNull())
+    act(() => { releaseOrder?.() })
+    await waitFor(() => expect(move.disabled).toBe(false))
+  })
+
   it('loads plans when an existing reservation is opened before any new booking', async () => {
     plansAvailable = true
     ledgerBody.columns[0]!.slots[0]!.items = [{

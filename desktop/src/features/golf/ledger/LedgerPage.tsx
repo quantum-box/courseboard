@@ -392,6 +392,8 @@ export function LedgerPage() {
   // Moving a column is computed against the whole arrangement, not just the
   // columns on screen, so filtering the board never rearranges it for others.
   const storedOrder = orderResource.data?.golfCourseIds ?? []
+  const orderReady = Boolean(orderResource.data && coursesResource.data)
+    && !orderResource.error && !coursesResource.error
   const boardOrder = arrangeCourses(storedOrder, courseOptions).map(course => course.id)
   const orderedCourseOptions = arrangeCourses(storedOrder, courseOptions)
 
@@ -483,6 +485,7 @@ export function LedgerPage() {
   }
 
   const moveColumn = async (golfCourseId: string, delta: -1 | 1) => {
+    if (!orderReady || savingOrder) return
     const visible = columns.map(column => column.golfCourseId)
     const next = moveCourse(boardOrder, visible, golfCourseId, delta)
     if (next === boardOrder) return
@@ -793,7 +796,8 @@ export function LedgerPage() {
             onBookSlot={bookSlot}
             onOpenContextMenu={setContextTarget}
             onSelectReservation={setEditingReservationId}
-            onMoveColumn={savingOrder ? () => {} : moveColumn}
+            onMoveColumn={moveColumn}
+            movesDisabled={savingOrder || !orderReady}
             onOpenCourseSetup={golfCourseId => navigate(courseSetupRoute(golfCourseId))}
           />
         )}
