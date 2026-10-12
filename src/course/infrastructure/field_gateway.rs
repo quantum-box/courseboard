@@ -2319,9 +2319,50 @@ mod tests {
                     headers.get("x-operator-id").unwrap(),
                     schedule_credentials().operator_id
                 );
+                assert_eq!(
+                    headers.get("x-platform-id").unwrap(),
+                    schedule_credentials().platform_id.unwrap()
+                );
             }
             server.abort();
         }
+    }
+
+    #[tokio::test]
+    async fn json_read_retry_shares_the_original_deadline() {
+        let calls = Arc::new(std::sync::atomic::AtomicUsize::new(0));
+        let app = Router::new().route(
+            "/read",
+            get(move || {
+                let calls = calls.clone();
+                async move {
+                    if calls.fetch_add(1, std::sync::atomic::Ordering::SeqCst) == 0 {
+                        return (
+                            axum::http::StatusCode::SERVICE_UNAVAILABLE,
+                            Json(json!({ "code": "SERVICE_UNAVAILABLE" })),
+                        );
+                    }
+                    tokio::time::sleep(Duration::from_millis(250)).await;
+                    (axum::http::StatusCode::OK, Json(json!({ "read": true })))
+                }
+            }),
+        );
+        let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let base = format!("http://{}", listener.local_addr().unwrap());
+        let server = tokio::spawn(async move { axum::serve(listener, app).await.unwrap() });
+        let result: Result<Value, _> = field_send_json_classified_with_timeout(
+            &reqwest::Client::new(),
+            &base,
+            reqwest::Method::GET,
+            "/read",
+            schedule_credentials(),
+            None,
+            |_| None,
+            Duration::from_millis(350),
+        )
+        .await;
+        assert!(result.unwrap_err().to_string().contains("timed out"));
+        server.abort();
     }
 
     #[tokio::test]

@@ -251,7 +251,7 @@ export function LedgerPage() {
         }>
       >(`${COURSE_API}/reservation-products`),
     [],
-    { cacheKey: 'reservation-products:list', enabled: bookingOpen },
+    { cacheKey: 'reservation-products:list', enabled: bookingOpen || editingReservationId !== null },
   )
 
   const playerTagResource = useResource(

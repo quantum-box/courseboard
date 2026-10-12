@@ -61,6 +61,7 @@ let releaseLedger: (() => void) | null = null
 let generatedThrough: string | null = null
 let supplyFailure = false
 let supplyGetCount = 0
+let plansAvailable = false
 let triggerReload: (() => false | Promise<void>) | null = null
 
 function ReloadBridge() {
@@ -75,6 +76,7 @@ beforeEach(async () => {
   generatedThrough = null
   supplyFailure = false
   supplyGetCount = 0
+  plansAvailable = false
   triggerReload = null
   ledgerBody = {
     date: '2026-07-20',
@@ -117,7 +119,10 @@ beforeEach(async () => {
     if (path.startsWith('/v1/course/course-order')) {
       return Promise.resolve({ golfCourseIds: ['course-east'] })
     }
-    if (path.startsWith('/v1/course/reservation-products')) return Promise.resolve({ items: [] })
+    if (path.startsWith('/v1/course/reservation-products')) return Promise.resolve({ items: plansAvailable ? [{
+      reservationServiceId: 'plan-self', displayName: 'テストプラン',
+      playType: 'self', expectedDurationMinutes: 240, golfCourseIds: ['course-east'],
+    }] : [] })
     if (path.startsWith('/v1/course/player-tag-options')) return Promise.resolve({ items: [] })
     if (path.startsWith('/v1/course/booking-horizon')) {
       return Promise.resolve({
@@ -173,6 +178,21 @@ function renderPage() {
 }
 
 describe('LedgerPage while the day is still loading', () => {
+  it('loads plans when an existing reservation is opened before any new booking', async () => {
+    plansAvailable = true
+    ledgerBody.columns[0]!.slots[0]!.items = [{
+      id: 'reservation-test', reservationNumber: 'R-1', reservationServiceId: 'plan-self',
+      golfCourseId: 'course-east', courseName: '東コース', teeTime: `${todayDate}T07:00:00+09:00`,
+      durationMinutes: 240, playType: 'self', partySize: 4, partyName: '予約テスト',
+      status: 'confirmed', holes: 18,
+    }]
+    renderPage()
+    releaseLedger?.()
+    fireEvent.click(await screen.findByRole('button', { name: /予約テスト/ }))
+    expect((await screen.findAllByText('テストプラン')).length).toBeGreaterThan(0)
+    expect(api.json.mock.calls.some(([path]) => path === '/v1/course/reservation-products')).toBe(true)
+  })
+
   it('prioritizes the board and courses before auxiliary reads and loads plans on demand', async () => {
     ledgerBody.columns[0]!.resourceId = 'resource-east'
     renderPage()
