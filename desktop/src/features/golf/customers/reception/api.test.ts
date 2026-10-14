@@ -325,6 +325,40 @@ describe('reception draft API adapter', () => {
     ])
   })
 
+  it('starts a fresh job when a resumed key no longer matches the prepared sheets', async () => {
+    const photo = new File(['a'], 'scan.jpg', { type: 'image/jpeg' })
+    const onJobFinished = vi.fn()
+    api.json
+      .mockRejectedValueOnce(new ApiError('ocr job idempotency key was already used with a different request', 409))
+      .mockResolvedValueOnce({ id: 'stale-job', status: 'cancelled' })
+      .mockResolvedValueOnce({
+        id: 'fresh-job',
+        status: 'completed',
+        completedUnits: 1,
+        draft: { visitors: [{ name: '西村 隆' }], warnings: [] },
+        uploads: [],
+      })
+
+    await expect(draftReceptionSheets(
+      [photo],
+      { onJobFinished },
+      {
+        draft: { visitors: [], warnings: [] },
+        nextBatchIndex: 0,
+        job: { idempotencyKey: 'stale-key', jobId: 'stale-job' },
+      },
+    )).resolves.toMatchObject({ visitors: [{ name: '西村 隆' }] })
+    expect(api.json.mock.calls.map(([path, init]) => [path, (init as RequestInit | undefined)?.method]))
+      .toEqual([
+        ['/v1/course/customers/reception-draft/jobs', 'POST'],
+        ['/v1/course/customers/reception-draft/jobs/stale-job', 'DELETE'],
+        ['/v1/course/customers/reception-draft/jobs', 'POST'],
+      ])
+    const freshKey = JSON.parse(String((api.json.mock.calls[2]?.[1] as RequestInit).body)).idempotencyKey
+    expect(freshKey).not.toBe('stale-key')
+    expect(onJobFinished).toHaveBeenCalledWith('stale-job')
+  })
+
   it('drops the resume key when throttling belongs to a persisted failed job', async () => {
     const photo = new File(['a'], 'scan.jpg', { type: 'image/jpeg' })
     api.json
