@@ -432,6 +432,9 @@ export function ReceptionPage() {
     signal?: AbortSignal,
   ) {
     for (let index = startIndex; index < groups.length; index += 1) {
+      // A batch read earlier may already hold saved rows and the desk's edits;
+      // reading it again would replace them and bill its pages twice.
+      if (batchResultsRef.current[index]?.status === 'ready') continue
       const completed = await processReviewBatch(groups, index, false, signal)
       if (!completed) return
     }
@@ -537,10 +540,14 @@ export function ReceptionPage() {
   async function rotateSheet(index: number, step: -90 | 90) {
     const result = batchResultsRef.current[activeBatchIndex]
     const currentRotation = result?.rotations[index] ?? 0
-    if (rotationLocked || !result || !orientationSources[index] || !files[index]) return
+    if (rotationLocked || readingControllerRef.current || !result || !orientationSources[index] || !files[index]) return
+    const batchIndex = activeBatchIndex
     const rotations = [...result.rotations]
     rotations[index] = ((currentRotation + step + 360) % 360) as ReceptionRotation
-    updateBatchResult(activeBatchIndex, current => ({
+    // The rotated sheets are a different request, so a failed read's job can
+    // never be resumed; cancel it instead of leaving it to expire.
+    const staleJobId = result.resume?.job?.jobId
+    updateBatchResult(batchIndex, current => ({
       ...current,
       rotations,
       resume: undefined,
@@ -549,12 +556,25 @@ export function ReceptionPage() {
     setReadError(null)
     setReadProgress(null)
     setReading(true)
+    const controller = new AbortController()
+    readingControllerRef.current = controller
     try {
-      await processReviewBatch(reviewBatches, activeBatchIndex, true)
+      if (staleJobId) {
+        await cancelReceptionOcrJob(staleJobId).catch(() => undefined)
+        if (activeOcrJobIdRef.current === staleJobId) activeOcrJobIdRef.current = null
+      }
+      if (controller.signal.aborted) return
+      const completed = await processReviewBatch(reviewBatches, batchIndex, true, controller.signal)
+      // A batch that failed earlier left the ones after it queued; continue
+      // them now, as the retry button would have.
+      if (completed && result.status === 'failed') await processReviewBatches(reviewBatches, batchIndex + 1, controller.signal)
     } finally {
-      setReading(false)
-      setReadProgress(null)
-      setProcessingBatchIndex(null)
+      if (readingControllerRef.current === controller) {
+        readingControllerRef.current = null
+        setReading(false)
+        setReadProgress(null)
+        setProcessingBatchIndex(null)
+      }
     }
   }
 

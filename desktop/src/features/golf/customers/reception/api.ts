@@ -194,17 +194,37 @@ export async function draftReceptionSheets(
     let jobResume = index === startBatchIndex ? resume?.job : undefined
     try {
       throwIfAborted(options.signal)
-      const idempotencyKey = jobResume?.idempotencyKey ?? crypto.randomUUID()
+      const resumedKey = Boolean(jobResume?.idempotencyKey)
+      let idempotencyKey = jobResume?.idempotencyKey ?? crypto.randomUUID()
       jobResume = { idempotencyKey, ...(jobResume?.jobId ? { jobId: jobResume.jobId } : {}) }
-      const createdJob = await receptionJobJson<CreatedReceptionOcrJob>(RECEPTION_DRAFT_JOBS_PATH, {
+      const createJob = (key: string) => receptionJobJson<CreatedReceptionOcrJob>(RECEPTION_DRAFT_JOBS_PATH, {
         method: 'POST',
         headers: { 'content-type': 'application/json' },
         body: JSON.stringify({
-          idempotencyKey,
+          idempotencyKey: key,
           sheets: batch.map(file => ({ contentType: file.type, size: file.size })),
         }),
         signal: options.signal,
       })
+      let createdJob: CreatedReceptionOcrJob
+      try {
+        createdJob = await createJob(idempotencyKey)
+      } catch (error) {
+        // A resumed key conflicts when the re-prepared sheets no longer match
+        // what it declared (orientation can succeed only on the retry) or its
+        // upload window has closed. Replaying it can never succeed, so retire
+        // the old job and start a fresh one.
+        if (!resumedKey || !(error instanceof ApiError) || error.status !== 409) throw error
+        const staleJobId = jobResume.jobId
+        if (staleJobId) {
+          await cancelReceptionOcrJob(staleJobId).catch(() => undefined)
+          options.onJobFinished?.(staleJobId)
+        }
+        throwIfAborted(options.signal)
+        idempotencyKey = crypto.randomUUID()
+        jobResume = { idempotencyKey }
+        createdJob = await createJob(idempotencyKey)
+      }
       let job: ReceptionOcrJob = createdJob
       jobResume = { idempotencyKey, jobId: job.id }
       options.onJobStarted?.(job.id)
