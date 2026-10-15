@@ -225,7 +225,8 @@ export function ReceptionPage() {
       )
       const missingPages = Array.from({ length: pageCount }, (_, index) => index + 1)
         .filter(page => !pagesWithNames.has(page))
-      return missingPages.length > 0 ? [{ source: sourceIndex + 1, pages: missingPages }] : []
+      const sourceNumber = activeBatchIndex * MAX_RECEPTION_BATCH_SHEETS + sourceIndex + 1
+      return missingPages.length > 0 ? [{ source: sourceNumber, pages: missingPages }] : []
     })
   }, [activeResult?.status, files, pdfPageCounts, rows])
   const duplicates = useMemo(
@@ -734,7 +735,7 @@ export function ReceptionPage() {
           <Notice tone="warning">
             {t('customers:reception.rows.bulkBlocked', {
               ready: String(pending.length),
-              count: String(blockedRows.length),
+              count: blockedRows.length,
             })}
           </Notice>
         ) : null}
@@ -742,7 +743,7 @@ export function ReceptionPage() {
           <Notice key={`unread-pages-${source}`} tone="warning">
             {t('customers:reception.pagesWithoutNames', {
               source: String(source),
-              count: String(pages.length),
+              count: pages.length,
               pages: formatReceptionPageRanges(pages, i18n.language.startsWith('ja') ? '、' : ', '),
             })}
           </Notice>
