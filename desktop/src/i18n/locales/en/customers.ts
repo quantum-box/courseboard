@@ -50,6 +50,7 @@ export const customers: DeepPartial<typeof source> = {
     readingBatch: 'Reading reception sheets (batch {{current}} of {{total}})…',
     batchWarning: 'Sheets {{firstSheet}}–{{lastSheet}}: {{warning}}',
     rowLimitWarning: 'This batch returned more than {{count}} people. Only the first {{count}} are shown; the rest were omitted.',
+    pagesWithoutNames: 'OCR did not read a customer name on {{count}} pages of reception PDF {{source}}: {{pages}}. They may be blank, or the reader may have missed a name. Check the original and use “Add a row” if someone needs to be registered.',
     batch: {
       title: 'Read batches',
       description: 'Process batches in order, with up to 32 sheets each. Reviews and registrations are kept when you switch batches.',
@@ -89,6 +90,8 @@ export const customers: DeepPartial<typeof source> = {
     empty: {
       title: 'Choose a reception sheet',
       description: 'The people written on the scan are read out of it. Every value can be corrected before anyone is registered.',
+      dropHint: 'Drop JPEG, PNG, HEIC/HEIF, or PDF files anywhere in this box.',
+      dropActive: 'Drop the files here to read them',
     },
     settings: {
       title: 'Reception sheet fields',
@@ -172,6 +175,7 @@ export const customers: DeepPartial<typeof source> = {
     rows: {
       title: 'People read from the sheet',
       description: 'Check each row against the sheet on the right before registering. The read is a draft.',
+      bulkBlocked: '{{ready}} people can be registered now. {{count}} unsaved rows do not meet the registration requirements. Each row shows which required field or consent is missing.',
       person: 'Person {{index}}',
       add: 'Add a row',
       register: 'Register this person',

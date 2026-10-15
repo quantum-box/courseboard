@@ -16,7 +16,7 @@ import {
   Trash2,
   Upload,
 } from 'lucide-react'
-import { useEffect, useMemo, useRef, useState } from 'react'
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import type { ReactNode } from 'react'
 import { useTranslation } from 'react-i18next'
 import { ApiError } from '../../../../api'
@@ -132,7 +132,7 @@ class ReceptionPreparationError extends Error {
  * second ledger entry for somebody who already has one.
  */
 export function ReceptionPage() {
-  const { t } = useTranslation(['customers', 'common'])
+  const { t, i18n } = useTranslation(['customers', 'common'])
   const fieldSettings = useResource(
     () => listReceptionFields(),
     [],
@@ -150,7 +150,9 @@ export function ReceptionPage() {
   const activeBatchIndexRef = useRef(0)
   const [processingBatchIndex, setProcessingBatchIndex] = useState<number | null>(null)
   const [files, setFiles] = useState<File[]>([])
+  const [pdfPageCounts, setPdfPageCounts] = useState<Record<number, number>>({})
   const [orientationSources, setOrientationSources] = useState<File[]>([])
+  const [dropActive, setDropActive] = useState(false)
   const rowListRef = useRef<HTMLOListElement>(null)
   const previewListRef = useRef<HTMLDivElement>(null)
   const syncUntilRef = useRef(0)
@@ -177,6 +179,12 @@ export function ReceptionPage() {
   const readingControllerRef = useRef<AbortController | null>(null)
   const activeOcrJobIdRef = useRef<string | null>(null)
 
+  const reportPdfPageCount = useCallback((sourceIndex: number, pageCount: number) => {
+    setPdfPageCounts(current => current[sourceIndex] === pageCount
+      ? current
+      : { ...current, [sourceIndex]: pageCount })
+  }, [])
+
   // The previews are object URLs over the files the desk picked; they are
   // revoked when the files change so a morning of scans does not accumulate
   // blobs.
@@ -198,6 +206,28 @@ export function ReceptionPage() {
   const activeResult = batchResults[activeBatchIndex]
   const rows = activeResult?.rows ?? []
   const warnings = activeResult?.warnings ?? []
+  const pagesWithoutNames = useMemo(() => {
+    if (activeResult?.status !== 'ready') return []
+    const sourceRows = rows.filter(row => !row.key.startsWith('added-'))
+    // Without a source index an OCR row could belong to any selected file.
+    if (sourceRows.some(row => row.sourceIndex == null)) return []
+    return Object.entries(pdfPageCounts).flatMap(([source, pageCount]) => {
+      const sourceIndex = Number(source)
+      const file = files[sourceIndex]
+      if (!file || previewKind(file) !== 'pdf') return []
+      const sourceFileRows = sourceRows.filter(row => row.sourceIndex === sourceIndex)
+      // A page-less OCR row for this PDF could belong to any page in it.
+      if (sourceFileRows.some(row => row.sourcePage == null)) return []
+      const pagesWithNames = new Set(
+        sourceFileRows
+          .filter(row => row.read.name.trim() !== '')
+          .map(row => row.sourcePage as number),
+      )
+      const missingPages = Array.from({ length: pageCount }, (_, index) => index + 1)
+        .filter(page => !pagesWithNames.has(page))
+      return missingPages.length > 0 ? [{ source: sourceIndex + 1, pages: missingPages }] : []
+    })
+  }, [activeResult?.status, files, pdfPageCounts, rows])
   const duplicates = useMemo(
     () => duplicateNameKeys(batchResults.flatMap(result => result.rows)),
     [batchResults],
@@ -207,6 +237,9 @@ export function ReceptionPage() {
     consentSettings.data ?? DEFAULT_RECEPTION_CONSENT_ITEMS,
   )
   const pending = pendingRows(rows, receptionFields, receptionConsentItems)
+  const blockedRows = rows.filter(row =>
+    row.status === 'pending' && !canRegister(row, receptionFields, receptionConsentItems),
+  )
   const saved = savedCount(rows)
 
   function updateBatchResult(
@@ -222,6 +255,7 @@ export function ReceptionPage() {
   }
 
   function activateBatch(index: number) {
+    if (activeBatchIndexRef.current !== index) setPdfPageCounts({})
     activeBatchIndexRef.current = index
     setActiveBatchIndex(index)
   }
@@ -449,6 +483,7 @@ export function ReceptionPage() {
       setReadError(t('customers:reception.file.totalSize'))
       return
     }
+    setPdfPageCounts({})
     setReading(true)
     const controller = new AbortController()
     readingControllerRef.current = controller
@@ -517,6 +552,7 @@ export function ReceptionPage() {
     const group = reviewBatches[index]
     if (busy || !result || !group || result.status === 'queued') return
     activateBatch(index)
+    setPdfPageCounts({})
     setReadError(result.error ?? null)
     setLoadingBatchPreview(true)
     try {
@@ -694,6 +730,23 @@ export function ReceptionPage() {
         {warnings.map(warning => (
           <Notice key={warning} tone="warning">{warning}</Notice>
         ))}
+        {activeResult?.status === 'ready' && blockedRows.length > 0 ? (
+          <Notice tone="warning">
+            {t('customers:reception.rows.bulkBlocked', {
+              ready: String(pending.length),
+              count: String(blockedRows.length),
+            })}
+          </Notice>
+        ) : null}
+        {pagesWithoutNames.map(({ source, pages }) => (
+          <Notice key={`unread-pages-${source}`} tone="warning">
+            {t('customers:reception.pagesWithoutNames', {
+              source: String(source),
+              count: String(pages.length),
+              pages: formatReceptionPageRanges(pages, i18n.language.startsWith('ja') ? '、' : ', '),
+            })}
+          </Notice>
+        ))}
       </Panel>
 
       {reviewBatches.length > 0 && (!compactReview || reviewBatches.length > 1 || activeResult?.status === 'failed') ? (
@@ -789,16 +842,49 @@ export function ReceptionPage() {
 
       {files.length === 0 && rows.length === 0 && !reading && !loadingBatchPreview ? (
         <Panel>
-          <EmptyState
-            title={t('customers:reception.empty.title')}
-            description={t('customers:reception.empty.description')}
-            action={(
-              <Button type="button" variant="primary" onClick={() => fileInputRef.current?.click()}>
-                <FileScan />
-                {t('customers:reception.choose.open')}
-              </Button>
-            )}
-          />
+          <div
+            className={`reception-dropzone${dropActive ? ' is-active' : ''}`}
+            onDragEnter={event => {
+              if (!Array.from(event.dataTransfer.types).includes('Files')) return
+              event.preventDefault()
+              if (!busy) setDropActive(true)
+            }}
+            onDragOver={event => {
+              if (!Array.from(event.dataTransfer.types).includes('Files')) return
+              event.preventDefault()
+              event.dataTransfer.dropEffect = 'copy'
+              if (!busy) setDropActive(true)
+            }}
+            onDragLeave={event => {
+              if (!event.currentTarget.contains(event.relatedTarget as Node | null)) {
+                setDropActive(false)
+              }
+            }}
+            onDrop={event => {
+              event.preventDefault()
+              setDropActive(false)
+              const dropped = Array.from(event.dataTransfer.files)
+              if (!busy && dropped.length > 0) void read(dropped)
+            }}
+          >
+            <EmptyState
+              title={t('customers:reception.empty.title')}
+              description={t('customers:reception.empty.description')}
+              action={(
+                <>
+                  <p className="reception-drop-hint" aria-live="polite">
+                    {t(dropActive
+                      ? 'customers:reception.empty.dropActive'
+                      : 'customers:reception.empty.dropHint')}
+                  </p>
+                  <Button type="button" variant="primary" disabled={busy} onClick={() => fileInputRef.current?.click()}>
+                    <FileScan />
+                    {t('customers:reception.choose.open')}
+                  </Button>
+                </>
+              )}
+            />
+          </div>
         </Panel>
       ) : null}
 
@@ -922,7 +1008,7 @@ export function ReceptionPage() {
                         </Button>
                       </div>
                       {previewKind(file) === 'pdf' ? (
-                        <PdfPages url={url} sourceIndex={index} />
+                        <PdfPages url={url} sourceIndex={index} onPageCount={reportPdfPageCount} />
                       ) : (
                         <img
                           className="reception-preview-image"
@@ -951,6 +1037,18 @@ export function ReceptionPage() {
 }
 
 const CUSTOM_FIELD_KEY_PATTERN = /^[a-z][a-z0-9_]{0,63}$/u
+
+function formatReceptionPageRanges(pages: readonly number[], separator: string) {
+  const ranges: Array<[number, number]> = []
+  for (const page of pages) {
+    const lastRange = ranges[ranges.length - 1]
+    if (lastRange && page === lastRange[1] + 1) lastRange[1] = page
+    else ranges.push([page, page])
+  }
+  return ranges
+    .map(([first, last]) => first === last ? String(first) : `${first}–${last}`)
+    .join(separator)
+}
 
 const FIELD_TYPE_OPTIONS = [
   'text',

@@ -48,6 +48,7 @@ export const customers = {
     readingBatch: '受付用紙を読み取っています（{{current}}/{{total}}回目）。',
     batchWarning: '{{firstSheet}}〜{{lastSheet}}枚目：{{warning}}',
     rowLimitWarning: 'このbatchの読み取り結果が{{count}}人を超えたため、先頭の{{count}}人のみ表示しています。残りは省略しました。',
+    pagesWithoutNames: 'OCRでは受付用紙{{source}}（PDF）の{{count}}ページ分で人の名前を読み取れていません（{{pages}}ページ）。空白ページか、読み取り漏れの可能性があります。原本を確認し、登録する人がいる場合は「行を足す」で追加してください。',
     batch: {
       title: '読み取りbatch',
       description: '最大32枚ずつのbatchに分けて順に処理します。確認・登録内容は切り替えても保持されます。',
@@ -93,6 +94,8 @@ export const customers = {
     empty: {
       title: '受付用紙をえらんでください',
       description: 'スキャンした画像やPDFから、書かれている人を読み取ります。読み取った内容は登録する前に画面で直せます。',
+      dropHint: 'JPEG・PNG・HEIC/HEIF・PDFをこの枠にドロップできます。',
+      dropActive: 'ここにドロップして読み取る',
     },
     settings: {
       title: '受付票の項目設定',
@@ -176,6 +179,7 @@ export const customers = {
     rows: {
       title: '読み取った人',
       description: '右の用紙と見比べて直してから登録してください。読み取りは下書きです。',
+      bulkBlocked: 'まとめて登録できるのは{{ready}}人です。未登録の{{count}}行は登録条件を満たしていません。必須項目や必須同意の不足は各行の警告をご確認ください。',
       person: '{{index}}人目',
       add: '行を足す',
       register: 'この人を登録する',

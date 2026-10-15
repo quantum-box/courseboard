@@ -47,6 +47,7 @@ export const customers: DeepPartial<typeof source> = {
     readingBatch: '受付の 紙を 読んで います（{{total}}回の {{current}}回目）。',
     batchWarning: '{{firstSheet}}から{{lastSheet}}まい目：{{warning}}',
     rowLimitWarning: 'この まとめで 読んだ 人が{{count}}人より 多かったので、はじめの{{count}}人だけ 出して います。のこりは 出して いません。',
+    pagesWithoutNames: 'OCRでは 受付の 紙{{source}}（PDF）の{{count}}ページで 名前を 読めて いません（{{pages}}ページ）。空白ページか、OCRが 名前を 読めなかった かもしれません。紙を たしかめて、人を のせるときは「行を たす」で 入れて ください。',
     batch: {
       title: '読み取りの まとめ',
       description: '32まいまでの まとめに 分けて じゅんに 読みます。たしかめた 内容や のせた 人は、まとめを かえても のこります。',
@@ -169,6 +170,7 @@ export const customers: DeepPartial<typeof source> = {
     rows: {
       title: '読めた 人',
       description: '右の 紙と 見くらべて、なおしてから のせて ください。読んだ ことは 下書きです。',
+      bulkBlocked: 'いま まとめて のせられるのは {{ready}}人です。{{count}}行は のせる ための 条件が たりません。足りない 項目や 同意は、それぞれの 行の 注意に 出て います。',
       person: '{{index}}人め',
       add: '行を たす',
       register: 'この 人を のせる',

@@ -60,6 +60,11 @@ export function CustomersPage() {
   const shown = useKeptData(search.searching ? null : search)
   const [creating, setCreating] = useState(false)
   const trimmedTerm = term.trim()
+  // The first render and the render immediately after typing both happen
+  // before the search effect can mark itself as searching. Treat an answer
+  // for a different query (or no answer yet) as pending so an empty result
+  // cannot briefly read as an empty ledger.
+  const loading = search.searching || (!search.error && search.completedQuery !== trimmedTerm)
   const searchParameter = customerSearchParameter(term)
   const searchCondition = searchParameter
     ? t(`customers:search.condition.${searchParameter}`)
@@ -145,7 +150,7 @@ export function CustomersPage() {
           />
         </Field>
 
-        {search.searching && !shown ? <LoadingState /> : null}
+        {loading && (!shown || shown.candidates.length === 0) ? <LoadingState /> : null}
         {/* A ledger that cannot be reached is a note, not a blocked screen:
             the desk still has to be able to register someone. */}
         {search.error ? <Notice tone="danger">{search.error}</Notice> : null}
@@ -153,7 +158,9 @@ export function CustomersPage() {
 
         {/* No column sorts: Field lists the ledger in one fixed order and
             sorting one page of it would not sort the ledger (PLT-4746). */}
-        {shown && (!search.error || shown.candidates.length > 0) ? (
+        {shown
+          && (!search.error || shown.candidates.length > 0)
+          && (!loading || shown.candidates.length > 0) ? (
           <DataTable
             rows={shown.candidates}
             columns={columns}
@@ -166,7 +173,7 @@ export function CustomersPage() {
               total: shown.total ?? undefined,
               // Without a count, a full page is the only sign of another one.
               hasMore: shown.candidates.length >= LEDGER_PAGE_SIZE,
-              loading: search.searching,
+              loading,
             }}
             empty={(
               <EmptyState

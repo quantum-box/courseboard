@@ -122,6 +122,10 @@ export function useCustomerSearch(
       completedQuery: previous ? trimmed : null,
       error: null,
     })
+    // The ledger's first, unfiltered page is the screen's initial content,
+    // not a keystroke search; do not make the desk wait through the typing
+    // debounce before its first request starts.
+    const delay = trimmed === '' && listWhenEmpty ? 0 : DEBOUNCE_MS
     const timer = setTimeout(() => {
       void (async () => {
         try {
@@ -146,7 +150,7 @@ export function useCustomerSearch(
           })
         }
       })()
-    }, DEBOUNCE_MS)
+    }, delay)
 
     return () => clearTimeout(timer)
   }, [query, listWhenEmpty, limit, offset])

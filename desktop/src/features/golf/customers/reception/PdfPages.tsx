@@ -6,7 +6,23 @@ import workerUrl from 'pdfjs-dist/build/pdf.worker.min.mjs?url'
 GlobalWorkerOptions.workerSrc = workerUrl
 
 /** Local previews only: original files still upload unchanged to Storage. */
-export function PdfPages({ url, sourceIndex, rotation = 0, pages, label, onRendered }: { url: string; sourceIndex: number; rotation?: 0 | 90 | 180 | 270; pages?: number[]; label?: string; onRendered?: (page: number) => void }) {
+export function PdfPages({
+  url,
+  sourceIndex,
+  rotation = 0,
+  pages,
+  label,
+  onRendered,
+  onPageCount,
+}: {
+  url: string
+  sourceIndex: number
+  rotation?: 0 | 90 | 180 | 270
+  pages?: number[]
+  label?: string
+  onRendered?: (page: number) => void
+  onPageCount?: (sourceIndex: number, pageCount: number) => void
+}) {
   const { t } = useTranslation(['customers', 'common'])
   const [document, setDocument] = useState<PDFDocumentProxy | null>(null)
   const [error, setError] = useState(false)
@@ -15,11 +31,16 @@ export function PdfPages({ url, sourceIndex, rotation = 0, pages, label, onRende
     setError(false)
     const task = getDocument({ url })
     let disposed = false
-    void task.promise.then(pdf => { if (!disposed) setDocument(pdf) }).catch(() => {
+    void task.promise.then(pdf => {
+      if (!disposed) {
+        setDocument(pdf)
+        onPageCount?.(sourceIndex, pdf.numPages)
+      }
+    }).catch(() => {
       if (!disposed) setError(true)
     })
     return () => { disposed = true; void task.destroy() }
-  }, [url])
+  }, [url, sourceIndex, onPageCount])
   if (error) return <p role="alert">{t('customers:reception.preview.pdfError')}</p>
   if (!document) return <p>{t('customers:reception.preview.pdfLoading')}</p>
   return <>{(pages ?? Array.from({ length: document.numPages }, (_, index) => index + 1)).map(page => (
