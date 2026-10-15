@@ -7725,6 +7725,18 @@ button,
 .reception-review-compact .reception-workspace .panel-header { align-items: center; }
 .reception-review-compact .reception-preview-list,
 .reception-review-compact .reception-row-list { max-height: calc(100dvh - 210px); }
+.reception-dropzone {
+  border: 1px dashed hsl(var(--nui-border));
+  border-radius: 8px;
+  transition: border-color 120ms ease, background-color 120ms ease;
+}
+.reception-dropzone.is-active {
+  border-style: solid;
+  border-color: hsl(var(--nui-primary));
+  background: hsl(var(--nui-selected) / .5);
+}
+.reception-drop-hint { color: hsl(var(--nui-muted-foreground)); }
+.reception-dropzone.is-active .reception-drop-hint { color: hsl(var(--nui-primary)); font-weight: 600; }
 @media (max-width: 900px) {
   .reception-review-compact .reception-row-list { max-height: none; }
 }
