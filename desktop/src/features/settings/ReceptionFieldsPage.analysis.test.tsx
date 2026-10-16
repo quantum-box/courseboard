@@ -119,7 +119,8 @@ describe('ReceptionFieldsPage analysis proposal', () => {
         }),
       }),
     ))
-    await waitFor(() => expect(screen.queryByText('個人情報の取扱い')).toBeNull())
+    await waitFor(() => expect(screen.getByText('Field登録済み')).toBeTruthy())
+    expect(screen.getByText('個人情報の取扱い')).toBeTruthy()
   })
 
   afterEach(() => {
