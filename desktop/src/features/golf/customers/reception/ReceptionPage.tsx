@@ -1752,13 +1752,18 @@ export function ReceptionFieldSettingsPanel({
               const isPending = proposedConsentItems.some(
                 item => item.consentKey === candidate.consentKey,
               )
-              const status = catalogItem
-                ? catalogItem.active
+              let status: string
+              if (catalogItem) {
+                status = catalogItem.active
                   ? t('customers:reception.settings.consentItemRegistered')
                   : t('customers:reception.settings.consentItemInactive')
-                : isPending
-                  ? t('customers:reception.settings.consentItemUnregistered')
-                  : t('customers:reception.settings.consentItemRegistered')
+              } else if (!canCreateConsentItems) {
+                status = t('customers:reception.settings.consentItemUnknown')
+              } else if (isPending) {
+                status = t('customers:reception.settings.consentItemUnregistered')
+              } else {
+                status = t('customers:reception.settings.consentItemRegistered')
+              }
               return (
                 <li key={candidate.consentKey}>
                   <strong>{candidate.label}</strong>

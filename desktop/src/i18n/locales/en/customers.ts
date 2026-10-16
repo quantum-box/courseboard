@@ -106,6 +106,7 @@ export const customers: DeepPartial<typeof source> = {
       consentItemRegistered: 'Registered in Field',
       consentItemInactive: 'Registered in Field (hidden on reception screen)',
       consentItemUnregistered: 'Not registered',
+      consentItemUnknown: 'Registration status unknown',
       consentCreate: 'Create {{count}} candidates',
       consentCreating: 'Creating consent items…',
       consentCreated: 'Created {{count}} consent items',

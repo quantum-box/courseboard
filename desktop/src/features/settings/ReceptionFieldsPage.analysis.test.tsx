@@ -119,8 +119,55 @@ describe('ReceptionFieldsPage analysis proposal', () => {
         }),
       }),
     ))
-    await waitFor(() => expect(screen.getByText('Field登録済み')).toBeTruthy())
-    expect(screen.getByText('個人情報の取扱い')).toBeTruthy()
+    await waitFor(() => {
+      const candidate = screen.getByText('個人情報の取扱い').closest('li')
+      expect(candidate?.textContent).toContain('Field登録済み')
+    })
+  })
+
+  it('does not call detected consent items unregistered while the Field catalog is unavailable', async () => {
+    let failCatalogRequest: (() => void) | undefined
+    const catalogRequest = new Promise<never>((_resolve, reject) => {
+      failCatalogRequest = () => reject(new Error('Field catalog unavailable'))
+    })
+    api.json.mockImplementation(async (path: string, init?: RequestInit) => {
+      if (path === '/v1/course/customer-reception-fields' && !init?.method) {
+        return { items: DEFAULT_RECEPTION_FIELDS }
+      }
+      if (path === '/v1/course/customer-consent-items?includeInactive=true' && !init?.method) {
+        return catalogRequest
+      }
+      if (path === '/v1/course/customer-reception-fields/analysis' && init?.method === 'POST') {
+        return {
+          fields: [],
+          consentItems: [{
+            consentKey: 'golf_privacy_terms',
+            label: '個人情報の取扱い',
+            body: '個人情報の取扱いに同意します',
+            required: true,
+          }],
+          warnings: [],
+        }
+      }
+      throw new Error(`Unexpected API call: ${init?.method ?? 'GET'} ${path}`)
+    })
+
+    const { container } = renderPage()
+    await waitFor(() => expect(screen.queryByText('項目設定を読み込んでいます。')).toBeNull())
+    const fileInput = container.querySelector<HTMLInputElement>('input[type="file"]')
+    fireEvent.change(fileInput as HTMLInputElement, {
+      target: { files: [new File(['blank'], 'blank.png', { type: 'image/png' })] },
+    })
+
+    const consentLabel = await screen.findByText('個人情報の取扱い')
+    const candidate = consentLabel.closest('li')
+    expect(candidate?.textContent).toContain('登録状況未確認')
+    expect(screen.getByRole('button', { name: '1件をまとめて作成' }).hasAttribute('disabled')).toBe(true)
+
+    failCatalogRequest?.()
+    await waitFor(() => expect(screen.queryByText('同意項目を読み込んでいます。')).toBeNull())
+    expect(screen.getByText('個人情報の取扱い').closest('li')?.textContent)
+      .toContain('登録状況未確認')
   })
 
   afterEach(() => {

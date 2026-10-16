@@ -103,6 +103,7 @@ export const customers: DeepPartial<typeof source> = {
       consentItemRegistered: 'Fieldに 登録ずみ',
       consentItemInactive: 'Fieldに 登録ずみ（受付の 画面には 出ません）',
       consentItemUnregistered: '未登録',
+      consentItemUnknown: '登録ずみか まだ わかりません',
       consentCreate: '{{count}}件を まとめて つくる',
       consentCreating: '同意する 項目を つくって います…',
       consentCreated: '同意する 項目を {{count}}件 つくりました',

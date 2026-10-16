@@ -110,6 +110,7 @@ export const customers = {
       consentItemRegistered: 'Field登録済み',
       consentItemInactive: 'Field登録済み（受付画面では非表示）',
       consentItemUnregistered: '未登録',
+      consentItemUnknown: '登録状況未確認',
       consentCreate: '{{count}}件をまとめて作成',
       consentCreating: '同意項目を作成中…',
       consentCreated: '同意項目を{{count}}件作成しました',
