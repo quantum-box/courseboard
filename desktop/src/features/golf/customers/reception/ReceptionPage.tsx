@@ -1148,7 +1148,13 @@ export function ReceptionFieldSettingsPanel({
   const [analyzing, setAnalyzing] = useState(false)
   const [creatingConsentItems, setCreatingConsentItems] = useState(false)
   const [proposalActive, setProposalActive] = useState(false)
+  const [analysisConsentItems, setAnalysisConsentItems] = useState<
+    ReceptionConsentCandidate[]
+  >([])
   const [proposedConsentItems, setProposedConsentItems] = useState<ReceptionConsentCandidate[]>([])
+  const [analysisCustomFieldCandidateCount, setAnalysisCustomFieldCandidateCount] = useState<
+    number | null
+  >(null)
   const [analysisWarnings, setAnalysisWarnings] = useState<string[]>([])
   const [analysisPreview, setAnalysisPreview] = useState<string | null>(null)
   const [analysisFile, setAnalysisFile] = useState<File | null>(null)
@@ -1184,7 +1190,9 @@ export function ReceptionFieldSettingsPanel({
     setAnalysisFile(null)
     setAnalysisDisplayFile(null)
     setAnalysisRotation(0)
+    setAnalysisConsentItems([])
     setProposedConsentItems([])
+    setAnalysisCustomFieldCandidateCount(null)
     proposalSnapshotRef.current = null
   }, [fields])
 
@@ -1270,7 +1278,9 @@ export function ReceptionFieldSettingsPanel({
     setAnalysisFile(null)
     setAnalysisDisplayFile(null)
     setAnalysisRotation(0)
+    setAnalysisConsentItems([])
     setProposedConsentItems([])
+    setAnalysisCustomFieldCandidateCount(null)
     proposalSnapshotRef.current = null
   }
 
@@ -1318,9 +1328,14 @@ export function ReceptionFieldSettingsPanel({
       setAnalysisPreview(proposal.previewImage ?? null)
       setDrafts(cloneReceptionFields(applyReceptionFormProposal(beforeAnalysis, proposal)))
       const existingConsentKeys = new Set(consentItems.map(item => item.consentKey))
-      setProposedConsentItems(proposal.consentItems.filter(
+      const newConsentCandidates = proposal.consentItems.filter(
         candidate => !existingConsentKeys.has(candidate.consentKey),
-      ))
+      )
+      setAnalysisConsentItems(proposal.consentItems)
+      setProposedConsentItems(newConsentCandidates)
+      setAnalysisCustomFieldCandidateCount(
+        proposal.fields.filter(field => field.kind === 'custom').length,
+      )
       setProposalActive(true)
       setAnalysisWarnings(proposal.warnings)
       showToast({ tone: 'success', message: t('customers:reception.analysis.applied') })
@@ -1431,7 +1446,9 @@ export function ReceptionFieldSettingsPanel({
       setAnalysisFile(null)
       setAnalysisDisplayFile(null)
       setAnalysisRotation(0)
+      setAnalysisConsentItems([])
       setProposedConsentItems([])
+      setAnalysisCustomFieldCandidateCount(null)
       proposalSnapshotRef.current = null
       showToast({ tone: 'success', message: t('customers:reception.settings.saved') })
     } catch (saveError) {
@@ -1504,54 +1521,6 @@ export function ReceptionFieldSettingsPanel({
       {analysisWarnings.map((warning, index) => (
         <Notice key={`${warning}-${index}`} tone="warning">{warning}</Notice>
       ))}
-      {consentItemsError ? (
-        <ResourceError
-          error={consentItemsError}
-          onRetry={onRetryConsentItems ?? (() => undefined)}
-        />
-      ) : null}
-      {consentItemsLoading ? (
-        <LoadingState label={t('customers:reception.settings.consentLoading')} />
-      ) : null}
-      {proposedConsentItems.length > 0 ? (
-        <div className="reception-consent-candidates">
-          <div className="reception-settings-section-head">
-            <div>
-              <h3>{t('customers:reception.settings.consentCandidatesTitle')}</h3>
-              <p className="reception-settings-hint">
-                {t('customers:reception.settings.consentCandidatesHint')}
-              </p>
-            </div>
-            <Button
-              type="button"
-              variant="secondary"
-              size="sm"
-              disabled={changing || !canCreateConsentItems}
-              onClick={() => void createProposedConsentItems()}
-            >
-              {creatingConsentItems
-                ? t('customers:reception.settings.consentCreating')
-                : t('customers:reception.settings.consentCreate', {
-                  count: proposedConsentItems.length,
-                })}
-            </Button>
-          </div>
-          <ul className="reception-consent-candidate-list">
-            {proposedConsentItems.map(candidate => (
-              <li key={candidate.consentKey}>
-                <strong>{candidate.label}</strong>
-                <small>
-                  {candidate.consentKey}
-                  {candidate.required
-                    ? ` / ${t('customers:reception.consents.required')}`
-                    : ''}
-                </small>
-                {candidate.body ? <span>{candidate.body}</span> : null}
-              </li>
-            ))}
-          </ul>
-        </div>
-      ) : null}
       {analysisFile ? (
         <div className="reception-analysis-preview">
           {analysisDisplayFile && analysisLocalPreviewUrl ? (
@@ -1717,8 +1686,22 @@ export function ReceptionFieldSettingsPanel({
           <Notice tone="warning">{t('customers:reception.settings.invalidKey')}</Notice>
         ) : null}
 
+        {proposalActive && analysisCustomFieldCandidateCount !== null ? (
+          <p className="reception-settings-empty" role="status">
+            {analysisCustomFieldCandidateCount > 0
+              ? t('customers:reception.settings.customAnalysisFound', {
+                count: analysisCustomFieldCandidateCount,
+              })
+              : t('customers:reception.settings.customAnalysisEmpty')}
+          </p>
+        ) : null}
+
         {custom.length === 0 ? (
-          <p className="reception-settings-empty">{t('customers:reception.settings.customEmpty')}</p>
+          proposalActive ? null : (
+            <p className="reception-settings-empty">
+              {t('customers:reception.settings.customEmpty')}
+            </p>
+          )
         ) : (
           <div className="reception-custom-field-list">
             {custom.map((field, index) => (
@@ -1842,6 +1825,84 @@ export function ReceptionFieldSettingsPanel({
               </div>
             ))}
           </div>
+        )}
+      </div>
+      <div className="reception-settings-section">
+        <div className="reception-settings-section-head">
+          <div>
+            <h3>{t('customers:reception.settings.consentCandidatesTitle')}</h3>
+            <p className="reception-settings-hint">
+              {t(proposalActive
+                ? 'customers:reception.settings.consentCandidatesHint'
+                : 'customers:reception.settings.consentCandidatesBeforeAnalysis')}
+            </p>
+          </div>
+          {proposedConsentItems.length > 0 ? (
+            <Button
+              type="button"
+              variant="secondary"
+              size="sm"
+              disabled={changing || !canCreateConsentItems}
+              onClick={() => void createProposedConsentItems()}
+            >
+              {creatingConsentItems
+                ? t('customers:reception.settings.consentCreating')
+                : t('customers:reception.settings.consentCreate', {
+                  count: proposedConsentItems.length,
+                })}
+            </Button>
+          ) : null}
+        </div>
+        {consentItemsError ? (
+          <ResourceError
+            error={consentItemsError}
+            onRetry={onRetryConsentItems ?? (() => undefined)}
+          />
+        ) : null}
+        {consentItemsLoading ? (
+          <LoadingState label={t('customers:reception.settings.consentLoading')} />
+        ) : null}
+        {!proposalActive ? null : analysisConsentItems.length > 0 ? (
+          <ul className="reception-consent-candidate-list">
+            {analysisConsentItems.map(candidate => {
+              const catalogItem = consentItems.find(
+                item => item.consentKey === candidate.consentKey,
+              )
+              const isPending = proposedConsentItems.some(
+                item => item.consentKey === candidate.consentKey,
+              )
+              let status: string
+              if (catalogItem) {
+                status = catalogItem.active
+                  ? t('customers:reception.settings.consentItemRegistered')
+                  : t('customers:reception.settings.consentItemInactive')
+              } else if (!canCreateConsentItems) {
+                status = t('customers:reception.settings.consentItemUnknown')
+              } else if (isPending) {
+                status = t('customers:reception.settings.consentItemUnregistered')
+              } else {
+                status = t('customers:reception.settings.consentItemRegistered')
+              }
+              return (
+                <li key={candidate.consentKey}>
+                  <strong>{candidate.label}</strong>
+                  <small>
+                    {candidate.consentKey}
+                    {candidate.required
+                      ? ` / ${t('customers:reception.consents.required')}`
+                      : ''}
+                    {' / '}
+                    {status}
+                  </small>
+                  {candidate.body ? <span>{candidate.body}</span> : null}
+                </li>
+              )
+            })}
+          </ul>
+        ) : (
+          <p className="reception-settings-empty" role="status">
+            {t('customers:reception.settings.consentCandidatesEmpty')}
+          </p>
         )}
       </div>
     </Panel>

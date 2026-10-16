@@ -420,7 +420,10 @@ struct FieldReceptionFormProposal {
 #[derive(Debug, Deserialize)]
 #[serde(rename_all = "camelCase")]
 struct FieldProposedConsentItem {
-    #[serde(default)]
+    // Field's analyzer can name a proposal with `suggestedKey`; CourseBoard's
+    // consent catalog uses `consentKey`. Accept both wire names so a valid
+    // Field proposal is not discarded as an empty key.
+    #[serde(default, alias = "suggestedKey", alias = "suggested_key")]
     consent_key: String,
     #[serde(default)]
     label: String,
