@@ -28,6 +28,8 @@ const MAX_RECEPTION_JOB_ADVANCES = MAX_RECEPTION_BATCH_SHEETS * 2 + 64
 export const RECEPTION_FIELDS_PATH = '/v1/course/customer-reception-fields'
 export const RECEPTION_FIELDS_ANALYSIS_PATH = `${RECEPTION_FIELDS_PATH}/analysis`
 export const RECEPTION_CONSENT_ITEMS_PATH = '/v1/course/customer-consent-items'
+/** Cache key of the reception screen's active-only consent catalog. */
+export const ACTIVE_CONSENT_ITEMS_CACHE_KEY = 'course:customer-consent-items-active'
 
 /** Carries completed OCR work so the failed batch can be retried independently. */
 export class ReceptionBatchError extends Error {

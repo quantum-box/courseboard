@@ -3,7 +3,7 @@
 import { cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react'
 import { I18nextProvider } from 'react-i18next'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
-import { clearResourceCache } from '../../hooks/useResource'
+import { clearResourceCache, peekResourceCache, writeResourceCache } from '../../hooks/useResource'
 import { i18next } from '../../i18n'
 import { PageReloadProvider } from '../../lib/pageReload'
 import { DEFAULT_RECEPTION_FIELDS } from '../golf/customers/reception/models'
@@ -131,6 +131,7 @@ describe('ReceptionFieldsPage analysis proposal', () => {
         ...JSON.parse(String(init.body)),
         termsVersion: '2',
       }))
+      writeResourceCache('course:customer-consent-items-active', [cart])
       renderPage()
 
       fireEvent.click(await screen.findByRole('button', { name: '「カート利用約款を遵守します。」を編集' }))
@@ -149,6 +150,8 @@ describe('ReceptionFieldsPage analysis proposal', () => {
       ))
       expect(await screen.findByText('乗用カート利用約款を遵守します。')).toBeTruthy()
       expect(screen.getByText(/必須 \/ 第2版/)).toBeTruthy()
+      // Reception's active-only copy must not keep the old wording.
+      expect(peekResourceCache('course:customer-consent-items-active')).toBeUndefined()
     })
 
     it('deletes after confirmation and can bring the item back', async () => {

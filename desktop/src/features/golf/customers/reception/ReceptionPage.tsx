@@ -38,6 +38,7 @@ import { navigate, navigateFromClick } from '../../../../lib/router'
 import { showToast } from '../../../../lib/toast'
 import { autoOrientReceptionSheet, rotateReceptionSheet, type ReceptionRotation } from './orientation'
 import {
+  ACTIVE_CONSENT_ITEMS_CACHE_KEY,
   analyzeReceptionForm,
   createReceptionConsentItem,
   draftReceptionSheets,
@@ -142,7 +143,7 @@ export function ReceptionPage() {
   const consentSettings = useResource(
     () => listReceptionConsentItems(),
     [],
-    { cacheKey: 'course:customer-consent-items-active' },
+    { cacheKey: ACTIVE_CONSENT_ITEMS_CACHE_KEY },
   )
   const [reviewBatches, setReviewBatches] = useState<File[][]>([])
   const [batchResults, setBatchResults] = useState<ReceptionReviewBatchResult[]>([])
