@@ -2,6 +2,7 @@ import { afterEach, describe, expect, it, vi } from 'vitest'
 import {
   isMockFieldDataEnabled,
   MOCK_CLIENT_CAPABILITY_ACTIONS,
+  nextMockTermsVersion,
   resolveMockFieldApiJson,
   resolveMockFieldApiText,
 } from './mockFieldApi'
@@ -520,5 +521,12 @@ describe('mockFieldApi', () => {
     expect(customerIds('/v1/course/customers?name=honda%40example.com')).toEqual([])
     expect(customerIds('/v1/course/customers?email=honda%40example.com')).toContain('cus_honda')
     expect(customerIds('/v1/course/customers?email=honda%40example')).toEqual([])
+  })
+
+  it('bumps consent terms versions the same way as the backend', () => {
+    expect(nextMockTermsVersion('1')).toBe('2')
+    expect(nextMockTermsVersion(' 9 ')).toBe('10')
+    expect(nextMockTermsVersion('2024-04')).toBe('2024-04.1')
+    expect(nextMockTermsVersion('')).toBe('1')
   })
 })

@@ -284,6 +284,13 @@ let mockReceptionConsentItems: MockReceptionConsentItem[] = [
   },
 ]
 
+/** Mirrors the backend's `next_terms_version`: only a wholly numeric version counts up. */
+export function nextMockTermsVersion(current: string) {
+  const trimmed = current.trim()
+  if (/^\d+$/.test(trimmed)) return String(Number(trimmed) + 1)
+  return trimmed ? `${trimmed}.1` : '1'
+}
+
 function cloneMockReceptionConsentItems() {
   return mockReceptionConsentItems.map(item => ({ ...item }))
 }
@@ -3783,8 +3790,7 @@ function resolveMutation(path: string, init?: RequestInit): MockFieldResult<Json
       ? (typeof body.body === 'string' && body.body.trim() ? body.body.trim() : null)
       : existing.body
     if (label !== existing.label || nextBody !== existing.body) {
-      const version = Number.parseInt(existing.termsVersion, 10)
-      existing.termsVersion = Number.isFinite(version) ? String(version + 1) : `${existing.termsVersion}.1`
+      existing.termsVersion = nextMockTermsVersion(existing.termsVersion)
     }
     existing.label = label
     existing.body = nextBody
