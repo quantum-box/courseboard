@@ -181,6 +181,41 @@ describe('ReceptionFieldsPage analysis proposal', () => {
     await waitFor(() => expect(sent).toEqual(['sheet-a', 'sheet-b', 'sheet-b']))
   })
 
+  it('offers no retry of the previous sheet when a new file fails before OCR', async () => {
+    const sent: string[] = []
+    api.json.mockImplementation(async (path: string, init?: RequestInit) => {
+      if (path === '/v1/course/customer-reception-fields' && !init?.method) {
+        return { items: DEFAULT_RECEPTION_FIELDS }
+      }
+      if (path === '/v1/course/customer-consent-items?includeInactive=true' && !init?.method) {
+        return { items: [] }
+      }
+      if (path === '/v1/course/customer-reception-fields/analysis' && init?.method === 'POST') {
+        sent.push(await ((init.body as FormData).get('file') as File).text())
+        if (sent.length === 1) throw new Error('OCR timed out')
+        return { fields: [], consentItems: [], warnings: [] }
+      }
+      throw new Error(`Unexpected API call: ${init?.method ?? 'GET'} ${path}`)
+    })
+
+    const { container } = renderPage()
+    await waitFor(() => expect(screen.queryByText('項目設定を読み込んでいます。')).toBeNull())
+    const fileInput = container.querySelector<HTMLInputElement>('input[type="file"]') as HTMLInputElement
+    fireEvent.change(fileInput, {
+      target: { files: [new File(['sheet-a'], 'a.png', { type: 'image/png' })] },
+    })
+    expect(await screen.findByRole('button', { name: 'もう一度読み取る' })).toBeTruthy()
+
+    fireEvent.change(fileInput, {
+      target: { files: [new File(['notes'], 'notes.txt', { type: 'text/plain' })] },
+    })
+
+    await waitFor(() => expect(toast.show).toHaveBeenCalledTimes(2))
+    expect(await screen.findByText('空の用紙を読み取れませんでした')).toBeTruthy()
+    expect(screen.queryByRole('button', { name: 'もう一度読み取る' })).toBeNull()
+    expect(sent).toEqual(['sheet-a'])
+  })
+
   it('creates reviewed consent candidates in Field through CourseBoard', async () => {
     api.json.mockImplementation(async (path: string, init?: RequestInit) => {
       if (path === '/v1/course/customer-reception-fields' && !init?.method) {

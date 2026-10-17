@@ -1303,6 +1303,9 @@ export function ReceptionFieldSettingsPanel({
     const beforeAnalysis = proposalSnapshotRef.current ?? cloneReceptionFields(drafts)
     setAnalyzing(true)
     setAnalysisError(null)
+    // A file that fails before reaching OCR has nothing to retry; never let
+    // the button fall back to the previous sheet.
+    setAnalysisAttempt(null)
     try {
       let source: File
       try {
