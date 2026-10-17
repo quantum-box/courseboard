@@ -1,5 +1,6 @@
 import { syncReceptionScroll } from './scrollSync'
 import { PdfPages } from './PdfPages'
+import { ConsentItemList } from './ConsentItemList'
 import { Badge, Button, Input } from '@tachyon-sdk/native-ui'
 import {
   ArrowDown,
@@ -37,6 +38,7 @@ import { navigate, navigateFromClick } from '../../../../lib/router'
 import { showToast } from '../../../../lib/toast'
 import { autoOrientReceptionSheet, rotateReceptionSheet, type ReceptionRotation } from './orientation'
 import {
+  ACTIVE_CONSENT_ITEMS_CACHE_KEY,
   analyzeReceptionForm,
   createReceptionConsentItem,
   draftReceptionSheets,
@@ -141,7 +143,7 @@ export function ReceptionPage() {
   const consentSettings = useResource(
     () => listReceptionConsentItems(),
     [],
-    { cacheKey: 'course:customer-consent-items-active' },
+    { cacheKey: ACTIVE_CONSENT_ITEMS_CACHE_KEY },
   )
   const [reviewBatches, setReviewBatches] = useState<File[][]>([])
   const [batchResults, setBatchResults] = useState<ReceptionReviewBatchResult[]>([])
@@ -1922,29 +1924,12 @@ export function ReceptionFieldSettingsPanel({
         {!proposalActive ? (
           // Without an analysis there are no candidates, but the operator
           // still needs to see what Field already holds (e.g. after a reload).
-          consentItemsLoading || consentItemsError ? null : consentItems.length > 0 ? (
-            <ul className="reception-consent-candidate-list">
-              {consentItems.map(item => (
-                <li key={item.consentKey}>
-                  <strong>{item.label}</strong>
-                  <small>
-                    {item.consentKey}
-                    {item.required
-                      ? ` / ${t('customers:reception.consents.required')}`
-                      : ''}
-                    {' / '}
-                    {item.active
-                      ? t('customers:reception.settings.consentItemRegistered')
-                      : t('customers:reception.settings.consentItemInactive')}
-                  </small>
-                  {item.body ? <span>{item.body}</span> : null}
-                </li>
-              ))}
-            </ul>
-          ) : (
-            <p className="reception-settings-empty" role="status">
-              {t('customers:reception.settings.consentRegisteredEmpty')}
-            </p>
+          consentItemsLoading || consentItemsError ? null : (
+            <ConsentItemList
+              items={consentItems}
+              disabled={changing}
+              onChanged={item => onConsentItemsCreated?.([item])}
+            />
           )
         ) : analysisConsentItems.length > 0 ? (
           <ul className="reception-consent-candidate-list">

@@ -118,7 +118,8 @@ pub use customer_consent::{
     RECEPTION_CONSENTS,
 };
 pub use customer_consent_catalog::{
-    active_reception_consent_definitions, CreateCustomerConsentItem, CustomerConsentItem,
+    active_reception_consent_definitions, next_terms_version, CreateCustomerConsentItem,
+    CustomerConsentItem, CustomerConsentItemPatch,
 };
 pub use customer_grade::{
     CustomerGradeRule, CustomerGradeRules, CustomerGradeVerdict, MAX_GRADE_RULES,

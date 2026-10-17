@@ -28,6 +28,8 @@ const MAX_RECEPTION_JOB_ADVANCES = MAX_RECEPTION_BATCH_SHEETS * 2 + 64
 export const RECEPTION_FIELDS_PATH = '/v1/course/customer-reception-fields'
 export const RECEPTION_FIELDS_ANALYSIS_PATH = `${RECEPTION_FIELDS_PATH}/analysis`
 export const RECEPTION_CONSENT_ITEMS_PATH = '/v1/course/customer-consent-items'
+/** Cache key of the reception screen's active-only consent catalog. */
+export const ACTIVE_CONSENT_ITEMS_CACHE_KEY = 'course:customer-consent-items-active'
 
 /** Carries completed OCR work so the failed batch can be retried independently. */
 export class ReceptionBatchError extends Error {
@@ -139,6 +141,40 @@ export async function createReceptionConsentItem(
   )
   if (!normalized) throw new Error('API response did not contain a consent item')
   return normalized
+}
+
+/** A partial edit; omitted fields stay as they are and `body: null` clears it. */
+export type ReceptionConsentItemUpdate = {
+  label?: string
+  body?: string | null
+  required?: boolean
+  active?: boolean
+}
+
+/** Edits a Field consent item. Field moves the terms version when the wording changes. */
+export async function updateReceptionConsentItem(
+  id: string,
+  update: ReceptionConsentItemUpdate,
+): Promise<ReceptionConsentItem> {
+  const response = await courseboardApiJson<unknown>(
+    `${RECEPTION_CONSENT_ITEMS_PATH}/${encodeURIComponent(id)}`,
+    {
+      method: 'PUT',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify(update),
+    },
+  )
+  const normalized = normalizeReceptionConsentItem(response)
+  if (!normalized) throw new Error('API response did not contain a consent item')
+  return normalized
+}
+
+/** Hides a consent item from reception. Field keeps it for the consent trail. */
+export async function deactivateReceptionConsentItem(id: string): Promise<void> {
+  await courseboardApiJson<unknown>(
+    `${RECEPTION_CONSENT_ITEMS_PATH}/${encodeURIComponent(id)}`,
+    { method: 'DELETE' },
+  )
 }
 
 /** Analyze a blank reception sheet and return an unsaved settings proposal. */

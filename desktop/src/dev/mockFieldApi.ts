@@ -284,6 +284,14 @@ let mockReceptionConsentItems: MockReceptionConsentItem[] = [
   },
 ]
 
+/** Mirrors the backend's `next_terms_version`: only a wholly numeric version counts up. */
+export function nextMockTermsVersion(current: string) {
+  const trimmed = current.trim()
+  // The backend counts up a u32 and treats anything larger as opaque.
+  if (/^\d+$/.test(trimmed) && Number(trimmed) < 4294967295) return String(Number(trimmed) + 1)
+  return trimmed ? `${trimmed}.1` : '1'
+}
+
 function cloneMockReceptionConsentItems() {
   return mockReceptionConsentItems.map(item => ({ ...item }))
 }
@@ -3766,6 +3774,30 @@ function resolveMutation(path: string, init?: RequestInit): MockFieldResult<Json
     }
     mockReceptionConsentItems.push(created)
     return hit({ ...created })
+  }
+
+  const consentItemMatch = pathname.match(/^\/v1\/course\/customer-consent-items\/([^/]+)$/)
+  if (consentItemMatch && (method === 'PUT' || method === 'DELETE')) {
+    const id = decodeURIComponent(consentItemMatch[1])
+    const existing = mockReceptionConsentItems.find(item => item.id === id)
+    if (!existing) return error(404, 'consent item not found')
+    if (method === 'DELETE') {
+      existing.active = false
+      return hit(null)
+    }
+    const label = typeof body?.label === 'string' ? body.label.trim() : existing.label
+    if (!label) return error(400, 'consent label is required')
+    const nextBody = body && 'body' in body
+      ? (typeof body.body === 'string' && body.body.trim() ? body.body.trim() : null)
+      : existing.body
+    if (label !== existing.label || nextBody !== existing.body) {
+      existing.termsVersion = nextMockTermsVersion(existing.termsVersion)
+    }
+    existing.label = label
+    existing.body = nextBody
+    if (typeof body?.required === 'boolean') existing.required = body.required
+    if (typeof body?.active === 'boolean') existing.active = body.active
+    return hit({ ...existing })
   }
 
   if (pathname === '/v1/course/customer-reception-fields' && method === 'PUT') {

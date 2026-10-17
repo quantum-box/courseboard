@@ -1,6 +1,7 @@
-import { useResource } from '../../hooks/useResource'
+import { clearResourceCache, useResource } from '../../hooks/useResource'
 import { useRegisterPageReload } from '../../lib/pageReload'
 import {
+  ACTIVE_CONSENT_ITEMS_CACHE_KEY,
   listReceptionConsentItems,
   listReceptionFields,
 } from '../golf/customers/reception/api'
@@ -30,7 +31,11 @@ export function ReceptionFieldsPage() {
   useRegisterPageReload(resource.refresh)
   useRegisterPageReload(consentResource.refresh)
 
+  /** Merges created or edited items into the catalog by consent key. */
   function onConsentItemsCreated(created: readonly ReceptionConsentItem[]) {
+    // The reception screen keeps its own active-only copy; drop it so a scan
+    // started there never builds rows from the wording or flags before this change.
+    clearResourceCache(ACTIVE_CONSENT_ITEMS_CACHE_KEY)
     consentResource.setData(current => {
       const byKey = new Map(
         (current ?? []).map(item => [item.consentKey, item]),
