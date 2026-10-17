@@ -68,6 +68,154 @@ describe('ReceptionFieldsPage analysis proposal', () => {
     })
   })
 
+  it('lists consent items already registered in Field without an analysis', async () => {
+    api.json.mockImplementation(async (path: string, init?: RequestInit) => {
+      if (path === '/v1/course/customer-reception-fields' && !init?.method) {
+        return { items: DEFAULT_RECEPTION_FIELDS }
+      }
+      if (path === '/v1/course/customer-consent-items?includeInactive=true' && !init?.method) {
+        return {
+          items: [{
+            id: 'consent_1',
+            consentKey: 'golf_cart_terms_acknowledgement',
+            label: 'カート利用約款を遵守します。',
+            body: null,
+            required: true,
+            termsVersion: '1',
+            active: true,
+            sortOrder: 0,
+          }],
+        }
+      }
+      throw new Error(`Unexpected API call: ${init?.method ?? 'GET'} ${path}`)
+    })
+
+    renderPage()
+
+    expect(await screen.findByText('カート利用約款を遵守します。')).toBeTruthy()
+    expect(screen.getByText(/golf_cart_terms_acknowledgement .*Field登録済み/)).toBeTruthy()
+  })
+
+  it('shows OCR progress and lets the operator retry a failed read', async () => {
+    let attempts = 0
+    let finishRead: (() => void) | null = null
+    api.json.mockImplementation(async (path: string, init?: RequestInit) => {
+      if (path === '/v1/course/customer-reception-fields' && !init?.method) {
+        return { items: DEFAULT_RECEPTION_FIELDS }
+      }
+      if (path === '/v1/course/customer-consent-items?includeInactive=true' && !init?.method) {
+        return { items: [] }
+      }
+      if (path === '/v1/course/customer-reception-fields/analysis' && init?.method === 'POST') {
+        attempts += 1
+        if (attempts === 1) {
+          await new Promise<void>(resolve => { finishRead = resolve })
+          throw new Error('OCR timed out')
+        }
+        return {
+          fields: [],
+          consentItems: [{
+            consentKey: 'golf_privacy_terms',
+            label: '個人情報の取扱い',
+            body: null,
+            required: true,
+          }],
+          warnings: [],
+        }
+      }
+      throw new Error(`Unexpected API call: ${init?.method ?? 'GET'} ${path}`)
+    })
+
+    const { container } = renderPage()
+    await waitFor(() => expect(screen.queryByText('項目設定を読み込んでいます。')).toBeNull())
+    const fileInput = container.querySelector<HTMLInputElement>('input[type="file"]')
+    fireEvent.change(fileInput as HTMLInputElement, {
+      target: { files: [new File(['blank'], 'blank.png', { type: 'image/png' })] },
+    })
+
+    expect(await screen.findByText(/用紙をOCRで読み取っています/)).toBeTruthy()
+    await waitFor(() => expect(finishRead).not.toBeNull())
+    finishRead!()
+
+    fireEvent.click(await screen.findByRole('button', { name: 'もう一度読み取る' }))
+
+    expect(await screen.findByText('個人情報の取扱い')).toBeTruthy()
+    expect(attempts).toBe(2)
+    expect(screen.queryByRole('button', { name: 'もう一度読み取る' })).toBeNull()
+  })
+
+  it('retries the sheet that failed rather than the previously read one', async () => {
+    const sent: string[] = []
+    api.json.mockImplementation(async (path: string, init?: RequestInit) => {
+      if (path === '/v1/course/customer-reception-fields' && !init?.method) {
+        return { items: DEFAULT_RECEPTION_FIELDS }
+      }
+      if (path === '/v1/course/customer-consent-items?includeInactive=true' && !init?.method) {
+        return { items: [] }
+      }
+      if (path === '/v1/course/customer-reception-fields/analysis' && init?.method === 'POST') {
+        const sheet = await ((init.body as FormData).get('file') as File).text()
+        sent.push(sheet)
+        if (sheet === 'sheet-b' && sent.filter(item => item === 'sheet-b').length === 1) {
+          throw new Error('OCR timed out')
+        }
+        return { fields: [], consentItems: [], warnings: [] }
+      }
+      throw new Error(`Unexpected API call: ${init?.method ?? 'GET'} ${path}`)
+    })
+
+    const { container } = renderPage()
+    await waitFor(() => expect(screen.queryByText('項目設定を読み込んでいます。')).toBeNull())
+    const fileInput = container.querySelector<HTMLInputElement>('input[type="file"]') as HTMLInputElement
+    fireEvent.change(fileInput, {
+      target: { files: [new File(['sheet-a'], 'a.png', { type: 'image/png' })] },
+    })
+    await waitFor(() => expect(sent).toEqual(['sheet-a']))
+    await waitFor(() => expect(screen.queryByText(/用紙をOCRで読み取っています/)).toBeNull())
+
+    fireEvent.change(fileInput, {
+      target: { files: [new File(['sheet-b'], 'b.png', { type: 'image/png' })] },
+    })
+    fireEvent.click(await screen.findByRole('button', { name: 'もう一度読み取る' }))
+
+    await waitFor(() => expect(sent).toEqual(['sheet-a', 'sheet-b', 'sheet-b']))
+  })
+
+  it('offers no retry of the previous sheet when a new file fails before OCR', async () => {
+    const sent: string[] = []
+    api.json.mockImplementation(async (path: string, init?: RequestInit) => {
+      if (path === '/v1/course/customer-reception-fields' && !init?.method) {
+        return { items: DEFAULT_RECEPTION_FIELDS }
+      }
+      if (path === '/v1/course/customer-consent-items?includeInactive=true' && !init?.method) {
+        return { items: [] }
+      }
+      if (path === '/v1/course/customer-reception-fields/analysis' && init?.method === 'POST') {
+        sent.push(await ((init.body as FormData).get('file') as File).text())
+        if (sent.length === 1) throw new Error('OCR timed out')
+        return { fields: [], consentItems: [], warnings: [] }
+      }
+      throw new Error(`Unexpected API call: ${init?.method ?? 'GET'} ${path}`)
+    })
+
+    const { container } = renderPage()
+    await waitFor(() => expect(screen.queryByText('項目設定を読み込んでいます。')).toBeNull())
+    const fileInput = container.querySelector<HTMLInputElement>('input[type="file"]') as HTMLInputElement
+    fireEvent.change(fileInput, {
+      target: { files: [new File(['sheet-a'], 'a.png', { type: 'image/png' })] },
+    })
+    expect(await screen.findByRole('button', { name: 'もう一度読み取る' })).toBeTruthy()
+
+    fireEvent.change(fileInput, {
+      target: { files: [new File(['notes'], 'notes.txt', { type: 'text/plain' })] },
+    })
+
+    await waitFor(() => expect(toast.show).toHaveBeenCalledTimes(2))
+    expect(await screen.findByText('空の用紙を読み取れませんでした')).toBeTruthy()
+    expect(screen.queryByRole('button', { name: 'もう一度読み取る' })).toBeNull()
+    expect(sent).toEqual(['sheet-a'])
+  })
+
   it('creates reviewed consent candidates in Field through CourseBoard', async () => {
     api.json.mockImplementation(async (path: string, init?: RequestInit) => {
       if (path === '/v1/course/customer-reception-fields' && !init?.method) {
