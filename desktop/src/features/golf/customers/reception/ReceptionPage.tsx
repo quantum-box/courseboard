@@ -1176,6 +1176,7 @@ export function ReceptionFieldSettingsPanel({
   const [analysisRotation, setAnalysisRotation] = useState<ReceptionRotation>(0)
   const analysisInputRef = useRef<HTMLInputElement | null>(null)
   const proposalSnapshotRef = useRef<ReceptionFieldDraft[] | null>(null)
+  const savedFieldsRef = useRef<readonly ReceptionField[] | null>(null)
   const analysisLocalPreviewUrl = analysisDisplayUrl?.file === analysisDisplayFile
     ? analysisDisplayUrl.url
     : null
@@ -1193,6 +1194,11 @@ export function ReceptionFieldSettingsPanel({
   }, [analysisDisplayFile])
 
   useEffect(() => {
+    // Our own PUT updates the baseline without discarding consent retries.
+    if (savedFieldsRef.current === fields) {
+      savedFieldsRef.current = null
+      return
+    }
     setDrafts(cloneReceptionFields(fields))
     setProposalActive(false)
     setAnalysisWarnings([])
@@ -1224,7 +1230,10 @@ export function ReceptionFieldSettingsPanel({
   }, [consentItems])
 
   const pendingConsentItems = [...proposedConsentItems, ...manualConsentItems]
-  const invalidConsent = pendingConsentItems.some(item => !item.label.trim())
+  const consentPromptTooLong = pendingConsentItems.some(item =>
+    [...(item.body?.trim() || item.label.trim())].length > 120,
+  )
+  const invalidConsent = consentPromptTooLong || pendingConsentItems.some(item => !item.label.trim())
   const dirty = !settingsEqual(drafts, fields) || pendingConsentItems.length > 0
   const invalidCustomKey = customFieldKeyIsInvalid(drafts)
   const standard = drafts.filter(field => field.kind === 'standard')
@@ -1472,9 +1481,11 @@ export function ReceptionFieldSettingsPanel({
       })))
       // Consent creation validates against the stored field schema. Persist
       // removed/disabled fields first so valid replacements fit the column limit.
-      if (pendingConsentItems.length > 0 && !await createProposedConsentItems()) return
       setDrafts(cloneReceptionFields(next))
+      proposalSnapshotRef.current = null
+      savedFieldsRef.current = next
       onSaved(next)
+      if (pendingConsentItems.length > 0 && !await createProposedConsentItems()) return
       setProposalActive(false)
       setAnalysisWarnings([])
       setAnalysisError(null)
@@ -1935,6 +1946,9 @@ export function ReceptionFieldSettingsPanel({
             </Button>
           ) : null}
         </div>
+        {consentPromptTooLong ? (
+          <Notice tone="warning">{t('customers:reception.settings.consentPromptTooLong')}</Notice>
+        ) : null}
         {manualConsentItems.map(candidate => (
           <div className="reception-custom-field" key={candidate.consentKey}>
             <Field label={t('customers:reception.settings.consentLabel')}>

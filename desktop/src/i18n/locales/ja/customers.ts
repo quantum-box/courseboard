@@ -108,6 +108,7 @@ export const customers = {
       consentLoading: '同意項目を読み込んでいます。',
       addConsent: '同意項目を追加',
       consentLabel: '同意項目の名前',
+      consentPromptTooLong: '同意の説明文は120文字以内で入力してください。説明文が空の場合は、同意項目の名前を120文字以内にしてください。',
       consentBody: '同意の説明文',
       removeConsent: '同意項目を削除',
       consentCandidatesTitle: '同意項目',

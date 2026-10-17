@@ -104,6 +104,7 @@ export const customers: DeepPartial<typeof source> = {
       consentLoading: 'Loading consent items.',
       addConsent: 'Add consent item',
       consentLabel: 'Consent item name',
+      consentPromptTooLong: 'Keep the consent description within 120 characters. If the description is empty, keep the consent item name within 120 characters.',
       consentBody: 'Consent description',
       removeConsent: 'Remove consent item',
       consentCandidatesTitle: 'Consent items',

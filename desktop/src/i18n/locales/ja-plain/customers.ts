@@ -99,6 +99,7 @@ export const customers: DeepPartial<typeof source> = {
       consentLoading: '同意する 項目を 読みこんで います。',
       addConsent: '同意する 項目を 追加',
       consentLabel: '同意する 項目の 名前',
+      consentPromptTooLong: '同意の 説明は 120文字までです。説明が ないときは、項目の 名前を 120文字までに してください。',
       consentBody: '同意の 説明',
       removeConsent: '同意する 項目を 削除',
       consentCandidatesTitle: '同意する 項目',
