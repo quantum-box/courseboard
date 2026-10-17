@@ -141,6 +141,40 @@ export async function createReceptionConsentItem(
   return normalized
 }
 
+/** A partial edit; omitted fields stay as they are and `body: null` clears it. */
+export type ReceptionConsentItemUpdate = {
+  label?: string
+  body?: string | null
+  required?: boolean
+  active?: boolean
+}
+
+/** Edits a Field consent item. Field moves the terms version when the wording changes. */
+export async function updateReceptionConsentItem(
+  id: string,
+  update: ReceptionConsentItemUpdate,
+): Promise<ReceptionConsentItem> {
+  const response = await courseboardApiJson<unknown>(
+    `${RECEPTION_CONSENT_ITEMS_PATH}/${encodeURIComponent(id)}`,
+    {
+      method: 'PUT',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify(update),
+    },
+  )
+  const normalized = normalizeReceptionConsentItem(response)
+  if (!normalized) throw new Error('API response did not contain a consent item')
+  return normalized
+}
+
+/** Hides a consent item from reception. Field keeps it for the consent trail. */
+export async function deactivateReceptionConsentItem(id: string): Promise<void> {
+  await courseboardApiJson<unknown>(
+    `${RECEPTION_CONSENT_ITEMS_PATH}/${encodeURIComponent(id)}`,
+    { method: 'DELETE' },
+  )
+}
+
 /** Analyze a blank reception sheet and return an unsaved settings proposal. */
 export async function analyzeReceptionForm(file: File): Promise<ReceptionFormProposal> {
   const form = new FormData()

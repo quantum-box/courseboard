@@ -19,7 +19,8 @@ use serde_json::{json, Value};
 
 use crate::course::domain::{
     CourseError, CreateCustomerConsentItem, CustomerConsentCatalogGateway, CustomerConsentGateway,
-    CustomerConsentItem, CustomerId, GatewayCredentials, ReceptionConsentAnswer,
+    CustomerConsentItem, CustomerConsentItemPatch, CustomerId, GatewayCredentials,
+    ReceptionConsentAnswer,
 };
 
 use super::field_gateway::{
@@ -144,6 +145,64 @@ impl CustomerConsentCatalogGateway for FieldCustomerConsentGateway {
         .await?;
         Ok(created.into())
     }
+
+    async fn update_consent_item(
+        &self,
+        credentials: GatewayCredentials<'_>,
+        id: &str,
+        patch: &CustomerConsentItemPatch,
+    ) -> Result<CustomerConsentItem, CourseError> {
+        let path = format!("/v1/erp/membership/consent-items/{}", urlencoding_path(id));
+        let updated: FieldCustomerConsentItem = field_send_json(
+            &self.client,
+            &self.base_url,
+            reqwest::Method::PUT,
+            &path,
+            credentials,
+            Some(&patch_body(patch)),
+        )
+        .await?;
+        Ok(updated.into())
+    }
+
+    async fn deactivate_consent_item(
+        &self,
+        credentials: GatewayCredentials<'_>,
+        id: &str,
+    ) -> Result<(), CourseError> {
+        let path = format!("/v1/erp/membership/consent-items/{}", urlencoding_path(id));
+        field_send_unit(
+            &self.client,
+            &self.base_url,
+            reqwest::Method::DELETE,
+            &path,
+            credentials,
+            None,
+        )
+        .await
+    }
+}
+
+/// Field's update is partial: an absent key is left alone, while
+/// `"body": null` clears the body. Only the fields being changed are sent.
+fn patch_body(patch: &CustomerConsentItemPatch) -> Value {
+    let mut body = serde_json::Map::new();
+    if let Some(label) = &patch.label {
+        body.insert("label".into(), json!(label));
+    }
+    if let Some(text) = &patch.body {
+        body.insert("body".into(), json!(text));
+    }
+    if let Some(required) = patch.required {
+        body.insert("required".into(), json!(required));
+    }
+    if let Some(terms_version) = &patch.terms_version {
+        body.insert("termsVersion".into(), json!(terms_version));
+    }
+    if let Some(active) = patch.active {
+        body.insert("active".into(), json!(active));
+    }
+    Value::Object(body)
 }
 
 /// Only the boxes that were actually answered.
@@ -182,6 +241,27 @@ mod tests {
 
     /// Field's request keys are camelCase, unlike the StoreKit surface the
     /// rest of the customer ledger uses. Sending `consent_key` is a 400.
+    #[test]
+    fn a_patch_sends_only_changed_fields_and_null_clears_the_body() {
+        let patch = CustomerConsentItemPatch {
+            label: Some("カート利用約款".into()),
+            body: Some(None),
+            terms_version: Some("2".into()),
+            ..Default::default()
+        };
+        assert_eq!(
+            patch_body(&patch),
+            json!({ "label": "カート利用約款", "body": null, "termsVersion": "2" })
+        );
+        assert_eq!(
+            patch_body(&CustomerConsentItemPatch {
+                active: Some(true),
+                ..Default::default()
+            }),
+            json!({ "active": true })
+        );
+    }
+
     #[test]
     fn the_body_is_camel_case_and_carries_the_counter_as_the_channel() {
         let body = consent_body(&[

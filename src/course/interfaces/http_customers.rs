@@ -23,18 +23,19 @@ use super::openapi::ErrorBody;
 
 use crate::course::domain::{
     reception_consent, AssignMembershipPlan, CourseError, CreateCustomerConsentItem, Customer,
-    CustomerConsentItem, CustomerGradeRule, CustomerGradeRules, CustomerId, CustomerMembership,
-    CustomerReceptionCreateGateway, CustomerReceptionField, CustomerReceptionFieldsGateway,
-    CustomerReceptionValuesGateway, CustomerRegistration, CustomerRegistrationSource,
-    CustomerSearchQuery, CustomerSummaryQuery, CustomerSummarySort, CustomerVisit, MemberDiscount,
-    MembershipActivity, MembershipActivityActor, MembershipActivityQuery, MembershipActivitySource,
-    MembershipActivityTarget, MembershipDiscount, MembershipDiscounts, MembershipDiscountsGateway,
-    MembershipPlan, MembershipPlanId, MembershipPlayWindow, MembershipPlayWindows,
-    MembershipPlayWindowsGateway, NewCustomer, PlayableDays, ProposedConsentItem, ReceptionAddress,
-    ReceptionConsentAnswer, ReceptionCustomerInput, ReceptionDraftRow, ReceptionFieldInput,
-    ReceptionFieldKind, ReceptionFieldType, ReceptionFormProposal, ReceptionOcrJob,
-    ReceptionOcrJobSheet, ReceptionOcrJobSheets, ReceptionSheet, ReceptionSheets, SetMemberNumber,
-    UpsertMembershipPlan, MAX_RECEPTION_JOB_SHEETS, MAX_RECEPTION_SHEETS,
+    CustomerConsentItem, CustomerConsentItemPatch, CustomerGradeRule, CustomerGradeRules,
+    CustomerId, CustomerMembership, CustomerReceptionCreateGateway, CustomerReceptionField,
+    CustomerReceptionFieldsGateway, CustomerReceptionValuesGateway, CustomerRegistration,
+    CustomerRegistrationSource, CustomerSearchQuery, CustomerSummaryQuery, CustomerSummarySort,
+    CustomerVisit, MemberDiscount, MembershipActivity, MembershipActivityActor,
+    MembershipActivityQuery, MembershipActivitySource, MembershipActivityTarget,
+    MembershipDiscount, MembershipDiscounts, MembershipDiscountsGateway, MembershipPlan,
+    MembershipPlanId, MembershipPlayWindow, MembershipPlayWindows, MembershipPlayWindowsGateway,
+    NewCustomer, PlayableDays, ProposedConsentItem, ReceptionAddress, ReceptionConsentAnswer,
+    ReceptionCustomerInput, ReceptionDraftRow, ReceptionFieldInput, ReceptionFieldKind,
+    ReceptionFieldType, ReceptionFormProposal, ReceptionOcrJob, ReceptionOcrJobSheet,
+    ReceptionOcrJobSheets, ReceptionSheet, ReceptionSheets, SetMemberNumber, UpsertMembershipPlan,
+    MAX_RECEPTION_JOB_SHEETS, MAX_RECEPTION_SHEETS,
 };
 use crate::course::infrastructure::{
     FieldCustomerConsentGateway, FieldCustomerGateway, FieldCustomerReceptionCreateGateway,
@@ -43,13 +44,14 @@ use crate::course::infrastructure::{
 use crate::course::usecase::{
     AnalyzeCustomerReceptionFieldsUseCase, AssignMembershipPlanUseCase,
     CreateCustomerConsentItemUseCase, CreateCustomerUseCase, CreateMembershipPlanUseCase,
-    CreateReceptionCustomerUseCase, CustomerProvenance, CustomerVisitReport, DeleteCustomerUseCase,
-    DraftCustomerReceptionUseCase, GetCustomerGradeRulesUseCase, GetCustomerMembershipUseCase,
-    GetCustomerReceptionFieldsUseCase, GetCustomerRegistrationUseCase, GetCustomerUseCase,
-    GetCustomerVisitsUseCase, ListCustomerConsentItemsUseCase, ListCustomerSummariesUseCase,
-    ListMembershipActivitiesUseCase, ListMembershipPlansUseCase, ReceptionOcrJobUseCase,
-    RecordReceptionCustomerValuesUseCase, ReplaceCustomerGradeRulesUseCase,
-    ReplaceCustomerReceptionFieldsUseCase, SearchCustomersUseCase, SetMemberNumberUseCase,
+    CreateReceptionCustomerUseCase, CustomerProvenance, CustomerVisitReport,
+    DeactivateCustomerConsentItemUseCase, DeleteCustomerUseCase, DraftCustomerReceptionUseCase,
+    GetCustomerGradeRulesUseCase, GetCustomerMembershipUseCase, GetCustomerReceptionFieldsUseCase,
+    GetCustomerRegistrationUseCase, GetCustomerUseCase, GetCustomerVisitsUseCase,
+    ListCustomerConsentItemsUseCase, ListCustomerSummariesUseCase, ListMembershipActivitiesUseCase,
+    ListMembershipPlansUseCase, ReceptionOcrJobUseCase, RecordReceptionCustomerValuesUseCase,
+    ReplaceCustomerGradeRulesUseCase, ReplaceCustomerReceptionFieldsUseCase,
+    SearchCustomersUseCase, SetMemberNumberUseCase, UpdateCustomerConsentItemUseCase,
     UpdateMembershipPlanUseCase,
 };
 use crate::{AppError, AppState, CallerPrincipal};
@@ -121,6 +123,27 @@ pub struct CreateCustomerConsentItemRequest {
     pub required: bool,
     pub terms_version: String,
     pub sort_order: i32,
+}
+
+/// A partial edit: an omitted field is left as it is.
+#[derive(Debug, Deserialize, ToSchema)]
+#[serde(rename_all = "camelCase")]
+pub struct UpdateCustomerConsentItemRequest {
+    pub label: Option<String>,
+    /// `null` clears the body; omitting it leaves the body unchanged.
+    #[serde(default, deserialize_with = "present_or_null")]
+    #[schema(value_type = Option<String>)]
+    pub body: Option<Option<String>>,
+    pub required: Option<bool>,
+    pub active: Option<bool>,
+}
+
+/// Tells an explicit `null` (`Some(None)`) from an omitted field (`None`).
+fn present_or_null<'de, D>(deserializer: D) -> Result<Option<Option<String>>, D::Error>
+where
+    D: serde::Deserializer<'de>,
+{
+    Option::<String>::deserialize(deserializer).map(Some)
 }
 
 fn reception_gateway(state: &AppState) -> Arc<FieldCustomerReceptionGateway> {
@@ -810,6 +833,80 @@ pub async fn create_customer_consent_item(
     .await
     .map_err(AppError::from)?;
     Ok((StatusCode::CREATED, Json(item.into())))
+}
+
+#[utoipa::path(
+    put,
+    path = "/v1/course/customer-consent-items/{consent_item_id}",
+    tag = "course",
+    params(("consent_item_id" = String, Path, description = "Field consent item id")),
+    request_body = UpdateCustomerConsentItemRequest,
+    responses(
+        (status = 200, description = "Updated Field consent item", body = CustomerConsentItemDto),
+        (status = 400, description = "Bad request", body = ErrorBody),
+        (status = 401, description = "Unauthorized", body = ErrorBody),
+        (status = 403, description = "Forbidden", body = ErrorBody),
+        (status = 404, description = "Not found", body = ErrorBody),
+        (status = 424, description = "Upstream provider error", body = ErrorBody),
+    ),
+    security(("bearer_auth" = []))
+)]
+pub async fn update_customer_consent_item(
+    State(state): State<AppState>,
+    headers: HeaderMap,
+    Path(consent_item_id): Path<String>,
+    Json(request): Json<UpdateCustomerConsentItemRequest>,
+) -> Result<Json<CustomerConsentItemDto>, AppError> {
+    let credentials = credentials(&state, &headers)?;
+    let item = UpdateCustomerConsentItemUseCase::new(
+        customer_consent_gateway(&state),
+        reception_fields_gateway(&state),
+    )
+    .execute(
+        credentials,
+        &consent_item_id,
+        CustomerConsentItemPatch {
+            label: request.label,
+            body: request.body,
+            required: request.required,
+            terms_version: None,
+            active: request.active,
+        },
+    )
+    .await
+    .map_err(AppError::from)?;
+    Ok(Json(item.into()))
+}
+
+/// DELETE /v1/course/customer-consent-items/{consent_item_id}
+///
+/// Field keeps the definition for the consent trail and stops offering it on
+/// the reception screen; it can be shown again with an update.
+#[utoipa::path(
+    delete,
+    path = "/v1/course/customer-consent-items/{consent_item_id}",
+    tag = "course",
+    params(("consent_item_id" = String, Path, description = "Field consent item id")),
+    responses(
+        (status = 204, description = "Consent item hidden from reception"),
+        (status = 401, description = "Unauthorized", body = ErrorBody),
+        (status = 403, description = "Forbidden", body = ErrorBody),
+        (status = 404, description = "Not found", body = ErrorBody),
+        (status = 424, description = "Upstream provider error", body = ErrorBody),
+    ),
+    security(("bearer_auth" = []))
+)]
+pub async fn delete_customer_consent_item(
+    State(state): State<AppState>,
+    headers: HeaderMap,
+    Path(consent_item_id): Path<String>,
+) -> Result<StatusCode, AppError> {
+    let credentials = credentials(&state, &headers)?;
+    DeactivateCustomerConsentItemUseCase::new(customer_consent_gateway(&state))
+        .execute(credentials, &consent_item_id)
+        .await
+        .map_err(AppError::from)?;
+    Ok(StatusCode::NO_CONTENT)
 }
 
 /// GET /v1/course/customer-reception-fields

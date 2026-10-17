@@ -134,7 +134,8 @@ pub use create_customer::{CreateCustomerUseCase, CustomerProvenance};
 pub use create_reception_customer::CreateReceptionCustomerUseCase;
 pub use create_reservation::{CreateReservationInput, CreateReservationUseCase};
 pub use customer_consent_items::{
-    CreateCustomerConsentItemUseCase, ListCustomerConsentItemsUseCase,
+    CreateCustomerConsentItemUseCase, DeactivateCustomerConsentItemUseCase,
+    ListCustomerConsentItemsUseCase, UpdateCustomerConsentItemUseCase,
 };
 pub use customer_grade_rules::{GetCustomerGradeRulesUseCase, ReplaceCustomerGradeRulesUseCase};
 pub use customer_reception_fields::{

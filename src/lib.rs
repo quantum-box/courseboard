@@ -779,6 +779,15 @@ pub fn build_router(state: AppState) -> Router {
                 )),
         )
         .route(
+            "/v1/course/customer-consent-items/:consent_item_id",
+            put(course::interfaces::http_customers::update_customer_consent_item)
+                .delete(course::interfaces::http_customers::delete_customer_consent_item)
+                .route_layer(middleware::from_fn_with_state(
+                    state.clone(),
+                    require_valid_token,
+                )),
+        )
+        .route(
             "/v1/course/data-exports/objects",
             get(course::interfaces::http_data_exports::list_data_export_objects).route_layer(
                 middleware::from_fn_with_state(state.clone(), require_valid_token),

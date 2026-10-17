@@ -30,6 +30,7 @@ export function ReceptionFieldsPage() {
   useRegisterPageReload(resource.refresh)
   useRegisterPageReload(consentResource.refresh)
 
+  /** Merges created or edited items into the catalog by consent key. */
   function onConsentItemsCreated(created: readonly ReceptionConsentItem[]) {
     consentResource.setData(current => {
       const byKey = new Map(

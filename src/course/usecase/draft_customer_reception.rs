@@ -129,6 +129,23 @@ mod tests {
         ) -> Result<CustomerConsentItem, CourseError> {
             unreachable!("not used by this use case")
         }
+
+        async fn update_consent_item(
+            &self,
+            _credentials: GatewayCredentials<'_>,
+            _id: &str,
+            _patch: &crate::course::domain::CustomerConsentItemPatch,
+        ) -> Result<CustomerConsentItem, CourseError> {
+            unreachable!("not used by this use case")
+        }
+
+        async fn deactivate_consent_item(
+            &self,
+            _credentials: GatewayCredentials<'_>,
+            _id: &str,
+        ) -> Result<(), CourseError> {
+            unreachable!("not used by this use case")
+        }
     }
 
     #[async_trait]

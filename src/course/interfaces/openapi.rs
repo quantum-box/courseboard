@@ -119,6 +119,8 @@ impl Modify for SecurityAddon {
         http_customers::cancel_reception_ocr_job,
         http_customers::list_customer_consent_items,
         http_customers::create_customer_consent_item,
+        http_customers::update_customer_consent_item,
+        http_customers::delete_customer_consent_item,
         http_customers::get_customer_reception_fields,
         http_customers::replace_customer_reception_fields,
         http_customers::analyze_customer_reception_fields,

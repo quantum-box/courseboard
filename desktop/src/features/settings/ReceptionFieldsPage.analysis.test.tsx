@@ -96,6 +96,104 @@ describe('ReceptionFieldsPage analysis proposal', () => {
     expect(screen.getByText(/golf_cart_terms_acknowledgement .*Field登録済み/)).toBeTruthy()
   })
 
+  describe('registered consent items', () => {
+    const cart = {
+      id: 'mci_cart',
+      consentKey: 'golf_cart_terms_acknowledgement',
+      label: 'カート利用約款を遵守します。',
+      body: null,
+      required: false,
+      termsVersion: '1',
+      active: true,
+      sortOrder: 0,
+    }
+
+    function serveCatalog(items: unknown[], onWrite: (path: string, init: RequestInit) => unknown) {
+      api.json.mockImplementation(async (path: string, init?: RequestInit) => {
+        if (path === '/v1/course/customer-reception-fields' && !init?.method) {
+          return { items: DEFAULT_RECEPTION_FIELDS }
+        }
+        if (path === '/v1/course/customer-consent-items?includeInactive=true' && !init?.method) {
+          return { items }
+        }
+        if (path.startsWith('/v1/course/customer-consent-items/') && init?.method) {
+          return onWrite(path, init)
+        }
+        throw new Error(`Unexpected API call: ${init?.method ?? 'GET'} ${path}`)
+      })
+    }
+
+    afterEach(() => vi.restoreAllMocks())
+
+    it('edits the wording and required flag through CourseBoard', async () => {
+      serveCatalog([cart], (_path, init) => ({
+        ...cart,
+        ...JSON.parse(String(init.body)),
+        termsVersion: '2',
+      }))
+      renderPage()
+
+      fireEvent.click(await screen.findByRole('button', { name: '「カート利用約款を遵守します。」を編集' }))
+      fireEvent.change(screen.getByDisplayValue('カート利用約款を遵守します。'), {
+        target: { value: '乗用カート利用約款を遵守します。' },
+      })
+      fireEvent.click(screen.getByRole('checkbox', { name: '必須' }))
+      fireEvent.click(screen.getByRole('button', { name: '保存' }))
+
+      await waitFor(() => expect(api.json).toHaveBeenCalledWith(
+        '/v1/course/customer-consent-items/mci_cart',
+        expect.objectContaining({
+          method: 'PUT',
+          body: JSON.stringify({ label: '乗用カート利用約款を遵守します。', body: null, required: true }),
+        }),
+      ))
+      expect(await screen.findByText('乗用カート利用約款を遵守します。')).toBeTruthy()
+      expect(screen.getByText(/必須 \/ 第2版/)).toBeTruthy()
+    })
+
+    it('deletes after confirmation and can bring the item back', async () => {
+      vi.spyOn(window, 'confirm').mockReturnValue(true)
+      serveCatalog([cart], (_path, init) => (
+        init.method === 'DELETE' ? null : { ...cart, ...JSON.parse(String(init.body)) }
+      ))
+      renderPage()
+
+      fireEvent.click(await screen.findByRole('button', { name: '「カート利用約款を遵守します。」を削除' }))
+
+      await waitFor(() => expect(api.json).toHaveBeenCalledWith(
+        '/v1/course/customer-consent-items/mci_cart',
+        expect.objectContaining({ method: 'DELETE' }),
+      ))
+      await waitFor(() => expect(screen.queryByText('カート利用約款を遵守します。')).toBeNull())
+      expect(screen.getByText('Fieldに登録済みの同意項目はまだありません。')).toBeTruthy()
+
+      fireEvent.click(screen.getByRole('button', { name: '削除した項目を表示（1件）' }))
+      fireEvent.click(screen.getByRole('button', { name: '「カート利用約款を遵守します。」を受付画面に戻す' }))
+
+      await waitFor(() => expect(api.json).toHaveBeenCalledWith(
+        '/v1/course/customer-consent-items/mci_cart',
+        expect.objectContaining({ method: 'PUT', body: JSON.stringify({ active: true }) }),
+      ))
+      expect(await screen.findByRole('button', { name: '「カート利用約款を遵守します。」を削除' })).toBeTruthy()
+    })
+
+    it('keeps the item when the operator cancels the delete', async () => {
+      vi.spyOn(window, 'confirm').mockReturnValue(false)
+      serveCatalog([cart], () => {
+        throw new Error('no write expected')
+      })
+      renderPage()
+
+      fireEvent.click(await screen.findByRole('button', { name: '「カート利用約款を遵守します。」を削除' }))
+
+      expect(screen.getByText('カート利用約款を遵守します。')).toBeTruthy()
+      expect(api.json).not.toHaveBeenCalledWith(
+        '/v1/course/customer-consent-items/mci_cart',
+        expect.anything(),
+      )
+    })
+  })
+
   it('shows OCR progress and lets the operator retry a failed read', async () => {
     let attempts = 0
     let finishRead: (() => void) | null = null

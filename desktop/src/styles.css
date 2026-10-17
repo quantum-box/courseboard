@@ -6455,6 +6455,37 @@ button,
   border-bottom: 0;
 }
 
+.reception-consent-candidate-list li.reception-consent-item {
+  grid-template-columns: minmax(0, 1fr) auto;
+  align-items: start;
+  gap: 8px;
+}
+
+.reception-consent-item-text {
+  display: grid;
+  gap: 2px;
+  min-width: 0;
+}
+
+.reception-consent-item-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px;
+}
+
+.reception-consent-edit {
+  grid-column: 1 / -1;
+  display: grid;
+  gap: 8px;
+  padding-block: 4px;
+}
+
+@media (max-width: 640px) {
+  .reception-consent-candidate-list li.reception-consent-item {
+    grid-template-columns: minmax(0, 1fr);
+  }
+}
+
 .reception-consent-candidate-list small,
 .reception-consent-candidate-list span {
   color: hsl(var(--nui-muted-foreground));

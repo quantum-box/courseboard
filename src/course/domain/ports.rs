@@ -10,26 +10,26 @@ use super::{
     CaddieDutyAssignment, CaddieDutyOptions, CaddieFeeChange, CaddieId, CaddieRankFeeChange,
     CaddieRankFeeChangeContext, CaddieRankFees, CaddieRating, CaddieRoster, CaddieShift,
     CaddieStaff, CancellationFeeDecision, CancellationQuery, Course, CourseError, CourseId,
-    CourseOrder, CreateCustomerConsentItem, Customer, CustomerConsentItem, CustomerGradeRules,
-    CustomerId, CustomerMembership, CustomerPage, CustomerReceptionField, CustomerRegistration,
-    CustomerSearchQuery, CustomerSummary, CustomerSummaryQuery, CustomerSummaryRun,
-    CustomerSummaryRunStatus, DailyBudget, DailyBudgetQuery, DefaultWorkingHours,
-    DeleteSlotOverrides, ExtensionStatus, FieldClientCapabilities, FieldRequestContext,
-    FieldShiftLink, GenerationSummary, GolfPricingSettings, InventoryWatermark,
-    MembershipActivityPage, MembershipActivityQuery, MembershipDiscounts, MembershipPlan,
-    MembershipPlanId, MembershipPlayWindows, MonthlySettlement, NewCustomer,
-    NewCustomerRegistration, NewReservation, NewReservationCancellation, PartyDetails,
-    PlayerTagOptions, ProductSlot, ReceptionConsentAnswer, ReceptionConsentDefinition,
-    ReceptionCustomerInput, ReceptionDraft, ReceptionFormProposal, ReceptionOcrJob,
-    ReceptionOcrJobContext, ReceptionOcrJobCreated, ReceptionOcrJobSheets, ReceptionSheet,
-    ReceptionSheets, RecordedCaddieFeeChange, ReplaceCaddieMemberships, Reservation,
-    ReservationBookingUpdate, ReservationCancellation, ReservationId, ReservationPolicy,
-    ReservationProduct, ReservationServiceId, Resource, ResourceId, ResourceTimeSlot,
-    SaveCourseResource, SeededReservation, SetMemberNumber, ShiftPolicy, SlotOverride,
-    SlotOverrideQuery, TaxRuleSnapshot, UnsyncedShift, UpdateExtensionConfig,
-    UpdateReservationPolicy, UpsertCaddie, UpsertCaddieAssignment, UpsertCaddieAvailability,
-    UpsertCourse, UpsertDailyBudget, UpsertMembershipPlan, UpsertReservationProduct, VisitCheckin,
-    VisitCheckinRequest, WorkedMinutes, YearMonth,
+    CourseOrder, CreateCustomerConsentItem, Customer, CustomerConsentItem,
+    CustomerConsentItemPatch, CustomerGradeRules, CustomerId, CustomerMembership, CustomerPage,
+    CustomerReceptionField, CustomerRegistration, CustomerSearchQuery, CustomerSummary,
+    CustomerSummaryQuery, CustomerSummaryRun, CustomerSummaryRunStatus, DailyBudget,
+    DailyBudgetQuery, DefaultWorkingHours, DeleteSlotOverrides, ExtensionStatus,
+    FieldClientCapabilities, FieldRequestContext, FieldShiftLink, GenerationSummary,
+    GolfPricingSettings, InventoryWatermark, MembershipActivityPage, MembershipActivityQuery,
+    MembershipDiscounts, MembershipPlan, MembershipPlanId, MembershipPlayWindows,
+    MonthlySettlement, NewCustomer, NewCustomerRegistration, NewReservation,
+    NewReservationCancellation, PartyDetails, PlayerTagOptions, ProductSlot,
+    ReceptionConsentAnswer, ReceptionConsentDefinition, ReceptionCustomerInput, ReceptionDraft,
+    ReceptionFormProposal, ReceptionOcrJob, ReceptionOcrJobContext, ReceptionOcrJobCreated,
+    ReceptionOcrJobSheets, ReceptionSheet, ReceptionSheets, RecordedCaddieFeeChange,
+    ReplaceCaddieMemberships, Reservation, ReservationBookingUpdate, ReservationCancellation,
+    ReservationId, ReservationPolicy, ReservationProduct, ReservationServiceId, Resource,
+    ResourceId, ResourceTimeSlot, SaveCourseResource, SeededReservation, SetMemberNumber,
+    ShiftPolicy, SlotOverride, SlotOverrideQuery, TaxRuleSnapshot, UnsyncedShift,
+    UpdateExtensionConfig, UpdateReservationPolicy, UpsertCaddie, UpsertCaddieAssignment,
+    UpsertCaddieAvailability, UpsertCourse, UpsertDailyBudget, UpsertMembershipPlan,
+    UpsertReservationProduct, VisitCheckin, VisitCheckinRequest, WorkedMinutes, YearMonth,
 };
 
 /// Answers whether the caller may perform one CourseBoard action.
@@ -410,6 +410,21 @@ pub trait CustomerConsentCatalogGateway: Send + Sync {
         credentials: GatewayCredentials<'_>,
         item: &CreateCustomerConsentItem,
     ) -> Result<CustomerConsentItem, CourseError>;
+
+    async fn update_consent_item(
+        &self,
+        credentials: GatewayCredentials<'_>,
+        id: &str,
+        patch: &CustomerConsentItemPatch,
+    ) -> Result<CustomerConsentItem, CourseError>;
+
+    /// Field keeps the definition (and its key) for the consent trail and
+    /// only stops offering it, so this is a deactivation, not an erase.
+    async fn deactivate_consent_item(
+        &self,
+        credentials: GatewayCredentials<'_>,
+        id: &str,
+    ) -> Result<(), CourseError>;
 }
 
 /// Port for where a ledger entry came from.
