@@ -68,6 +68,108 @@ describe('ReceptionFieldsPage analysis proposal', () => {
     })
   })
 
+  it('saves manual and OCR consent items together with the top save button, retaining failures for retry', async () => {
+    let failManual = true
+    const created: string[] = []
+    let fieldsSaved = false
+    api.json.mockImplementation(async (path: string, init?: RequestInit) => {
+      if (path === '/v1/course/customer-reception-fields') {
+        if (init?.method === 'PUT') fieldsSaved = true
+        return { items: DEFAULT_RECEPTION_FIELDS }
+      }
+      if (path === '/v1/course/customer-consent-items?includeInactive=true') return { items: [] }
+      if (path === '/v1/course/customer-reception-fields/analysis') return {
+        fields: [], warnings: [],
+        consentItems: [{ consentKey: 'golf_privacy', label: '個人情報', body: null, required: true }],
+      }
+      if (path === '/v1/course/customer-consent-items' && init?.method === 'POST') {
+        const body = JSON.parse(String(init.body))
+        expect(fieldsSaved).toBe(true)
+        if (body.label === '追加の同意' && failManual) throw new Error('temporary failure')
+        created.push(body.label)
+        return { id: body.consentKey, active: true, ...body }
+      }
+      throw new Error(`Unexpected API call: ${path}`)
+    })
+    const { container } = renderPage()
+    const add = await screen.findByRole('button', { name: '同意項目を追加' })
+    await waitFor(() => expect(add.hasAttribute('disabled')).toBe(false))
+    fireEvent.click(add)
+    const save = screen.getByRole('button', { name: '項目設定を保存' })
+    expect(save.hasAttribute('disabled')).toBe(true)
+    fireEvent.change(screen.getByRole('textbox', { name: '同意項目の名前' }), { target: { value: '追加の同意' } })
+    fireEvent.change(container.querySelector('input[type="file"]') as HTMLInputElement, {
+      target: { files: [new File(['blank'], 'blank.png', { type: 'image/png' })] },
+    })
+    await screen.findByText('個人情報')
+    fireEvent.click(save)
+    await waitFor(() => expect(toast.show).toHaveBeenCalledWith(expect.objectContaining({ title: '同意項目を作成できませんでした' })))
+    expect(screen.getByDisplayValue('追加の同意')).toBeTruthy()
+    expect(created).toEqual(['個人情報'])
+    expect(api.json.mock.calls.some(([, init]) => init?.method === 'PUT')).toBe(true)
+    failManual = false
+    fireEvent.click(save)
+    await waitFor(() => expect(toast.show).toHaveBeenCalledWith(expect.objectContaining({ message: '受付票の項目設定を保存しました' })))
+    expect(created).toEqual(['個人情報', '追加の同意'])
+    await waitFor(() => expect(screen.queryByDisplayValue('追加の同意')).toBeNull())
+  })
+
+  it('keeps saved fields as the cancel baseline while retaining a failed OCR consent', async () => {
+    let stored = [...DEFAULT_RECEPTION_FIELDS]
+    api.json.mockImplementation(async (path: string, init?: RequestInit) => {
+      if (path === '/v1/course/customer-reception-fields') {
+        if (init?.method === 'PUT') stored = JSON.parse(String(init.body)).items
+        return { items: stored }
+      }
+      if (path === '/v1/course/customer-consent-items?includeInactive=true') return { items: [] }
+      if (path === '/v1/course/customer-reception-fields/analysis') return {
+        fields: [], warnings: [],
+        consentItems: [{ consentKey: 'golf_privacy', label: '個人情報', body: null, required: true }],
+      }
+      if (path === '/v1/course/customer-consent-items') throw new Error('temporary failure')
+      throw new Error(`Unexpected API call: ${path}`)
+    })
+    const { container } = renderPage()
+    await screen.findByRole('textbox', { name: '電話番号の表示名' })
+    fireEvent.change(container.querySelector('input[type="file"]') as HTMLInputElement, {
+      target: { files: [new File(['blank'], 'blank.png', { type: 'image/png' })] },
+    })
+    await screen.findByText('個人情報')
+    fireEvent.change(screen.getByRole('textbox', { name: '電話番号の表示名' }), { target: { value: '保存された連絡先' } })
+    fireEvent.click(screen.getByRole('button', { name: '項目設定を保存' }))
+    await waitFor(() => expect(toast.show).toHaveBeenCalledWith(expect.objectContaining({ title: '同意項目を作成できませんでした' })))
+    expect(screen.getByRole('button', { name: '1件をまとめて作成' })).toBeTruthy()
+    expect(screen.getByDisplayValue('保存された連絡先')).toBeTruthy()
+    fireEvent.click(screen.getByRole('button', { name: '提案を取り消す' }))
+    expect(screen.getByDisplayValue('保存された連絡先')).toBeTruthy()
+    expect(screen.getByRole('button', { name: '項目設定を保存' }).hasAttribute('disabled')).toBe(true)
+  })
+
+  it('validates the effective consent prompt at 120 Unicode characters before writing fields', async () => {
+    renderPage()
+    const add = await screen.findByRole('button', { name: '同意項目を追加' })
+    await waitFor(() => expect(add.hasAttribute('disabled')).toBe(false))
+    fireEvent.click(add)
+    const name = screen.getByRole('textbox', { name: '同意項目の名前' })
+    const body = screen.getByRole('textbox', { name: '同意の説明文' })
+    const save = screen.getByRole('button', { name: '項目設定を保存' })
+    fireEvent.change(name, { target: { value: '同意' } })
+    fireEvent.change(body, { target: { value: '😀'.repeat(121) } })
+    expect(save.hasAttribute('disabled')).toBe(true)
+    expect(screen.getByRole('button', { name: '1件をまとめて作成' }).hasAttribute('disabled')).toBe(true)
+    expect(screen.getByText(/同意の説明文は120文字以内/)).toBeTruthy()
+    fireEvent.click(save)
+    expect(api.json.mock.calls.some(([, init]) => init?.method === 'PUT' || init?.method === 'POST')).toBe(false)
+    fireEvent.change(body, { target: { value: '😀'.repeat(120) } })
+    expect(save.hasAttribute('disabled')).toBe(false)
+    fireEvent.change(name, { target: { value: 'あ'.repeat(121) } })
+    expect(save.hasAttribute('disabled')).toBe(false)
+    fireEvent.change(body, { target: { value: '   ' } })
+    expect(save.hasAttribute('disabled')).toBe(true)
+    fireEvent.change(name, { target: { value: 'あ'.repeat(120) } })
+    expect(save.hasAttribute('disabled')).toBe(false)
+  })
+
   it('lists consent items already registered in Field without an analysis', async () => {
     api.json.mockImplementation(async (path: string, init?: RequestInit) => {
       if (path === '/v1/course/customer-reception-fields' && !init?.method) {

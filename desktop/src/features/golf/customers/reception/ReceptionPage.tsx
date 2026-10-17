@@ -1153,6 +1153,7 @@ export function ReceptionFieldSettingsPanel({
   const [analysisConsentItems, setAnalysisConsentItems] = useState<
     ReceptionConsentCandidate[]
   >([])
+  const [manualConsentItems, setManualConsentItems] = useState<ReceptionConsentCandidate[]>([])
   const [proposedConsentItems, setProposedConsentItems] = useState<ReceptionConsentCandidate[]>([])
   const [analysisCustomFieldCandidateCount, setAnalysisCustomFieldCandidateCount] = useState<
     number | null
@@ -1175,6 +1176,7 @@ export function ReceptionFieldSettingsPanel({
   const [analysisRotation, setAnalysisRotation] = useState<ReceptionRotation>(0)
   const analysisInputRef = useRef<HTMLInputElement | null>(null)
   const proposalSnapshotRef = useRef<ReceptionFieldDraft[] | null>(null)
+  const savedFieldsRef = useRef<readonly ReceptionField[] | null>(null)
   const analysisLocalPreviewUrl = analysisDisplayUrl?.file === analysisDisplayFile
     ? analysisDisplayUrl.url
     : null
@@ -1192,6 +1194,11 @@ export function ReceptionFieldSettingsPanel({
   }, [analysisDisplayFile])
 
   useEffect(() => {
+    // Our own PUT updates the baseline without discarding consent retries.
+    if (savedFieldsRef.current === fields) {
+      savedFieldsRef.current = null
+      return
+    }
     setDrafts(cloneReceptionFields(fields))
     setProposalActive(false)
     setAnalysisWarnings([])
@@ -1212,13 +1219,22 @@ export function ReceptionFieldSettingsPanel({
   // inactive definition).
   useEffect(() => {
     const existingKeys = new Set(consentItems.map(item => item.consentKey))
+    setManualConsentItems(current => {
+      const next = current.filter(candidate => !existingKeys.has(candidate.consentKey))
+      return next.length === current.length ? current : next
+    })
     setProposedConsentItems(current => {
       const next = current.filter(candidate => !existingKeys.has(candidate.consentKey))
       return next.length === current.length ? current : next
     })
   }, [consentItems])
 
-  const dirty = !settingsEqual(drafts, fields)
+  const pendingConsentItems = [...proposedConsentItems, ...manualConsentItems]
+  const consentPromptTooLong = pendingConsentItems.some(item =>
+    [...(item.body?.trim() || item.label.trim())].length > 120,
+  )
+  const invalidConsent = consentPromptTooLong || pendingConsentItems.some(item => !item.label.trim())
+  const dirty = !settingsEqual(drafts, fields) || pendingConsentItems.length > 0
   const invalidCustomKey = customFieldKeyIsInvalid(drafts)
   const standard = drafts.filter(field => field.kind === 'standard')
   const custom = drafts.filter(field => field.kind === 'custom')
@@ -1282,6 +1298,7 @@ export function ReceptionFieldSettingsPanel({
     const restore = proposalActive && proposalSnapshotRef.current
       ? proposalSnapshotRef.current
       : fields
+    setManualConsentItems([])
     setDrafts(cloneReceptionFields(restore))
     setProposalActive(false)
     setAnalysisWarnings([])
@@ -1372,7 +1389,8 @@ export function ReceptionFieldSettingsPanel({
 
   /** Create confirmed Field consent definitions one at a time. */
   async function createProposedConsentItems() {
-    if (!canCreateConsentItems || proposedConsentItems.length === 0) return
+    if (!canCreateConsentItems || invalidConsent) return false
+    if (pendingConsentItems.length === 0) return true
     setCreatingConsentItems(true)
     const remaining: ReceptionConsentCandidate[] = []
     const createdItems: ReceptionConsentItem[] = []
@@ -1383,7 +1401,7 @@ export function ReceptionFieldSettingsPanel({
     let failure: unknown = null
 
     try {
-      for (const [index, candidate] of proposedConsentItems.entries()) {
+      for (const [index, candidate] of pendingConsentItems.entries()) {
         if (failure) {
           remaining.push(candidate)
           continue
@@ -1423,7 +1441,9 @@ export function ReceptionFieldSettingsPanel({
       setCreatingConsentItems(false)
     }
 
-    setProposedConsentItems(remaining)
+    const remainingKeys = new Set(remaining.map(item => item.consentKey))
+    setProposedConsentItems(current => current.filter(item => remainingKeys.has(item.consentKey)))
+    setManualConsentItems(current => current.filter(item => remainingKeys.has(item.consentKey)))
     if (createdItems.length > 0) onConsentItemsCreated?.(createdItems)
     if (failure) {
       showToast({
@@ -1431,7 +1451,7 @@ export function ReceptionFieldSettingsPanel({
         title: t('customers:reception.settings.consentCreateFailed'),
         message: resourceErrorText(failure),
       })
-      return
+      return false
     }
     showToast({
       tone: 'success',
@@ -1439,10 +1459,11 @@ export function ReceptionFieldSettingsPanel({
         count: createdItems.length,
       }),
     })
+    return true
   }
 
   async function save() {
-    if (invalidCustomKey) return
+    if (invalidCustomKey || invalidConsent) return
     setSaving(true)
     try {
       const next = await saveReceptionFields(drafts.map(field => ({
@@ -1458,8 +1479,13 @@ export function ReceptionFieldSettingsPanel({
         sortOrder: field.sortOrder,
         options: field.fieldType === 'select' ? field.options : [],
       })))
+      // Consent creation validates against the stored field schema. Persist
+      // removed/disabled fields first so valid replacements fit the column limit.
       setDrafts(cloneReceptionFields(next))
+      proposalSnapshotRef.current = null
+      savedFieldsRef.current = next
       onSaved(next)
+      if (pendingConsentItems.length > 0 && !await createProposedConsentItems()) return
       setProposalActive(false)
       setAnalysisWarnings([])
       setAnalysisError(null)
@@ -1529,7 +1555,7 @@ export function ReceptionFieldSettingsPanel({
           <Button
             type="button"
             variant="primary"
-            disabled={!dirty || changing || loading || invalidCustomKey}
+            disabled={!dirty || changing || loading || invalidCustomKey || invalidConsent || (pendingConsentItems.length > 0 && !canCreateConsentItems)}
             onClick={() => void save()}
           >
             <Save />
@@ -1896,22 +1922,58 @@ export function ReceptionFieldSettingsPanel({
                 : 'customers:reception.settings.consentCandidatesBeforeAnalysis')}
             </p>
           </div>
-          {proposedConsentItems.length > 0 ? (
+          <Button type="button" variant="secondary" size="sm" disabled={changing || !canCreateConsentItems}
+            onClick={() => setManualConsentItems(current => [...current, {
+              consentKey: `golf_manual_${crypto.randomUUID().replaceAll("-", "")}`,
+              label: "", body: null, required: false,
+            }])}>
+            <Plus />
+            {t('customers:reception.settings.addConsent')}
+          </Button>
+          {pendingConsentItems.length > 0 ? (
             <Button
               type="button"
               variant="secondary"
               size="sm"
-              disabled={changing || !canCreateConsentItems}
+              disabled={changing || !canCreateConsentItems || invalidConsent}
               onClick={() => void createProposedConsentItems()}
             >
               {creatingConsentItems
                 ? t('customers:reception.settings.consentCreating')
                 : t('customers:reception.settings.consentCreate', {
-                  count: proposedConsentItems.length,
+                  count: pendingConsentItems.length,
                 })}
             </Button>
           ) : null}
         </div>
+        {consentPromptTooLong ? (
+          <Notice tone="warning">{t('customers:reception.settings.consentPromptTooLong')}</Notice>
+        ) : null}
+        {manualConsentItems.map(candidate => (
+          <div className="reception-custom-field" key={candidate.consentKey}>
+            <Field label={t('customers:reception.settings.consentLabel')}>
+              <Input value={candidate.label} disabled={changing}
+                onChange={event => setManualConsentItems(current => current.map(item =>
+                  item.consentKey === candidate.consentKey ? { ...item, label: event.target.value } : item))} />
+            </Field>
+            <Field label={t('customers:reception.settings.consentBody')}>
+              <NativeTextarea value={candidate.body ?? ''} disabled={changing}
+                onChange={event => setManualConsentItems(current => current.map(item =>
+                  item.consentKey === candidate.consentKey ? { ...item, body: event.target.value } : item))} />
+            </Field>
+            <label>
+              <input type="checkbox" checked={candidate.required} disabled={changing}
+                onChange={event => setManualConsentItems(current => current.map(item =>
+                  item.consentKey === candidate.consentKey ? { ...item, required: event.target.checked } : item))} />
+              {t('customers:reception.consents.required')}
+            </label>
+            <Button type="button" variant="ghost" size="sm" disabled={changing}
+              aria-label={t('customers:reception.settings.removeConsent')}
+              onClick={() => setManualConsentItems(current => current.filter(item => item.consentKey !== candidate.consentKey))}>
+              <Trash2 />
+            </Button>
+          </div>
+        ))}
         {consentItemsError ? (
           <ResourceError
             error={consentItemsError}
