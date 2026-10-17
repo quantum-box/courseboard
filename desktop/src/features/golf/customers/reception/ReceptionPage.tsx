@@ -1156,6 +1156,7 @@ export function ReceptionFieldSettingsPanel({
     number | null
   >(null)
   const [analysisWarnings, setAnalysisWarnings] = useState<string[]>([])
+  const [analysisError, setAnalysisError] = useState<string | null>(null)
   const [analysisPreview, setAnalysisPreview] = useState<string | null>(null)
   const [analysisFile, setAnalysisFile] = useState<File | null>(null)
   const [analysisDisplayFile, setAnalysisDisplayFile] = useState<File | null>(null)
@@ -1186,6 +1187,7 @@ export function ReceptionFieldSettingsPanel({
     setDrafts(cloneReceptionFields(fields))
     setProposalActive(false)
     setAnalysisWarnings([])
+    setAnalysisError(null)
     setAnalysisPreview(null)
     setAnalysisFile(null)
     setAnalysisDisplayFile(null)
@@ -1274,6 +1276,7 @@ export function ReceptionFieldSettingsPanel({
     setDrafts(cloneReceptionFields(restore))
     setProposalActive(false)
     setAnalysisWarnings([])
+    setAnalysisError(null)
     setAnalysisPreview(null)
     setAnalysisFile(null)
     setAnalysisDisplayFile(null)
@@ -1291,6 +1294,7 @@ export function ReceptionFieldSettingsPanel({
   ) {
     const beforeAnalysis = proposalSnapshotRef.current ?? cloneReceptionFields(drafts)
     setAnalyzing(true)
+    setAnalysisError(null)
     try {
       let source: File
       try {
@@ -1339,11 +1343,13 @@ export function ReceptionFieldSettingsPanel({
       setProposalActive(true)
       setAnalysisWarnings(proposal.warnings)
       showToast({ tone: 'success', message: t('customers:reception.analysis.applied') })
-    } catch (analysisError) {
+    } catch (failure) {
+      const message = resourceErrorText(failure)
+      setAnalysisError(message)
       showToast({
         tone: 'danger',
         title: t('customers:reception.analysis.failed'),
-        message: resourceErrorText(analysisError),
+        message,
       })
     } finally {
       setAnalyzing(false)
@@ -1442,6 +1448,7 @@ export function ReceptionFieldSettingsPanel({
       onSaved(next)
       setProposalActive(false)
       setAnalysisWarnings([])
+      setAnalysisError(null)
       setAnalysisPreview(null)
       setAnalysisFile(null)
       setAnalysisDisplayFile(null)
@@ -1518,6 +1525,29 @@ export function ReceptionFieldSettingsPanel({
         </>
       )}
     >
+      {analyzing ? (
+        <LoadingState label={t('customers:reception.analysis.inProgress')} />
+      ) : null}
+      {!analyzing && analysisError ? (
+        <Notice
+          tone="danger"
+          title={t('customers:reception.analysis.failed')}
+          actions={analysisFile ? (
+            <Button
+              type="button"
+              variant="secondary"
+              size="sm"
+              disabled={changing}
+              onClick={() => void analyzeBlankForm(analysisFile, analysisRotation, true)}
+            >
+              <RefreshCw />
+              {t('customers:reception.analysis.retry')}
+            </Button>
+          ) : undefined}
+        >
+          {analysisError}
+        </Notice>
+      ) : null}
       {analysisWarnings.map((warning, index) => (
         <Notice key={`${warning}-${index}`} tone="warning">{warning}</Notice>
       ))}
@@ -1545,6 +1575,16 @@ export function ReceptionFieldSettingsPanel({
             </>
           ) : null}
           <div className="reception-preview-page-actions">
+            <Button
+              type="button"
+              variant="ghost"
+              size="sm"
+              disabled={changing}
+              onClick={() => void analyzeBlankForm(analysisFile, analysisRotation, true)}
+            >
+              <RefreshCw />
+              {t('customers:reception.analysis.reread')}
+            </Button>
             <Button
               type="button"
               variant="ghost"
@@ -1862,7 +1902,34 @@ export function ReceptionFieldSettingsPanel({
         {consentItemsLoading ? (
           <LoadingState label={t('customers:reception.settings.consentLoading')} />
         ) : null}
-        {!proposalActive ? null : analysisConsentItems.length > 0 ? (
+        {!proposalActive ? (
+          // Without an analysis there are no candidates, but the operator
+          // still needs to see what Field already holds (e.g. after a reload).
+          consentItemsLoading || consentItemsError ? null : consentItems.length > 0 ? (
+            <ul className="reception-consent-candidate-list">
+              {consentItems.map(item => (
+                <li key={item.consentKey}>
+                  <strong>{item.label}</strong>
+                  <small>
+                    {item.consentKey}
+                    {item.required
+                      ? ` / ${t('customers:reception.consents.required')}`
+                      : ''}
+                    {' / '}
+                    {item.active
+                      ? t('customers:reception.settings.consentItemRegistered')
+                      : t('customers:reception.settings.consentItemInactive')}
+                  </small>
+                  {item.body ? <span>{item.body}</span> : null}
+                </li>
+              ))}
+            </ul>
+          ) : (
+            <p className="reception-settings-empty" role="status">
+              {t('customers:reception.settings.consentRegisteredEmpty')}
+            </p>
+          )
+        ) : analysisConsentItems.length > 0 ? (
           <ul className="reception-consent-candidate-list">
             {analysisConsentItems.map(candidate => {
               const catalogItem = consentItems.find(
