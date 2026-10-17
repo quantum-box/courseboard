@@ -14,18 +14,25 @@ export function PlanPicker({
   value,
   name,
   onChange,
+  lockedReason = null,
 }: {
   plans: BookablePlan[]
   value: string
   /** Radio group name. Distinct per sheet so two open lists cannot merge. */
   name: string
   onChange: (reservationServiceId: string) => void
+  /**
+   * Why the plan can no longer change, when it cannot. The list stays on
+   * screen so the desk still sees which plan the booking is under.
+   */
+  lockedReason?: string | null
 }) {
   const { t } = useTranslation(['ledger'])
   if (plans.length === 0) return null
   return (
-    <fieldset className="ledger-plan-picker">
+    <fieldset className="ledger-plan-picker" disabled={lockedReason !== null}>
       <legend>{t('ledger:newReservation.plan')}</legend>
+      {lockedReason ? <p className="ledger-plan-locked">{lockedReason}</p> : null}
       <div className="ledger-plan-list">
         {plans.map(plan => (
           <label
@@ -39,6 +46,9 @@ export function PlanPicker({
               name={name}
               value={plan.reservationServiceId}
               checked={value === plan.reservationServiceId}
+              // The fieldset already disables these in a browser; saying it on
+              // each input too is what assistive tech and tests read.
+              disabled={lockedReason !== null}
               onChange={() => onChange(plan.reservationServiceId)}
             />
             <span className="ledger-plan-label">{plan.label}</span>
