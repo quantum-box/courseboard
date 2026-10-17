@@ -20,6 +20,12 @@ vi.mock('../../lib/toast', () => ({ showToast: vi.fn() }))
 
 const OPERATION_DATE = '2026-08-08'
 
+/** How the day's supply reads the caddies who filed nothing (courseboard#90). */
+let unfiled: { unfiledCaddies: number; unfiledReadAs: 'working' | 'off' } = {
+  unfiledCaddies: 0,
+  unfiledReadAs: 'working',
+}
+
 function profile() {
   return {
     id: 'caddie-dispatch-tabs',
@@ -50,6 +56,7 @@ describe('CaddiesPage dispatch tabs', () => {
     await i18next.changeLanguage('ja')
     window.history.replaceState({}, '', `/golf/caddies/dispatch?date=${OPERATION_DATE}`)
     clearResourceCache()
+    unfiled = { unfiledCaddies: 0, unfiledReadAs: 'working' }
     api.json.mockReset()
     api.json.mockImplementation(async (path: string) => {
       if (path === '/v1/course/caddie-profiles') {
@@ -88,6 +95,7 @@ describe('CaddiesPage dispatch tabs', () => {
           caddieAttachedCap: 1,
           currentCaddieAttached: 0,
           remaining: 1,
+          ...unfiled,
         }
       }
       if (path === `/v1/course/caddie-course-supply?date=${OPERATION_DATE}`) {
@@ -122,6 +130,33 @@ describe('CaddiesPage dispatch tabs', () => {
     expect(assigned).toBeTruthy()
     expect(assigned?.hasAttribute('open')).toBe(false)
     expect(screen.queryByRole('heading', { name: '別業務' })).toBeNull()
+  })
+
+  it('says the supply counts caddies who never filed as working', async () => {
+    // courseboard#90: the day's supply used to count them silently, which is
+    // how caddie-attached slots got sold that nobody had promised to walk.
+    unfiled = { unfiledCaddies: 3, unfiledReadAs: 'working' }
+    renderPage()
+
+    expect(await screen.findByText(
+      i18next.t('caddies:supply.unfiled.working', { n: '3' }),
+    )).toBeTruthy()
+  })
+
+  it('says the supply is short until the missing requests come in', async () => {
+    unfiled = { unfiledCaddies: 2, unfiledReadAs: 'off' }
+    renderPage()
+
+    expect(await screen.findByText(
+      i18next.t('caddies:supply.unfiled.off', { n: '2' }),
+    )).toBeTruthy()
+  })
+
+  it('says nothing about unfiled caddies when everybody filed', async () => {
+    renderPage()
+
+    await screen.findByText(i18next.t('caddies:supply.title'))
+    expect(screen.queryByText(/希望がまだ届いていません/)).toBeNull()
   })
 
   it('switches to non-round work while keeping the operation date', async () => {

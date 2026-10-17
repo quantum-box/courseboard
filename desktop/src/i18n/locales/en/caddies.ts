@@ -138,6 +138,10 @@ export const caddies: DeepPartial<typeof source> = {
       ok: 'Can still take bookings',
     },
     note: 'Morning {{morning}} · Afternoon {{afternoon}}',
+    unfiled: {
+      working: '{{n}} caddies have not filed for this day. The shift rules count them as working, so the supply above may be more than you really have.',
+      off: '{{n}} caddies have not filed for this day. The shift rules count them as off, so the supply above will grow once they file.',
+    },
   },
   autoAssign: {
     title: 'Auto-assign',
