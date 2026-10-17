@@ -68,6 +68,49 @@ describe('ReceptionFieldsPage analysis proposal', () => {
     })
   })
 
+  it('saves manual and OCR consent items together with the top save button, retaining failures for retry', async () => {
+    let failManual = true
+    const created: string[] = []
+    api.json.mockImplementation(async (path: string, init?: RequestInit) => {
+      if (path === '/v1/course/customer-reception-fields') {
+        return { items: DEFAULT_RECEPTION_FIELDS }
+      }
+      if (path === '/v1/course/customer-consent-items?includeInactive=true') return { items: [] }
+      if (path === '/v1/course/customer-reception-fields/analysis') return {
+        fields: [], warnings: [],
+        consentItems: [{ consentKey: 'golf_privacy', label: '個人情報', body: null, required: true }],
+      }
+      if (path === '/v1/course/customer-consent-items' && init?.method === 'POST') {
+        const body = JSON.parse(String(init.body))
+        if (body.label === '追加の同意' && failManual) throw new Error('temporary failure')
+        created.push(body.label)
+        return { id: body.consentKey, active: true, ...body }
+      }
+      throw new Error(`Unexpected API call: ${path}`)
+    })
+    const { container } = renderPage()
+    const add = await screen.findByRole('button', { name: '同意項目を追加' })
+    await waitFor(() => expect(add.hasAttribute('disabled')).toBe(false))
+    fireEvent.click(add)
+    const save = screen.getByRole('button', { name: '項目設定を保存' })
+    expect(save.hasAttribute('disabled')).toBe(true)
+    fireEvent.change(screen.getByRole('textbox', { name: '同意項目の名前' }), { target: { value: '追加の同意' } })
+    fireEvent.change(container.querySelector('input[type="file"]') as HTMLInputElement, {
+      target: { files: [new File(['blank'], 'blank.png', { type: 'image/png' })] },
+    })
+    await screen.findByText('個人情報')
+    fireEvent.click(save)
+    await waitFor(() => expect(toast.show).toHaveBeenCalledWith(expect.objectContaining({ title: '同意項目を作成できませんでした' })))
+    expect(screen.getByDisplayValue('追加の同意')).toBeTruthy()
+    expect(created).toEqual(['個人情報'])
+    expect(api.json.mock.calls.some(([, init]) => init?.method === 'PUT')).toBe(false)
+    failManual = false
+    fireEvent.click(save)
+    await waitFor(() => expect(api.json.mock.calls.some(([, init]) => init?.method === 'PUT')).toBe(true))
+    expect(created).toEqual(['個人情報', '追加の同意'])
+    await waitFor(() => expect(screen.queryByDisplayValue('追加の同意')).toBeNull())
+  })
+
   it('lists consent items already registered in Field without an analysis', async () => {
     api.json.mockImplementation(async (path: string, init?: RequestInit) => {
       if (path === '/v1/course/customer-reception-fields' && !init?.method) {
