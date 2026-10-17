@@ -1157,6 +1157,12 @@ export function ReceptionFieldSettingsPanel({
   >(null)
   const [analysisWarnings, setAnalysisWarnings] = useState<string[]>([])
   const [analysisError, setAnalysisError] = useState<string | null>(null)
+  // The sheet and rotation of the latest OCR attempt, which may differ from
+  // the last successful one shown in the preview; retry must resend this.
+  const [analysisAttempt, setAnalysisAttempt] = useState<{
+    file: File
+    rotation: ReceptionRotation
+  } | null>(null)
   const [analysisPreview, setAnalysisPreview] = useState<string | null>(null)
   const [analysisFile, setAnalysisFile] = useState<File | null>(null)
   const [analysisDisplayFile, setAnalysisDisplayFile] = useState<File | null>(null)
@@ -1188,6 +1194,7 @@ export function ReceptionFieldSettingsPanel({
     setProposalActive(false)
     setAnalysisWarnings([])
     setAnalysisError(null)
+    setAnalysisAttempt(null)
     setAnalysisPreview(null)
     setAnalysisFile(null)
     setAnalysisDisplayFile(null)
@@ -1277,6 +1284,7 @@ export function ReceptionFieldSettingsPanel({
     setProposalActive(false)
     setAnalysisWarnings([])
     setAnalysisError(null)
+    setAnalysisAttempt(null)
     setAnalysisPreview(null)
     setAnalysisFile(null)
     setAnalysisDisplayFile(null)
@@ -1317,6 +1325,7 @@ export function ReceptionFieldSettingsPanel({
           : t(`customers:reception.file.${invalid}`)
         throw new Error(message)
       }
+      setAnalysisAttempt({ file: source, rotation })
       if (!analysisFile) {
         // Keep a local recovery preview when the first server request fails.
         setAnalysisFile(source)
@@ -1449,6 +1458,7 @@ export function ReceptionFieldSettingsPanel({
       setProposalActive(false)
       setAnalysisWarnings([])
       setAnalysisError(null)
+      setAnalysisAttempt(null)
       setAnalysisPreview(null)
       setAnalysisFile(null)
       setAnalysisDisplayFile(null)
@@ -1532,13 +1542,17 @@ export function ReceptionFieldSettingsPanel({
         <Notice
           tone="danger"
           title={t('customers:reception.analysis.failed')}
-          actions={analysisFile ? (
+          actions={analysisAttempt ? (
             <Button
               type="button"
               variant="secondary"
               size="sm"
               disabled={changing}
-              onClick={() => void analyzeBlankForm(analysisFile, analysisRotation, true)}
+              onClick={() => void analyzeBlankForm(
+                analysisAttempt.file,
+                analysisAttempt.rotation,
+                true,
+              )}
             >
               <RefreshCw />
               {t('customers:reception.analysis.retry')}

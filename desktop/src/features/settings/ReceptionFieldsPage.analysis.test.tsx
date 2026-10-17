@@ -144,6 +144,43 @@ describe('ReceptionFieldsPage analysis proposal', () => {
     expect(screen.queryByRole('button', { name: 'もう一度読み取る' })).toBeNull()
   })
 
+  it('retries the sheet that failed rather than the previously read one', async () => {
+    const sent: string[] = []
+    api.json.mockImplementation(async (path: string, init?: RequestInit) => {
+      if (path === '/v1/course/customer-reception-fields' && !init?.method) {
+        return { items: DEFAULT_RECEPTION_FIELDS }
+      }
+      if (path === '/v1/course/customer-consent-items?includeInactive=true' && !init?.method) {
+        return { items: [] }
+      }
+      if (path === '/v1/course/customer-reception-fields/analysis' && init?.method === 'POST') {
+        const sheet = await ((init.body as FormData).get('file') as File).text()
+        sent.push(sheet)
+        if (sheet === 'sheet-b' && sent.filter(item => item === 'sheet-b').length === 1) {
+          throw new Error('OCR timed out')
+        }
+        return { fields: [], consentItems: [], warnings: [] }
+      }
+      throw new Error(`Unexpected API call: ${init?.method ?? 'GET'} ${path}`)
+    })
+
+    const { container } = renderPage()
+    await waitFor(() => expect(screen.queryByText('項目設定を読み込んでいます。')).toBeNull())
+    const fileInput = container.querySelector<HTMLInputElement>('input[type="file"]') as HTMLInputElement
+    fireEvent.change(fileInput, {
+      target: { files: [new File(['sheet-a'], 'a.png', { type: 'image/png' })] },
+    })
+    await waitFor(() => expect(sent).toEqual(['sheet-a']))
+    await waitFor(() => expect(screen.queryByText(/用紙をOCRで読み取っています/)).toBeNull())
+
+    fireEvent.change(fileInput, {
+      target: { files: [new File(['sheet-b'], 'b.png', { type: 'image/png' })] },
+    })
+    fireEvent.click(await screen.findByRole('button', { name: 'もう一度読み取る' }))
+
+    await waitFor(() => expect(sent).toEqual(['sheet-a', 'sheet-b', 'sheet-b']))
+  })
+
   it('creates reviewed consent candidates in Field through CourseBoard', async () => {
     api.json.mockImplementation(async (path: string, init?: RequestInit) => {
       if (path === '/v1/course/customer-reception-fields' && !init?.method) {
