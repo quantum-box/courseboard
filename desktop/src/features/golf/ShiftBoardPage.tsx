@@ -192,15 +192,34 @@ function employmentStatusLabel(status: string) {
 /**
  * Whether the handed-out sheet prints anything for one day.
  *
- * The sheet answers one question — who is on the course that day — so a day
- * nobody works is left blank instead of carrying 休 (SCC-24). The screen keeps
- * showing every day as it is: that is where the desk reads who asked for what.
+ * The sheet answers one question — who is on the course that day — so it
+ * prints only what was decided: a shift in the month being printed (the
+ * confirmed one, or the plan when a plan is exported) or a round actually
+ * assigned. A day that only carries somebody's request used to be filled in
+ * from the request, which handed an undecided month round under the shift
+ * sheet's name with 可 meaning "said they could come" (SCC-43).
  *
- * Days nobody has filed for are blank for the same reason, and that is why a
- * row with nothing printed on it is dropped rather than handed round empty.
+ * A decided day nobody works is blank rather than 休 (SCC-24). The screen
+ * keeps showing every day as it is: that is where the desk reads who asked
+ * for what.
  */
 function printsOnTheSheet(cell: ShiftCell) {
-  return cell.kind !== 'off' && cell.kind !== 'none'
+  const decided = cell.confirmed !== null || cell.assignments > 0
+  return decided && cell.kind !== 'off' && cell.kind !== 'none'
+}
+
+/**
+ * Why a sheet would come out with nothing to hand round, if it would.
+ *
+ * Two different reasons that need different words: a month nobody has
+ * confirmed yet is not a month nobody works.
+ */
+function emptySheetReason(source: ShiftPrintSource, document: ShiftExportDocument) {
+  if (source.kind === 'confirmed' && source.shifts.length === 0) {
+    return 'shifts:export.notConfirmed' as const
+  }
+  if (document.rows.length === 0) return 'shifts:export.emptyMonth' as const
+  return null
 }
 
 function exportWeekend(date: string): ShiftExportWeekend {
@@ -661,8 +680,9 @@ export function ShiftBoardPage() {
   ])
 
   const printBoard = useCallback((source: ShiftPrintSource) => {
-    if (buildSheet(source).rows.length === 0) {
-      showToast({ tone: 'info', message: t('shifts:export.emptyMonth') })
+    const reason = emptySheetReason(source, buildSheet(source))
+    if (reason) {
+      showToast({ tone: 'info', message: t(reason) })
       return
     }
     // The printable table is rendered in a body-level portal. Flush it before
@@ -680,8 +700,9 @@ export function ShiftBoardPage() {
   ) => {
     try {
       const document = buildSheet(source)
-      if (document.rows.length === 0) {
-        showToast({ tone: 'info', message: t('shifts:export.emptyMonth') })
+      const reason = emptySheetReason(source, document)
+      if (reason) {
+        showToast({ tone: 'info', message: t(reason) })
         return
       }
       const filename = `${exportFileStem(source)}.${format}`
