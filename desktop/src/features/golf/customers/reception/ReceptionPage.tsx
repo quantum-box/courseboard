@@ -1457,7 +1457,6 @@ export function ReceptionFieldSettingsPanel({
     if (invalidCustomKey || invalidConsent) return
     setSaving(true)
     try {
-      if (pendingConsentItems.length > 0 && !await createProposedConsentItems()) return
       const next = await saveReceptionFields(drafts.map(field => ({
         fieldKey: field.fieldKey.trim(),
         kind: field.kind,
@@ -1471,6 +1470,9 @@ export function ReceptionFieldSettingsPanel({
         sortOrder: field.sortOrder,
         options: field.fieldType === 'select' ? field.options : [],
       })))
+      // Consent creation validates against the stored field schema. Persist
+      // removed/disabled fields first so valid replacements fit the column limit.
+      if (pendingConsentItems.length > 0 && !await createProposedConsentItems()) return
       setDrafts(cloneReceptionFields(next))
       onSaved(next)
       setProposalActive(false)

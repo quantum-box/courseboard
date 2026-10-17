@@ -71,8 +71,10 @@ describe('ReceptionFieldsPage analysis proposal', () => {
   it('saves manual and OCR consent items together with the top save button, retaining failures for retry', async () => {
     let failManual = true
     const created: string[] = []
+    let fieldsSaved = false
     api.json.mockImplementation(async (path: string, init?: RequestInit) => {
       if (path === '/v1/course/customer-reception-fields') {
+        if (init?.method === 'PUT') fieldsSaved = true
         return { items: DEFAULT_RECEPTION_FIELDS }
       }
       if (path === '/v1/course/customer-consent-items?includeInactive=true') return { items: [] }
@@ -82,6 +84,7 @@ describe('ReceptionFieldsPage analysis proposal', () => {
       }
       if (path === '/v1/course/customer-consent-items' && init?.method === 'POST') {
         const body = JSON.parse(String(init.body))
+        expect(fieldsSaved).toBe(true)
         if (body.label === '追加の同意' && failManual) throw new Error('temporary failure')
         created.push(body.label)
         return { id: body.consentKey, active: true, ...body }
@@ -103,10 +106,10 @@ describe('ReceptionFieldsPage analysis proposal', () => {
     await waitFor(() => expect(toast.show).toHaveBeenCalledWith(expect.objectContaining({ title: '同意項目を作成できませんでした' })))
     expect(screen.getByDisplayValue('追加の同意')).toBeTruthy()
     expect(created).toEqual(['個人情報'])
-    expect(api.json.mock.calls.some(([, init]) => init?.method === 'PUT')).toBe(false)
+    expect(api.json.mock.calls.some(([, init]) => init?.method === 'PUT')).toBe(true)
     failManual = false
     fireEvent.click(save)
-    await waitFor(() => expect(api.json.mock.calls.some(([, init]) => init?.method === 'PUT')).toBe(true))
+    await waitFor(() => expect(toast.show).toHaveBeenCalledWith(expect.objectContaining({ message: '受付票の項目設定を保存しました' })))
     expect(created).toEqual(['個人情報', '追加の同意'])
     await waitFor(() => expect(screen.queryByDisplayValue('追加の同意')).toBeNull())
   })
