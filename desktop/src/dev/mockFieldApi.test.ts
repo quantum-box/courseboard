@@ -528,5 +528,6 @@ describe('mockFieldApi', () => {
     expect(nextMockTermsVersion(' 9 ')).toBe('10')
     expect(nextMockTermsVersion('2024-04')).toBe('2024-04.1')
     expect(nextMockTermsVersion('')).toBe('1')
+    expect(nextMockTermsVersion('4294967295')).toBe('4294967295.1')
   })
 })

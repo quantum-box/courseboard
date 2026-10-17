@@ -47,10 +47,18 @@ pub struct CustomerConsentItemPatch {
 /// never saw. Numeric versions count up; anything else gets a revision suffix.
 pub fn next_terms_version(current: &str) -> String {
     let current = current.trim();
-    match current.parse::<u32>() {
-        Ok(number) => (number + 1).to_string(),
-        Err(_) if current.is_empty() => "1".to_string(),
-        Err(_) => format!("{current}.1"),
+    if current.is_empty() {
+        return "1".to_string();
+    }
+    // A number too large to count up is treated like any other opaque
+    // version: wrapping would hand new wording an older-looking version.
+    match current
+        .parse::<u32>()
+        .ok()
+        .and_then(|number| number.checked_add(1))
+    {
+        Some(next) => next.to_string(),
+        None => format!("{current}.1"),
     }
 }
 
@@ -93,5 +101,7 @@ mod terms_version_tests {
         assert_eq!(next_terms_version(" 9 "), "10");
         assert_eq!(next_terms_version("2024-04"), "2024-04.1");
         assert_eq!(next_terms_version(""), "1");
+        assert_eq!(next_terms_version("4294967295"), "4294967295.1");
+        assert_eq!(next_terms_version("99999999999"), "99999999999.1");
     }
 }

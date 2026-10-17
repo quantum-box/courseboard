@@ -287,7 +287,8 @@ let mockReceptionConsentItems: MockReceptionConsentItem[] = [
 /** Mirrors the backend's `next_terms_version`: only a wholly numeric version counts up. */
 export function nextMockTermsVersion(current: string) {
   const trimmed = current.trim()
-  if (/^\d+$/.test(trimmed)) return String(Number(trimmed) + 1)
+  // The backend counts up a u32 and treats anything larger as opaque.
+  if (/^\d+$/.test(trimmed) && Number(trimmed) < 4294967295) return String(Number(trimmed) + 1)
   return trimmed ? `${trimmed}.1` : '1'
 }
 
