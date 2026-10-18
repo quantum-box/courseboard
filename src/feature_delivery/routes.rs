@@ -478,3 +478,58 @@ pub fn api_refs(key: &str) -> Vec<String> {
         .map(|(pattern, _)| format!("* {FIELD_PROXY_PREFIX}{pattern}"));
     routes.chain(proxied).collect()
 }
+
+const DATA_EXPORT_ROWS_PREFIX: &str = "/v1/course/data-exports/";
+const DATA_EXPORT_KEY_PREFIX: &str = "external:courseboard:";
+
+/// Export sources whose feature is narrower than the one their read action
+/// names: reception answers are the reception feature, not the whole ledger.
+const EXPORT_SOURCE_FEATURES: &[(&str, &str)] = &[
+    ("reception", "courseboard.customers.reception"),
+    ("receptionFields", "courseboard.customers.reception"),
+    ("receptionAnswers", "courseboard.customers.reception"),
+    ("cancellations", "courseboard.customers.cancellations"),
+    ("visitCheckins", "courseboard.tee_sheet.checkin"),
+    ("staff", "courseboard.staff"),
+];
+
+/// The feature that owns an action: of the features reading it, the one the
+/// others build on (the smallest requirement closure).
+pub fn feature_for_action(action: &str) -> Option<&'static FeatureDefinition> {
+    catalog::FEATURES
+        .iter()
+        .filter(|feature| feature.read_actions.contains(&action))
+        .min_by_key(|feature| super::required_closure(feature).len())
+}
+
+/// The feature an export source belongs to. The export endpoints call the
+/// source handlers in-process, so the router never sees the source's own
+/// route: this is where its feature is decided instead.
+pub fn export_source_feature(source_key: &str) -> Option<&'static FeatureDefinition> {
+    let key = source_key
+        .strip_prefix(DATA_EXPORT_KEY_PREFIX)
+        .unwrap_or(source_key);
+    if let Some((_, feature)) = EXPORT_SOURCE_FEATURES
+        .iter()
+        .find(|(source, _)| *source == key)
+    {
+        return catalog::feature(feature);
+    }
+    crate::course::domain::data_exports::data_export_objects()
+        .iter()
+        .find(|object| object.key == key)
+        .and_then(|object| feature_for_action(object.required_action()))
+}
+
+/// Features a request needs on top of its route's own.
+pub fn additional_features(method: &Method, path: &str) -> Vec<&'static FeatureDefinition> {
+    if *method != Method::GET && *method != Method::HEAD {
+        return Vec::new();
+    }
+    path.strip_prefix(DATA_EXPORT_ROWS_PREFIX)
+        .and_then(|rest| rest.strip_suffix("/rows"))
+        .filter(|key| !key.contains('/'))
+        .and_then(export_source_feature)
+        .into_iter()
+        .collect()
+}

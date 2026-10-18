@@ -413,6 +413,10 @@ fn guarded_app(state: AppState) -> Router {
         .route("/field-api/*path", any(|| async { "handler ran" }))
         .route("/healthz", any(|| async { "handler ran" }))
         .route(
+            "/v1/course/data-exports/:source_key/rows",
+            any(|| async { "handler ran" }),
+        )
+        .route(
             "/v1/course/feature-deliveries/evaluate",
             post(evaluate_feature_deliveries),
         )
@@ -609,4 +613,98 @@ async fn evaluate_rejects_keys_outside_the_catalog() {
         .await
         .unwrap();
     assert_eq!(response.status(), StatusCode::BAD_REQUEST);
+}
+
+// ─── Data exports: each source is its own feature ─────────────────────────
+
+#[test]
+fn every_export_source_belongs_to_a_feature() {
+    let keyless: Vec<&str> = crate::course::domain::data_exports::data_export_objects()
+        .iter()
+        .filter(|object| routes::export_source_feature(&object.key).is_none())
+        .map(|object| object.key.as_str())
+        .collect();
+    assert!(
+        keyless.is_empty(),
+        "export sources without a feature: {keyless:?}"
+    );
+    let key = |source: &str| routes::export_source_feature(source).map(|feature| feature.key);
+    assert_eq!(key("payroll"), Some("courseboard.caddies.payroll"));
+    assert_eq!(
+        key("external:courseboard:settlement"),
+        Some("courseboard.settlement")
+    );
+    assert_eq!(
+        key("receptionAnswers"),
+        Some("courseboard.customers.reception")
+    );
+    assert_eq!(key("courses"), Some("courseboard.courses"));
+    assert_eq!(key("visitCheckins"), Some("courseboard.tee_sheet.checkin"));
+}
+
+#[tokio::test]
+async fn export_rows_need_the_source_feature_as_well() {
+    let only_exports = [("courseboard.data_exports", true, true)];
+    let app = guarded_app(state(
+        Arc::new(ScriptedEvaluator::with(&only_exports)),
+        DeliveryEnforcement::Enforce,
+    ));
+    let response = app
+        .oneshot(request(
+            Method::GET,
+            "/v1/course/data-exports/settlement/rows",
+        ))
+        .await
+        .unwrap();
+    assert_eq!(response.status(), StatusCode::FORBIDDEN);
+
+    let with_source = [
+        ("courseboard.data_exports", true, true),
+        ("courseboard.settlement", true, true),
+    ];
+    let app = guarded_app(state(
+        Arc::new(ScriptedEvaluator::with(&with_source)),
+        DeliveryEnforcement::Enforce,
+    ));
+    let response = app
+        .oneshot(request(
+            Method::GET,
+            "/v1/course/data-exports/settlement/rows",
+        ))
+        .await
+        .unwrap();
+    assert_eq!(response.status(), StatusCode::OK);
+}
+
+fn headers() -> axum::http::HeaderMap {
+    let mut headers = axum::http::HeaderMap::new();
+    headers.insert(AUTHORIZATION, format!("Bearer {TOKEN}").parse().unwrap());
+    headers.insert("x-operator-id", TENANT.parse().unwrap());
+    headers
+}
+
+#[tokio::test]
+async fn the_export_catalogue_offers_only_provided_sources_under_enforcement() {
+    let values = [
+        ("courseboard.data_exports", true, true),
+        ("courseboard.settlement", true, true),
+        ("courseboard.caddies.payroll", false, true),
+    ];
+    let sources = ["settlement", "payroll", "unknown"];
+    let guard = FeatureDeliveryGuard::new(
+        Arc::new(ScriptedEvaluator::with(&values)),
+        DeliveryEnforcement::Enforce,
+    );
+    assert_eq!(
+        guard.provided_export_sources(&sources, &headers()).await,
+        vec![true, false, false]
+    );
+    let shadow = FeatureDeliveryGuard::new(
+        Arc::new(ScriptedEvaluator::with(&values)),
+        DeliveryEnforcement::Shadow,
+    );
+    assert_eq!(
+        shadow.provided_export_sources(&sources, &headers()).await,
+        vec![true, true, true]
+    );
 }

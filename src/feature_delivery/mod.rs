@@ -302,7 +302,7 @@ impl IntoResponse for DeliveryDenial {
 
 /// The feature followed by everything it requires, transitively, as catalog
 /// keys in a stable order without repeats.
-fn required_closure(feature: &'static FeatureDefinition) -> Vec<&'static str> {
+pub(crate) fn required_closure(feature: &FeatureDefinition) -> Vec<&'static str> {
     let mut keys = vec![feature.key];
     let mut index = 0;
     while index < keys.len() {
@@ -390,6 +390,52 @@ impl FeatureDeliveryGuard {
     }
 }
 
+impl FeatureDeliveryGuard {
+    /// Which of these export sources the tenant's plan provides, in order.
+    /// Everything is kept unless enforcing, so `off` and `shadow` change
+    /// nothing; an unreadable decision keeps nothing.
+    pub async fn provided_export_sources(
+        &self,
+        source_keys: &[&str],
+        headers: &HeaderMap,
+    ) -> Vec<bool> {
+        if self.enforcement != DeliveryEnforcement::Enforce {
+            return vec![true; source_keys.len()];
+        }
+        let Ok(context) = FeatureFlagEvaluationContext::from_headers(headers) else {
+            return vec![false; source_keys.len()];
+        };
+        let data_exports = catalog::feature("courseboard.data_exports").expect("catalog feature");
+        let sources: Vec<Option<&'static FeatureDefinition>> = source_keys
+            .iter()
+            .map(|key| routes::export_source_feature(key))
+            .collect();
+        let mut features = vec![data_exports];
+        for feature in sources.iter().flatten() {
+            if !features.iter().any(|seen| seen.key == feature.key) {
+                features.push(feature);
+            }
+        }
+        let decisions: HashMap<&str, bool> = features
+            .iter()
+            .map(|feature| feature.key)
+            .zip(
+                self.evaluate(&features, &context)
+                    .await
+                    .into_iter()
+                    .map(|d| d.is_ok()),
+            )
+            .collect();
+        sources
+            .iter()
+            .map(|source| match source {
+                Some(feature) => decisions[data_exports.key] && decisions[feature.key],
+                None => false,
+            })
+            .collect()
+    }
+}
+
 fn evaluation_context(req: &Request<Body>) -> Option<FeatureFlagEvaluationContext> {
     let bearer = crate::course_authz::bearer_from(req)?;
     let header = |name: &str| {
@@ -433,8 +479,15 @@ pub async fn require_feature_delivery(
                     _ => AppError::Unauthorized.into_response(),
                 };
             }
+            let mut features = vec![feature];
+            features.extend(routes::additional_features(req.method(), req.uri().path()));
             let decision = match evaluation_context(&req) {
-                Some(context) => guard.evaluate(&[feature], &context).await.remove(0),
+                Some(context) => guard
+                    .evaluate(&features, &context)
+                    .await
+                    .into_iter()
+                    .find(Result::is_err)
+                    .unwrap_or(Ok(())),
                 None => Err(DeliveryDenial::Unavailable),
             };
             (Some(feature.key), decision)

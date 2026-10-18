@@ -55,9 +55,19 @@ pub async fn list_data_export_objects(
     let objects = DataExportsUseCase::new(state.data_exports.clone())
         .objects(credentials(&state, &headers)?)
         .await?;
+    // Offer only the sources whose feature the tenant's plan provides; the
+    // rows endpoint refuses the others at the delivery guard.
+    let keys: Vec<&str> = objects.iter().map(|object| object.key.as_str()).collect();
+    let provided = state
+        .feature_delivery()
+        .provided_export_sources(&keys, &headers)
+        .await;
+    let objects = objects
+        .into_iter()
+        .zip(provided)
+        .filter_map(|(object, provided)| provided.then_some(object));
     Ok(Json(DataExportObjectList {
         items: objects
-            .into_iter()
             .map(|object| DataExportObjectDto {
                 requires_month: object.table == "computed",
                 key: format!("external:courseboard:{}", object.key),
