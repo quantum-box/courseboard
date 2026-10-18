@@ -422,6 +422,17 @@ pub async fn require_feature_delivery(
         RequestFeature::Exempt(_) => return next.run(req).await,
         RequestFeature::Unclassified => (None, Err(DeliveryDenial::UnclassifiedRoute)),
         RequestFeature::Required(feature) => {
+            // Verified here rather than trusted from an outer layer: the action
+            // gate can be switched off (`COURSEBOARD_DISABLE_ACTION_AUTHZ`), and
+            // an unverified bearer must never buy an outbound request to Core.
+            let verified = crate::course_authz::bearer_from(&req)
+                .is_some_and(|bearer| state.token_verifier_for_authz().verify(bearer).is_ok());
+            if !verified {
+                return match guard.enforcement() {
+                    DeliveryEnforcement::Shadow => next.run(req).await,
+                    _ => AppError::Unauthorized.into_response(),
+                };
+            }
             let decision = match evaluation_context(&req) {
                 Some(context) => guard.evaluate(&[feature], &context).await.remove(0),
                 None => Err(DeliveryDenial::Unavailable),

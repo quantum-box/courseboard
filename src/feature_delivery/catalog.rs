@@ -141,7 +141,7 @@ pub const FEATURES: &[FeatureDefinition] = &[
         ui: ["settings/membership-plans", "settings/membership-discounts", "settings/membership-play-windows"]),
     feature!("courseboard.caddies", "The caddie roster and which courses each caddie works.",
         read: [LIST_CADDIES], manage: [MANAGE_CADDIES],
-        requires: [], gates: [],
+        requires: ["courseboard.courses"], gates: [],
         ui: ["golf/caddies", "golf/caddies/:caddieId"]),
     feature!("courseboard.caddies.dispatch", "Putting caddies on rounds, by hand or by the auto-placement, and duty rotas.",
         read: [LIST_CADDIE_ASSIGNMENTS], manage: [MANAGE_CADDIE_ASSIGNMENTS],
@@ -153,7 +153,11 @@ pub const FEATURES: &[FeatureDefinition] = &[
         ui: []),
     feature!("courseboard.caddies.shifts", "Shift plans, the rules they are generated under, and the sync to Field.",
         read: [LIST_SHIFTS], manage: [MANAGE_SHIFTS],
-        requires: ["courseboard.caddies", "courseboard.caddies.availability"], gates: [],
+        requires: [
+            "courseboard.caddies",
+            "courseboard.caddies.availability",
+            "courseboard.caddies.dispatch"
+        ], gates: [],
         ui: ["golf/caddies/shifts"]),
     feature!("courseboard.caddies.insights", "Attendance, supply, reinforcement, and rating figures.",
         read: [LIST_CADDIE_INSIGHTS], manage: [],

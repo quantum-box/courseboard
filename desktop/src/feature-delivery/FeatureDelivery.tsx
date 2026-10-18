@@ -14,7 +14,7 @@ import {
   type FeatureDeliveryValue,
   evaluateFeatureDeliveries,
 } from './feature-delivery-api'
-import { FEATURE_KEYS, routeFeatureKey } from './routeFeatures'
+import { FEATURE_KEYS, routeFeatureKeys } from './routeFeatures'
 
 /**
  * Whether the tenant's plan provides each CourseBoard feature.
@@ -142,11 +142,17 @@ export function deliveryDecision(
   return value.enabled
 }
 
+/** All of a route's features: `false` if any is refused, `null` if any is unknown. */
 export function routeDeliveryDecision(
   route: string,
   context: Omit<FeatureDeliveryContextValue, 'refresh'> | null,
-) {
-  return deliveryDecision(routeFeatureKey(route), context)
+): boolean | null {
+  const keys = routeFeatureKeys(route)
+  if (!keys) return true
+  const decisions = keys.map(key => deliveryDecision(key, context))
+  if (decisions.includes(false)) return false
+  if (decisions.includes(null)) return null
+  return true
 }
 
 export function useOptionalFeatureDelivery() {

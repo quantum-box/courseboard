@@ -51,6 +51,17 @@ describe('deliveryDecision', () => {
     expect(routeDeliveryDecision('golf/ledger', failed)).toBeNull()
   })
 
+  it('closes a screen when any feature it loads is not provided', () => {
+    const context = enforced({
+      'courseboard.caddies.shifts': { enabled: true, resolved: true },
+      'courseboard.caddies': { enabled: true, resolved: true },
+      'courseboard.caddies.availability': { enabled: true, resolved: true },
+      'courseboard.courses': { enabled: true, resolved: true },
+      'courseboard.caddies.dispatch': { enabled: false, resolved: true },
+    })
+    expect(routeDeliveryDecision('golf/caddies/shifts', context)).toBe(false)
+  })
+
   it('gates nothing without a provider', () => {
     expect(routeDeliveryDecision('golf/ledger', null)).toBe(true)
   })

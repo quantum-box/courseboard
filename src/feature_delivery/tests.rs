@@ -319,6 +319,7 @@ async fn a_feature_is_provided_only_with_everything_it_requires() {
         ("courseboard.caddies.payroll", true, true),
         ("courseboard.caddies.rank_fees", true, true),
         ("courseboard.caddies", true, true),
+        ("courseboard.courses", true, true),
     ];
     assert_eq!(decide(ScriptedEvaluator::with(&all), key).await, Ok(()));
 
@@ -326,6 +327,7 @@ async fn a_feature_is_provided_only_with_everything_it_requires() {
         ("courseboard.caddies.payroll", true, true),
         ("courseboard.caddies.rank_fees", true, true),
         ("courseboard.caddies", false, true),
+        ("courseboard.courses", true, true),
     ];
     assert_eq!(
         decide(ScriptedEvaluator::with(&without_parent), key).await,
@@ -507,6 +509,26 @@ async fn enforce_refuses_an_unmapped_field_proxy_path_and_skips_exempt_ones() {
     let response = app.oneshot(request(Method::GET, "/healthz")).await.unwrap();
     assert_eq!(response.status(), StatusCode::OK);
     assert_eq!(evaluator.calls.load(Ordering::SeqCst), 0);
+}
+
+#[tokio::test]
+async fn an_unverified_bearer_never_reaches_core() {
+    for (enforcement, status) in [
+        (DeliveryEnforcement::Enforce, StatusCode::UNAUTHORIZED),
+        (DeliveryEnforcement::Shadow, StatusCode::OK),
+    ] {
+        let evaluator = Arc::new(ScriptedEvaluator::with(&[]));
+        let app = guarded_app(state(evaluator.clone(), enforcement));
+        let request = Request::builder()
+            .uri("/v1/course/tee-sheet")
+            .header(AUTHORIZATION, "Bearer forged")
+            .header("x-operator-id", TENANT)
+            .body(Body::empty())
+            .unwrap();
+        let response = app.oneshot(request).await.unwrap();
+        assert_eq!(response.status(), status, "{enforcement:?}");
+        assert_eq!(evaluator.calls.load(Ordering::SeqCst), 0, "{enforcement:?}");
+    }
 }
 
 #[tokio::test]

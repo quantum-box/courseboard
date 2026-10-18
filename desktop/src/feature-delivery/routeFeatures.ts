@@ -7,6 +7,8 @@
  * `routeFeatures.test.ts`, so a screen cannot ship without a key.
  */
 
+import { FIELD_ACTIONS, routeActionRequirement } from '../auth/capabilityRoutes'
+
 export const FEATURE_KEYS = Object.freeze([
   'courseboard.tee_sheet',
   'courseboard.tee_sheet.slot_overrides',
@@ -131,4 +133,55 @@ export function routeFeatureKey(route: string): FeatureKey | null | undefined {
   if (literal) return ROUTE_FEATURES[literal]
   const parameterised = patterns.find(pattern => pattern.includes(':') && patternMatches(pattern, target))
   return parameterised ? ROUTE_FEATURES[parameterised] : undefined
+}
+
+/**
+ * The feature whose API answers for each action a screen needs to mount.
+ *
+ * A screen like the ledger loads caddie assignments and shifts beside the tee
+ * sheet; IAM already demands those actions (`routeActionRequirement`), so the
+ * plan has to provide their features too, or the page opens and its loaders
+ * answer 403. Each entry is checked against the manifest's `requiredActions`.
+ */
+export const ACTION_FEATURES: Readonly<Record<string, FeatureKey>> = Object.freeze({
+  [FIELD_ACTIONS.listTeeSheet]: 'courseboard.tee_sheet',
+  [FIELD_ACTIONS.listSlotOverrides]: 'courseboard.tee_sheet.slot_overrides',
+  [FIELD_ACTIONS.listCourses]: 'courseboard.courses',
+  [FIELD_ACTIONS.listProducts]: 'courseboard.products',
+  [FIELD_ACTIONS.listReservationPolicy]: 'courseboard.reservation_policy',
+  [FIELD_ACTIONS.listExtensionStatus]: 'courseboard.reservation_policy',
+  [FIELD_ACTIONS.listCustomers]: 'courseboard.customers',
+  [FIELD_ACTIONS.manageCustomers]: 'courseboard.customers',
+  [FIELD_ACTIONS.listMembership]: 'courseboard.membership',
+  [FIELD_ACTIONS.fieldListMembership]: 'courseboard.membership',
+  [FIELD_ACTIONS.listCaddies]: 'courseboard.caddies',
+  [FIELD_ACTIONS.listCaddieAssignments]: 'courseboard.caddies.dispatch',
+  [FIELD_ACTIONS.listCaddieAvailability]: 'courseboard.caddies.availability',
+  [FIELD_ACTIONS.listShifts]: 'courseboard.caddies.shifts',
+  [FIELD_ACTIONS.listCaddieInsights]: 'courseboard.caddies.insights',
+  [FIELD_ACTIONS.listCaddieRankFees]: 'courseboard.caddies.rank_fees',
+  [FIELD_ACTIONS.listPayroll]: 'courseboard.caddies.payroll',
+  [FIELD_ACTIONS.listHrm]: 'courseboard.staff',
+  [FIELD_ACTIONS.listBudgets]: 'courseboard.budgets',
+  [FIELD_ACTIONS.listSettlement]: 'courseboard.settlement',
+  [FIELD_ACTIONS.calculateFees]: 'courseboard.fee_simulator',
+  [FIELD_ACTIONS.listReservationReports]: 'courseboard.reservation_report_import',
+  [FIELD_ACTIONS.listBridgeDefinitions]: 'courseboard.data_imports',
+  [FIELD_ACTIONS.listBridgeExportDefinitions]: 'courseboard.data_exports',
+})
+
+/**
+ * Every feature a route needs: its own, plus the feature behind each action
+ * it must hold to mount. `null` exempt, `undefined` unknown, as
+ * `routeFeatureKey`. The server ANDs each feature's own requirements.
+ */
+export function routeFeatureKeys(route: string): readonly FeatureKey[] | null | undefined {
+  const own = routeFeatureKey(route)
+  if (own === null || own === undefined) return own
+  const keys = new Set<FeatureKey>([own])
+  for (const action of routeActionRequirement(route)?.allOf ?? []) {
+    const key = ACTION_FEATURES[action]
+    if (key) keys.add(key)
+  }
+  return [...keys]
 }
