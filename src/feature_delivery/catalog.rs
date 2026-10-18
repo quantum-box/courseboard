@@ -62,6 +62,28 @@ pub struct FeatureDefinition {
     /// Release flags that must be on as well. Empty for a stable feature:
     /// the contract and IAM decide it alone.
     pub release_gates: &'static [&'static str],
+    /// Free-form notes for people reading the catalog, as `(key, value)`.
+    /// Carried into the manifest when present; never part of a decision,
+    /// the feature's identity, or its digest. Limits match Core's
+    /// `ProductFeatures`: see [`ANNOTATION_LIMITS`].
+    pub annotations: &'static [(&'static str, &'static str)],
+}
+
+/// Core's limits on `annotations`: at most this many keys, each matching
+/// `[a-z0-9][a-z0-9._/-]{0,62}`, each value at most this many bytes.
+pub const ANNOTATION_LIMITS: (usize, usize) = (32, 1024);
+
+/// Whether an annotation key has the shape Core accepts.
+pub fn is_annotation_key(key: &str) -> bool {
+    let mut chars = key.chars();
+    let Some(first) = chars.next() else {
+        return false;
+    };
+    key.len() <= 63
+        && (first.is_ascii_lowercase() || first.is_ascii_digit())
+        && chars.all(|c| {
+            c.is_ascii_lowercase() || c.is_ascii_digit() || matches!(c, '.' | '_' | '/' | '-')
+        })
 }
 
 impl FeatureDefinition {
@@ -82,7 +104,8 @@ pub fn feature(key: &str) -> Option<&'static FeatureDefinition> {
 macro_rules! feature {
     ($key:literal, $description:literal,
      read: [$($read:expr),*], manage: [$($manage:expr),*],
-     requires: [$($requires:literal),*], gates: [$($gate:expr),*]) => {
+     requires: [$($requires:literal),*], gates: [$($gate:expr),*]
+     $(, annotations: [$(($note_key:literal, $note_value:literal)),*])?) => {
         FeatureDefinition {
             key: $key,
             description: $description,
@@ -90,6 +113,7 @@ macro_rules! feature {
             manage_actions: &[$($manage),*],
             required_feature_keys: &[$($requires),*],
             release_gates: &[$($gate),*],
+            annotations: &[$($(($note_key, $note_value)),*)?],
         }
     };
 }
@@ -256,6 +280,7 @@ pub fn render_manifest() -> String {
             "requiredFeatureKeys",
             feature.required_feature_keys,
         );
+        annotations(&mut out, feature.annotations);
         line(&mut out, 4, "operationBindings:");
         line(&mut out, 4, "- operation: read");
         list(&mut out, 6, "requiredActions", feature.read_actions);
@@ -281,6 +306,34 @@ fn list(out: &mut String, indent: usize, name: &str, items: &[&str]) {
 
 /// Double-quote a scalar. Every value here is plain ASCII text, so escaping
 /// the quote and the backslash is enough for YAML.
+/// The `annotations` map, in declaration order; omitted when empty.
+pub(crate) fn annotations(out: &mut String, notes: &[(&str, &str)]) {
+    if notes.is_empty() {
+        return;
+    }
+    out.push_str("    annotations:\n");
+    for (key, value) in notes {
+        out.push_str(&format!("      {}: {}\n", quote(key), quote(value)));
+    }
+}
+
+/// A YAML double-quoted scalar. Backslash, quote, and every control
+/// character are escaped, so a free-form annotation value cannot break out
+/// of its line.
 fn quote(value: &str) -> String {
-    format!("\"{}\"", value.replace('\\', "\\\\").replace('"', "\\\""))
+    let mut quoted = String::with_capacity(value.len() + 2);
+    quoted.push('"');
+    for c in value.chars() {
+        match c {
+            '\\' => quoted.push_str("\\\\"),
+            '"' => quoted.push_str("\\\""),
+            '\n' => quoted.push_str("\\n"),
+            '\r' => quoted.push_str("\\r"),
+            '\t' => quoted.push_str("\\t"),
+            c if c.is_control() => quoted.push_str(&format!("\\u{:04x}", c as u32)),
+            c => quoted.push(c),
+        }
+    }
+    quoted.push('"');
+    quoted
 }

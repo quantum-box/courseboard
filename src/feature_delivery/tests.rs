@@ -1159,3 +1159,65 @@ fn member_pricing_in_the_simulator_needs_the_membership_feature() {
     let simulator = catalog::feature("courseboard.fee_simulator").unwrap();
     assert!(super::required_closure(simulator).contains(&"courseboard.membership"));
 }
+
+#[test]
+fn annotations_stay_within_cores_limits() {
+    let (max_keys, max_value_bytes) = catalog::ANNOTATION_LIMITS;
+    for feature in FEATURES {
+        assert!(
+            feature.annotations.len() <= max_keys,
+            "{} has more than {max_keys} annotations",
+            feature.key
+        );
+        let mut seen = HashSet::new();
+        for (key, value) in feature.annotations {
+            assert!(
+                catalog::is_annotation_key(key),
+                "{}: bad annotation key {key:?}",
+                feature.key
+            );
+            assert!(
+                seen.insert(key),
+                "{}: duplicate annotation {key}",
+                feature.key
+            );
+            assert!(
+                value.len() <= max_value_bytes,
+                "{}: annotation {key} is over {max_value_bytes} bytes",
+                feature.key
+            );
+        }
+    }
+}
+
+#[test]
+fn annotation_keys_follow_cores_pattern() {
+    for key in [
+        "a",
+        "owner",
+        "docs/runbook",
+        "v1.notes_x-y",
+        &"a".repeat(63),
+    ] {
+        assert!(catalog::is_annotation_key(key), "{key}");
+    }
+    for key in ["", "Owner", "-lead", ".x", "a b", "日本", &"a".repeat(64)] {
+        assert!(!catalog::is_annotation_key(key), "{key}");
+    }
+}
+
+#[test]
+fn annotations_render_as_a_quoted_map_and_are_omitted_when_empty() {
+    let mut out = String::new();
+    catalog::annotations(&mut out, &[]);
+    assert!(out.is_empty());
+
+    catalog::annotations(
+        &mut out,
+        &[("owner", "desk team"), ("note", "line one\nline \"two\"\\")],
+    );
+    assert_eq!(
+        out,
+        "    annotations:\n      \"owner\": \"desk team\"\n      \"note\": \"line one\\nline \\\"two\\\"\\\\\"\n"
+    );
+}

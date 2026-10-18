@@ -160,6 +160,7 @@ CourseBoard のガードは、`/field-api` の後ろのパスで分類する。�
 
 - 正本: `src/feature_delivery/catalog.rs`。key、説明、read / manage の action、`requiredFeatureKeys`、`releaseGates`、画面ルート。
 - 生成物: `.tachyon/manifests/courseboard-product-features.yml`（`apiVersion: apps.tachy.one/v1alpha`、`kind: ProductFeatures`、`metadata.tenantId` は CourseBoard の権利者テナント）。各機能は key、説明、delivery key、`requiredActions`、`releaseGates`、`requiredFeatureKeys`、`operationBindings` を持つ。空の項目は書き出さない。ルート・画面との対応（`apiRefs` / `uiRefs`）は載せない。実行時の判定に使わない記述用の情報なので、正本は `course_authz::ROUTES` と `routes.rs`（API）、`App.tsx` と `routeFeatures.ts`（画面）に置く。`catalogFeatureId` と `digest` は、取り込む側（Field / Core）が発行する。
+- 任意のメモ欄 `annotations`（文字列 → 文字列の map）を、機能ごとに持てる。制限は Core と同じで、key は最大 32 個、key の形式は `[a-z0-9][a-z0-9._/-]{0,62}`、値は最大 1 KiB。空なら書き出さない。判定・識別・digest には使わない。
 - 再生成: `COURSEBOARD_UPDATE_FEATURE_MANIFEST=1 cargo test feature_delivery`。生成結果とファイルが違うと CI が落ちる。
 - apply（受け側ができたら）:
 
