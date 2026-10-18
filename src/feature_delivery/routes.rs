@@ -521,15 +521,41 @@ pub fn export_source_feature(source_key: &str) -> Option<&'static FeatureDefinit
         .and_then(|object| feature_for_action(object.required_action()))
 }
 
-/// Features a request needs on top of its route's own.
-pub fn additional_features(method: &Method, path: &str) -> Vec<&'static FeatureDefinition> {
+/// Features a request needs on top of its route's own, or `None` when the
+/// request names a source the guard cannot place (refused under enforcement).
+///
+/// The source key is percent-decoded the way axum's `Path` decodes it for the
+/// handler, so `%70ayroll` is judged as the `payroll` it will read.
+pub fn additional_features(method: &Method, path: &str) -> Option<Vec<&'static FeatureDefinition>> {
     if *method != Method::GET && *method != Method::HEAD {
-        return Vec::new();
+        return Some(Vec::new());
     }
-    path.strip_prefix(DATA_EXPORT_ROWS_PREFIX)
+    let Some(raw_key) = path
+        .strip_prefix(DATA_EXPORT_ROWS_PREFIX)
         .and_then(|rest| rest.strip_suffix("/rows"))
         .filter(|key| !key.contains('/'))
-        .and_then(export_source_feature)
-        .into_iter()
-        .collect()
+    else {
+        return Some(Vec::new());
+    };
+    let key = percent_decode(raw_key)?;
+    export_source_feature(&key).map(|feature| vec![feature])
+}
+
+/// Strict percent-decoding of one path segment; `None` on a malformed escape
+/// or bytes that are not UTF-8.
+pub fn percent_decode(segment: &str) -> Option<String> {
+    let bytes = segment.as_bytes();
+    let mut decoded = Vec::with_capacity(bytes.len());
+    let mut index = 0;
+    while index < bytes.len() {
+        if bytes[index] == b'%' {
+            let hex = segment.get(index + 1..index + 3)?;
+            decoded.push(u8::from_str_radix(hex, 16).ok()?);
+            index += 3;
+        } else {
+            decoded.push(bytes[index]);
+            index += 1;
+        }
+    }
+    String::from_utf8(decoded).ok()
 }

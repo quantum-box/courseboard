@@ -436,7 +436,10 @@ impl FeatureDeliveryGuard {
     }
 }
 
-fn evaluation_context(req: &Request<Body>) -> Option<FeatureFlagEvaluationContext> {
+fn evaluation_context(
+    req: &Request<Body>,
+    tenant_fallback: Option<String>,
+) -> Option<FeatureFlagEvaluationContext> {
     let bearer = crate::course_authz::bearer_from(req)?;
     let header = |name: &str| {
         req.headers()
@@ -448,16 +451,65 @@ fn evaluation_context(req: &Request<Body>) -> Option<FeatureFlagEvaluationContex
     };
     Some(FeatureFlagEvaluationContext::new(
         format!("Bearer {bearer}"),
-        header("x-operator-id")?,
+        header("x-operator-id").or(tenant_fallback)?,
         header("x-platform-id"),
     ))
+}
+
+const LEGACY_ADMIN_PREFIX: &str = "/admin/";
+const LEGACY_ADMIN_FORM_LIMIT: usize = 64 * 1024;
+
+fn tenant_field(pairs: Vec<(String, String)>) -> Option<String> {
+    pairs
+        .into_iter()
+        .find(|(name, _)| name == "tenant_id")
+        .map(|(_, value)| value.trim().to_string())
+        .filter(|value| !value.is_empty())
+}
+
+/// The legacy server-rendered admin names its tenant in a `tenant_id` query
+/// or form field instead of `x-operator-id`. Read it from there so the same
+/// tenant the handler acts on is the one Core is asked about; Core evaluates
+/// it under the caller's own bearer, so naming a tenant one does not belong
+/// to does not make a feature provided. The form body is buffered and put
+/// back for the handler.
+async fn legacy_admin_tenant(req: Request<Body>) -> (Request<Body>, Option<String>) {
+    if !req.uri().path().starts_with(LEGACY_ADMIN_PREFIX)
+        || req.headers().contains_key("x-operator-id")
+    {
+        return (req, None);
+    }
+    if let Some(tenant) = req
+        .uri()
+        .query()
+        .and_then(|query| serde_urlencoded::from_str(query).ok())
+        .and_then(tenant_field)
+    {
+        return (req, Some(tenant));
+    }
+    let is_form = req
+        .headers()
+        .get(axum::http::header::CONTENT_TYPE)
+        .and_then(|value| value.to_str().ok())
+        .is_some_and(|value| value.starts_with("application/x-www-form-urlencoded"));
+    if !is_form {
+        return (req, None);
+    }
+    let (parts, body) = req.into_parts();
+    let Ok(bytes) = axum::body::to_bytes(body, LEGACY_ADMIN_FORM_LIMIT).await else {
+        return (Request::from_parts(parts, Body::empty()), None);
+    };
+    let tenant = serde_urlencoded::from_bytes(&bytes)
+        .ok()
+        .and_then(tenant_field);
+    (Request::from_parts(parts, Body::from(bytes)), tenant)
 }
 
 /// Runs inside the action gate, right before the handler, so a request it
 /// sees has already passed IAM.
 pub async fn require_feature_delivery(
     State(state): State<AppState>,
-    req: Request<Body>,
+    mut req: Request<Body>,
     next: Next,
 ) -> Response {
     let guard = state.feature_delivery();
@@ -479,16 +531,24 @@ pub async fn require_feature_delivery(
                     _ => AppError::Unauthorized.into_response(),
                 };
             }
-            let mut features = vec![feature];
-            features.extend(routes::additional_features(req.method(), req.uri().path()));
-            let decision = match evaluation_context(&req) {
-                Some(context) => guard
-                    .evaluate(&features, &context)
-                    .await
-                    .into_iter()
-                    .find(Result::is_err)
-                    .unwrap_or(Ok(())),
-                None => Err(DeliveryDenial::Unavailable),
+            let (rebuilt, tenant_fallback) = legacy_admin_tenant(req).await;
+            req = rebuilt;
+            let decision = match (
+                routes::additional_features(req.method(), req.uri().path()),
+                evaluation_context(&req, tenant_fallback),
+            ) {
+                (None, _) => Err(DeliveryDenial::UnclassifiedRoute),
+                (Some(_), None) => Err(DeliveryDenial::Unavailable),
+                (Some(additional), Some(context)) => {
+                    let mut features = vec![feature];
+                    features.extend(additional);
+                    guard
+                        .evaluate(&features, &context)
+                        .await
+                        .into_iter()
+                        .find(Result::is_err)
+                        .unwrap_or(Ok(()))
+                }
             };
             (Some(feature.key), decision)
         }

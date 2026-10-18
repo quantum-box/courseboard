@@ -251,6 +251,7 @@ struct ScriptedEvaluator {
     fail: bool,
     calls: AtomicUsize,
     asked: Mutex<Vec<String>>,
+    tenants: Mutex<Vec<String>>,
 }
 
 impl ScriptedEvaluator {
@@ -286,9 +287,13 @@ impl FeatureDeliveryEvaluator for ScriptedEvaluator {
     async fn delivery_values(
         &self,
         delivery_keys: &[String],
-        _context: &FeatureFlagEvaluationContext,
+        context: &FeatureFlagEvaluationContext,
     ) -> Result<HashMap<String, DeliveryValue>, FeatureFlagProviderError> {
         self.calls.fetch_add(1, Ordering::SeqCst);
+        self.tenants
+            .lock()
+            .unwrap()
+            .push(context.operator_id().to_string());
         self.asked
             .lock()
             .unwrap()
@@ -416,6 +421,7 @@ fn guarded_app(state: AppState) -> Router {
             "/v1/course/data-exports/:source_key/rows",
             any(|| async { "handler ran" }),
         )
+        .route("/admin/caddies", any(|body: String| async move { body }))
         .route(
             "/v1/course/feature-deliveries/evaluate",
             post(evaluate_feature_deliveries),
@@ -707,4 +713,85 @@ async fn the_export_catalogue_offers_only_provided_sources_under_enforcement() {
         shadow.provided_export_sources(&sources, &headers()).await,
         vec![true, true, true]
     );
+}
+
+#[test]
+fn percent_decoding_is_strict() {
+    assert_eq!(
+        routes::percent_decode("%70ayroll").as_deref(),
+        Some("payroll")
+    );
+    assert_eq!(routes::percent_decode("plain").as_deref(), Some("plain"));
+    assert_eq!(routes::percent_decode("%zz"), None);
+    assert_eq!(routes::percent_decode("%7"), None);
+}
+
+#[tokio::test]
+async fn an_encoded_export_key_is_judged_as_the_source_it_reads() {
+    let only_exports = [("courseboard.data_exports", true, true)];
+    for path in [
+        "/v1/course/data-exports/%70ayroll/rows",
+        "/v1/course/data-exports/%zz/rows",
+        "/v1/course/data-exports/nonexistent/rows",
+    ] {
+        let app = guarded_app(state(
+            Arc::new(ScriptedEvaluator::with(&only_exports)),
+            DeliveryEnforcement::Enforce,
+        ));
+        let response = app.oneshot(request(Method::GET, path)).await.unwrap();
+        assert_eq!(response.status(), StatusCode::FORBIDDEN, "{path}");
+    }
+}
+
+fn admin_request(method: Method, uri: &str, body: &str) -> Request<Body> {
+    Request::builder()
+        .method(method)
+        .uri(uri)
+        .header(AUTHORIZATION, format!("Bearer {TOKEN}"))
+        .header("content-type", "application/x-www-form-urlencoded")
+        .body(Body::from(body.to_string()))
+        .unwrap()
+}
+
+#[tokio::test]
+async fn legacy_admin_is_judged_for_the_tenant_its_form_names() {
+    let provided = [
+        ("courseboard.caddies", true, true),
+        ("courseboard.courses", true, true),
+    ];
+    let evaluator = Arc::new(ScriptedEvaluator::with(&provided));
+    let app = guarded_app(state(evaluator.clone(), DeliveryEnforcement::Enforce));
+    let response = app
+        .clone()
+        .oneshot(admin_request(
+            Method::GET,
+            &format!("/admin/caddies?tenant_id={TENANT}"),
+            "",
+        ))
+        .await
+        .unwrap();
+    assert_eq!(response.status(), StatusCode::OK);
+
+    let form = format!("tenant_id={TENANT}&display_name=Sato");
+    let response = app
+        .oneshot(admin_request(Method::POST, "/admin/caddies", &form))
+        .await
+        .unwrap();
+    assert_eq!(response.status(), StatusCode::OK);
+    // The handler still reads the whole form the guard looked into.
+    let body = to_bytes(response.into_body(), 1 << 16).await.unwrap();
+    assert_eq!(body, form.as_bytes());
+    assert_eq!(*evaluator.tenants.lock().unwrap(), vec![TENANT, TENANT]);
+}
+
+#[tokio::test]
+async fn legacy_admin_without_a_tenant_is_unavailable() {
+    let evaluator = Arc::new(ScriptedEvaluator::with(&[]));
+    let app = guarded_app(state(evaluator.clone(), DeliveryEnforcement::Enforce));
+    let response = app
+        .oneshot(admin_request(Method::GET, "/admin/caddies", ""))
+        .await
+        .unwrap();
+    assert_eq!(response.status(), StatusCode::FORBIDDEN);
+    assert_eq!(evaluator.calls.load(Ordering::SeqCst), 0);
 }
