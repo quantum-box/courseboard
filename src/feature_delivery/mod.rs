@@ -441,42 +441,85 @@ impl FeatureDeliveryGuard {
 }
 
 impl FeatureDeliveryGuard {
-    /// Whether a common-import target may be used: `courseboard.data_imports`
-    /// and the target's own feature. Only `enforce` refuses; `shadow` logs.
+    /// Whether each common-import target may be used: `courseboard.data_imports`
+    /// and the target's own feature, decided from one Core batch however many
+    /// targets (or listed jobs) ask. Only `enforce` refuses; `shadow` logs and
+    /// allows; `off` asks nothing.
+    pub async fn import_target_decisions(
+        &self,
+        targets: &[&str],
+        headers: &HeaderMap,
+    ) -> HashMap<String, bool> {
+        let mut unique: Vec<&str> = Vec::new();
+        for target in targets {
+            if !unique.contains(target) {
+                unique.push(target);
+            }
+        }
+        if self.enforcement == DeliveryEnforcement::Off || unique.is_empty() {
+            return unique
+                .into_iter()
+                .map(|target| (target.to_string(), true))
+                .collect();
+        }
+        let data_imports = catalog::feature("courseboard.data_imports").expect("catalog feature");
+        let features: Vec<Option<&'static FeatureDefinition>> = unique
+            .iter()
+            .map(|target| routes::import_target_feature(target))
+            .collect();
+        let decisions: Vec<Result<(), DeliveryDenial>> =
+            match FeatureFlagEvaluationContext::from_headers(headers) {
+                Err(_) => vec![Err(DeliveryDenial::Unavailable); unique.len()],
+                Ok(context) => {
+                    let mut batch = vec![data_imports];
+                    for feature in features.iter().flatten() {
+                        if !batch.iter().any(|seen| seen.key == feature.key) {
+                            batch.push(feature);
+                        }
+                    }
+                    let results: HashMap<&str, Result<(), DeliveryDenial>> = batch
+                        .iter()
+                        .map(|feature| feature.key)
+                        .zip(self.evaluate(&batch, &context).await)
+                        .collect();
+                    features
+                        .iter()
+                        .map(|feature| match feature {
+                            None => Err(DeliveryDenial::UnclassifiedRoute),
+                            Some(feature) => results[data_imports.key].and(results[feature.key]),
+                        })
+                        .collect()
+                }
+            };
+        unique
+            .into_iter()
+            .zip(decisions)
+            .map(|(target, decision)| {
+                if let Err(denial) = decision {
+                    tracing::warn!(
+                        target,
+                        reason = denial.code(),
+                        enforcement = ?self.enforcement,
+                        "feature delivery denied for import target"
+                    );
+                }
+                let allowed = decision.is_ok() || self.enforcement != DeliveryEnforcement::Enforce;
+                (target.to_string(), allowed)
+            })
+            .collect()
+    }
+
+    /// [`Self::import_target_decisions`] for one target, as an error.
     pub async fn ensure_import_target(
         &self,
         target: &str,
         headers: &HeaderMap,
     ) -> Result<(), AppError> {
-        if self.enforcement == DeliveryEnforcement::Off {
-            return Ok(());
-        }
-        let data_imports = catalog::feature("courseboard.data_imports").expect("catalog feature");
-        let decision = match (
-            routes::import_target_feature(target),
-            FeatureFlagEvaluationContext::from_headers(headers),
-        ) {
-            (None, _) => Err(DeliveryDenial::UnclassifiedRoute),
-            (Some(_), Err(_)) => Err(DeliveryDenial::Unavailable),
-            (Some(feature), Ok(context)) => self
-                .evaluate(&[data_imports, feature], &context)
-                .await
-                .into_iter()
-                .find(Result::is_err)
-                .unwrap_or(Ok(())),
-        };
-        let Err(denial) = decision else {
-            return Ok(());
-        };
-        tracing::warn!(
-            target,
-            reason = denial.code(),
-            enforcement = ?self.enforcement,
-            "feature delivery denied for import target"
-        );
-        match self.enforcement {
-            DeliveryEnforcement::Enforce => Err(AppError::Forbidden),
-            _ => Ok(()),
+        let decisions = self.import_target_decisions(&[target], headers).await;
+        if decisions.get(target).copied().unwrap_or(false) {
+            Ok(())
+        } else {
+            Err(AppError::Forbidden)
         }
     }
 }

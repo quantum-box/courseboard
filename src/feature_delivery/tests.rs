@@ -998,3 +998,40 @@ async fn legacy_admin_refuses_a_query_and_form_that_disagree() {
     );
     assert_eq!(evaluator.calls.load(Ordering::SeqCst), 0);
 }
+
+#[tokio::test]
+async fn an_import_listing_asks_core_once_whatever_its_length() {
+    let values = [
+        ("courseboard.data_imports", true, true),
+        ("courseboard.customers", true, true),
+        ("courseboard.budgets", false, true),
+        ("courseboard.courses", true, true),
+    ];
+    let targets = [
+        "customer",
+        "dailyBudgets",
+        "customer",
+        "customer",
+        "dailyBudgets",
+        "unknown",
+    ];
+    let evaluator = Arc::new(ScriptedEvaluator::with(&values));
+    let guard = FeatureDeliveryGuard::new(evaluator.clone(), DeliveryEnforcement::Enforce);
+    let decisions = guard.import_target_decisions(&targets, &headers()).await;
+    assert_eq!(evaluator.calls.load(Ordering::SeqCst), 1);
+    assert!(decisions["customer"]);
+    assert!(!decisions["dailyBudgets"]);
+    assert!(!decisions["unknown"]);
+
+    // Shadow still asks once, and changes nothing.
+    let evaluator = Arc::new(ScriptedEvaluator::failing());
+    let shadow = FeatureDeliveryGuard::new(evaluator.clone(), DeliveryEnforcement::Shadow);
+    let decisions = shadow.import_target_decisions(&targets, &headers()).await;
+    assert_eq!(evaluator.calls.load(Ordering::SeqCst), 1);
+    assert!(decisions.values().all(|allowed| *allowed));
+
+    let evaluator = Arc::new(ScriptedEvaluator::failing());
+    let off = FeatureDeliveryGuard::new(evaluator.clone(), DeliveryEnforcement::Off);
+    off.import_target_decisions(&targets, &headers()).await;
+    assert_eq!(evaluator.calls.load(Ordering::SeqCst), 0);
+}

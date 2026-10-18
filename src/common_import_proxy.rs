@@ -112,8 +112,16 @@ fn parsed(status: StatusCode, bytes: &[u8]) -> Result<Value, AppError> {
     serde_json::from_slice(bytes)
         .map_err(|_| AppError::Provider("Field import response is invalid".into()))
 }
-async fn permitted(state: &AppState, headers: &HeaderMap, key: &str) -> Result<(), AppError> {
+async fn permitted_by_iam(
+    state: &AppState,
+    headers: &HeaderMap,
+    key: &str,
+) -> Result<(), AppError> {
     credentials(state, headers)?.require(target(key)?.0).await?;
+    Ok(())
+}
+async fn permitted(state: &AppState, headers: &HeaderMap, key: &str) -> Result<(), AppError> {
+    permitted_by_iam(state, headers, key).await?;
     // The router only sees `/v1/course/data-imports/*`; the target's own
     // product feature is checked here, beside its IAM action.
     state
@@ -149,12 +157,24 @@ pub async fn proxy(
         )
         .await?;
         let value = parsed(status, &bytes)?;
+        let listed = value["items"].as_array().cloned().unwrap_or_default();
+        // One delivery batch for the whole catalogue, not one per target.
+        let keys: Vec<&str> = listed
+            .iter()
+            .filter_map(|item| item["key"].as_str())
+            .filter(|key| target(key).is_ok())
+            .collect();
+        let delivered = state
+            .feature_delivery()
+            .import_target_decisions(&keys, headers)
+            .await;
         let mut items = Vec::new();
-        for mut item in value["items"].as_array().cloned().unwrap_or_default() {
+        for mut item in listed.iter().cloned() {
             let key = item["key"].as_str().unwrap_or_default().to_owned();
             if let Ok((_, label)) = target(&key) {
                 if item["import"]["writable"] == true
-                    && permitted(&state, headers, &key).await.is_ok()
+                    && delivered.get(&key).copied().unwrap_or(false)
+                    && permitted_by_iam(&state, headers, &key).await.is_ok()
                 {
                     item["label"] = json!(label);
                     items.push(item);
@@ -167,18 +187,25 @@ pub async fn proxy(
         let (status, _, bytes) =
             upstream(&state, headers, method, "/v1/bridge/data-jobs", None, None).await?;
         let value = parsed(status, &bytes)?;
+        let listed = value["items"].as_array().cloned().unwrap_or_default();
+        // One delivery batch for the whole job history, not one per row.
+        let keys: Vec<&str> = listed
+            .iter()
+            .filter_map(|item| item["objectKey"].as_str())
+            .filter(|key| target(key).is_ok())
+            .collect();
+        let delivered = state
+            .feature_delivery()
+            .import_target_decisions(&keys, headers)
+            .await;
         let mut items = Vec::new();
-        for item in value["items"].as_array().cloned().unwrap_or_default() {
+        for item in listed.iter().cloned() {
+            let key = item["objectKey"].as_str().unwrap_or_default();
             if (item["kind"] == "import" || item["kind"] == "document")
                 && item["importOptions"]["sourceApp"] == "courseboard"
                 && item["importOptions"]["documentParentId"].is_null()
-                && permitted(
-                    &state,
-                    headers,
-                    item["objectKey"].as_str().unwrap_or_default(),
-                )
-                .await
-                .is_ok()
+                && delivered.get(key).copied().unwrap_or(false)
+                && permitted_by_iam(&state, headers, key).await.is_ok()
             {
                 items.push(item);
             }
