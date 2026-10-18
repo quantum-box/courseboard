@@ -1768,31 +1768,35 @@ export function ReceptionFieldSettingsPanel({
                       ) : null}
                     </td>
                     <td>
-                      <Input
-                        aria-label={t('customers:reception.settings.labelLabel', { field: receptionFieldLabel(field) })}
-                        value={field.customLabel ? field.label ?? '' : receptionFieldLabel(field)}
-                        disabled={changing}
-                        onChange={event => update(field.editorKey, {
-                          label: event.target.value,
-                          customLabel: true,
-                        })}
-                      />
-                      {field.customLabel ? (
-                        <Button
-                          type="button"
-                          variant="ghost"
-                          size="sm"
-                          aria-label={t('customers:reception.settings.resetLabel')}
+                      <div className="reception-label-editor">
+                        <Input
+                          aria-label={t('customers:reception.settings.labelLabel', { field: receptionFieldLabel(field) })}
+                          value={field.customLabel ? field.label ?? '' : receptionFieldLabel(field)}
                           disabled={changing}
-                          onClick={() => update(field.editorKey, {
-                            label: receptionFieldDefaultLabel(field.fieldKey),
-                            customLabel: false,
+                          onChange={event => update(field.editorKey, {
+                            label: event.target.value,
+                            customLabel: true,
                           })}
-                        >
-                          <RotateCcw />
-                          {t('customers:reception.settings.resetLabel')}
-                        </Button>
-                      ) : null}
+                        />
+                        <span className="reception-label-reset">
+                          {field.customLabel ? (
+                            <Button
+                              type="button"
+                              variant="ghost"
+                              size="sm"
+                              aria-label={t('customers:reception.settings.resetLabel')}
+                              title={t('customers:reception.settings.resetLabel')}
+                              disabled={changing}
+                              onClick={() => update(field.editorKey, {
+                                label: receptionFieldDefaultLabel(field.fieldKey),
+                                customLabel: false,
+                              })}
+                            >
+                              <RotateCcw />
+                            </Button>
+                          ) : null}
+                        </span>
+                      </div>
                     </td>
                   </tr>
                 )
@@ -1847,30 +1851,34 @@ export function ReceptionFieldSettingsPanel({
                     />
                   </Field>
                   <Field label={t('customers:reception.settings.customLabel')}>
-                    <Input
-                      value={field.customLabel ? field.label ?? '' : receptionFieldLabel(field)}
-                      disabled={changing}
-                      onChange={event => update(field.editorKey, {
-                        label: event.target.value,
-                        customLabel: true,
-                      })}
-                    />
-                    {field.customLabel ? (
-                      <Button
-                        type="button"
-                        variant="ghost"
-                        size="sm"
-                        aria-label={t('customers:reception.settings.resetLabel')}
+                    <div className="reception-label-editor">
+                      <Input
+                        value={field.customLabel ? field.label ?? '' : receptionFieldLabel(field)}
                         disabled={changing}
-                        onClick={() => update(field.editorKey, {
-                          label: receptionFieldDefaultLabel(field.fieldKey),
-                          customLabel: false,
+                        onChange={event => update(field.editorKey, {
+                          label: event.target.value,
+                          customLabel: true,
                         })}
-                      >
-                        <RotateCcw />
-                        {t('customers:reception.settings.resetLabel')}
-                      </Button>
-                    ) : null}
+                      />
+                      <span className="reception-label-reset">
+                        {field.customLabel ? (
+                          <Button
+                            type="button"
+                            variant="ghost"
+                            size="sm"
+                            aria-label={t('customers:reception.settings.resetLabel')}
+                            title={t('customers:reception.settings.resetLabel')}
+                            disabled={changing}
+                            onClick={() => update(field.editorKey, {
+                              label: receptionFieldDefaultLabel(field.fieldKey),
+                              customLabel: false,
+                            })}
+                          >
+                            <RotateCcw />
+                          </Button>
+                        ) : null}
+                      </span>
+                    </div>
                   </Field>
                   <Field label={t('customers:reception.settings.customType')}>
                     <NativeSelect

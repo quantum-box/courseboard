@@ -6598,6 +6598,28 @@ button,
   gap: 8px;
 }
 
+.reception-label-editor {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) 32px;
+  align-items: center;
+  gap: 4px;
+  min-width: 0;
+}
+
+.reception-label-reset {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 32px;
+  height: 32px;
+}
+
+.reception-label-reset button {
+  width: 32px;
+  height: 32px;
+  padding: 0;
+}
+
 .reception-custom-field {
   display: grid;
   gap: 8px;
