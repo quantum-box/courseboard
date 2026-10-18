@@ -67,6 +67,23 @@ function toPlayers(draft: DraftPlayer[]): PartyPlayer[] {
  * per player, and the desk works the cell as one thing — it retypes the group,
  * it does not amend seat three.
  */
+/**
+ * Why a booking's plan can no longer be changed, or `null` when it can.
+ *
+ * Mirrors the API's refusal, so the reason is on the sheet rather than in an
+ * error after the desk has already picked something else.
+ */
+function planLock(reservation: TeeReservation, arrivals: number) {
+  if (['cancelled', 'completed', 'no_show'].includes(reservation.status)) {
+    return 'ledger:party.planLocked.over' as const
+  }
+  if (arrivals > 0 || ['checked_in', 'on_course'].includes(reservation.status)) {
+    return 'ledger:party.planLocked.checkedIn' as const
+  }
+  if ((reservation.paidAmount ?? 0) > 0) return 'ledger:party.planLocked.paid' as const
+  return null
+}
+
 export function PartyEditor({
   reservation,
   plans,
@@ -95,6 +112,8 @@ export function PartyEditor({
   const [groupNumber, setGroupNumber] = useState('')
   const [players, setPlayers] = useState<DraftPlayer[]>([])
   const [planId, setPlanId] = useState('')
+  /** Seats already checked in, as the check-in section below reads them. */
+  const [arrivals, setArrivals] = useState(0)
   const [saving, setSaving] = useState(false)
   const [confirmingDiscard, setConfirmingDiscard] = useState(false)
   /** What the sheet opened with, so "changed" means changed by the desk. */
@@ -103,6 +122,11 @@ export function PartyEditor({
   const coursePlans = plansForCourse(plans, reservation?.golfCourseId)
   /** Empty when the booking predates plans or its plan is no longer sold. */
   const openedPlanId = reservation?.reservationServiceId ?? ''
+  // The plan is what the booking is priced and staffed on. Once money has
+  // been taken or the group has arrived, the API refuses to change it; the
+  // sheet says so before the desk picks another one (SCC-9).
+  const planLockKey = reservation ? planLock(reservation, arrivals) : null
+  const planLockedReason = planLockKey ? t(planLockKey) : null
 
   // Reset from the booking whenever a different one is opened, so the sheet
   // never shows the previous group's names against this group's tee time.
@@ -320,6 +344,7 @@ export function PartyEditor({
           value={planId}
           name="courseboard-party-plan"
           onChange={setPlanId}
+          lockedReason={planLockedReason}
         />
 
         <section className="ledger-party-players" aria-label={t('ledger:party.players')}>
@@ -402,6 +427,7 @@ export function PartyEditor({
           reservationId={reservation.id}
           players={reservation.party?.players ?? []}
           dirty={dirty}
+          onArrivalsChange={setArrivals}
         />
 
         <div className="ledger-party-actions">

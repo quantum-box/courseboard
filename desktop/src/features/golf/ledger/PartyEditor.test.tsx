@@ -149,3 +149,65 @@ describe('the ledger booking sheet', () => {
     expect(save.disabled).toBe(true)
   })
 })
+
+describe('changing the plan of a booking that is already settled (SCC-9)', () => {
+  const twoPlans = [
+    ...plans,
+    {
+      reservationServiceId: 'plan-self',
+      label: 'セルフ',
+      playType: 'self' as const,
+      expectedDurationMinutes: 270,
+      golfCourseIds: ['course-east'],
+      maxPlayersPerGroup: 4,
+    },
+  ]
+
+  function planRadios() {
+    return screen.getAllByRole('radio') as HTMLInputElement[]
+  }
+
+  it('lets the desk change the plan of an unpaid booking nobody has arrived for', async () => {
+    renderEditor({ plans: twoPlans })
+
+    await waitFor(() => expect(planRadios()).toHaveLength(2))
+    expect(planRadios().every(radio => !radio.disabled)).toBe(true)
+    expect(screen.queryByText(i18next.t('ledger:party.planLocked.paid'))).toBeNull()
+  })
+
+  it('says a paid booking keeps its plan, before the desk picks another', async () => {
+    // A deposit is money taken too, so any amount locks the plan.
+    renderEditor({ plans: twoPlans, reservation: { ...reservation, paidAmount: 5_000 } })
+
+    expect(await screen.findByText(i18next.t('ledger:party.planLocked.paid'))).toBeTruthy()
+    expect(planRadios().every(radio => radio.disabled)).toBe(true)
+  })
+
+  it('says a group that has checked in keeps its plan', async () => {
+    api.json.mockImplementation(async (path: string) => {
+      if (path.endsWith('/checkins')) {
+        return {
+          items: [{
+            reservationId: reservation.id,
+            playerIndex: 0,
+            playerName: 'QAプレイヤー1',
+            playedOn: '2026-08-12',
+            checkedInAt: '2026-08-12T06:40:00Z',
+          }],
+        }
+      }
+      return { items: [] }
+    })
+    renderEditor({ plans: twoPlans })
+
+    expect(await screen.findByText(i18next.t('ledger:party.planLocked.checkedIn'))).toBeTruthy()
+    expect(planRadios().every(radio => radio.disabled)).toBe(true)
+  })
+
+  it('says a round that is over keeps its plan', async () => {
+    renderEditor({ plans: twoPlans, reservation: { ...reservation, status: 'completed' } })
+
+    expect(await screen.findByText(i18next.t('ledger:party.planLocked.over'))).toBeTruthy()
+    expect(planRadios().every(radio => radio.disabled)).toBe(true)
+  })
+})
