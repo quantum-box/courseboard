@@ -184,16 +184,26 @@ const ROUTE_PREFIX_FEATURES: ReadonlyArray<readonly [string, FeatureKey]> = [
   ['golf/data-imports/', 'courseboard.data_imports'],
 ]
 
+/**
+ * Features a screen reads but can do without: the staff register shows the
+ * caddie link and attendance when it can, and warns instead when it cannot,
+ * so a plan with staff alone still opens it.
+ */
+const OPTIONAL_FEATURES: Readonly<Partial<Record<FeatureKey, readonly FeatureKey[]>>> = Object.freeze({
+  'courseboard.staff': ['courseboard.caddies', 'courseboard.caddies.insights'],
+})
+
 export function routeFeatureKeys(route: string): readonly FeatureKey[] | null | undefined {
   const own = routeFeatureKey(route)
   if (own === null || own === undefined) return own
+  const optional = new Set<FeatureKey>(OPTIONAL_FEATURES[own] ?? [])
   const keys = new Set<FeatureKey>([own])
   for (const [prefix, key] of ROUTE_PREFIX_FEATURES) {
     if (route.startsWith(prefix)) keys.add(key)
   }
   for (const action of routeActionRequirement(route)?.allOf ?? []) {
     const key = ACTION_FEATURES[action]
-    if (key) keys.add(key)
+    if (key && !optional.has(key)) keys.add(key)
   }
   return [...keys]
 }

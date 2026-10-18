@@ -767,7 +767,8 @@ spec:
       status: implemented
     optionalIntegration: null
     releaseGates: []
-    requiredFeatureKeys: []
+    requiredFeatureKeys:
+    - "courseboard.membership"
     internalDependencies: []
     operationBindings:
     - operation: read

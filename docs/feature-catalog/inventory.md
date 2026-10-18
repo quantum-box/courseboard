@@ -91,7 +91,7 @@ key は `courseboard.` で始める。Core に渡す delivery key は、Field �
 | 18 | `courseboard.staff` | `staff(/:id)` | Field `/v1/erp/staff`（`/field-api` 経由。キャディ登録・打刻も含む） | `field:ListHrm` | `field:ManageHrm` | なし | — |
 | 19 | `courseboard.budgets` | `golf/budgets` | daily-budgets, achievement, import | `ListBudgets` | `ManageBudgets` | なし | courses |
 | 20 | `courseboard.settlement` | `golf/settlement` | monthly-settlement, export.csv | `ListSettlement` | — | なし | — |
-| 21 | `courseboard.fee_simulator` | `golf/simulator` | simulator/calculate, simulate/range, pricing-settings | `CalculateFees` | `ManageReservationPolicy`（PUT pricing-settings） | なし | — |
+| 21 | `courseboard.fee_simulator` | `golf/simulator` | simulator/calculate, simulate/range, pricing-settings | `CalculateFees` | `ManageReservationPolicy`（PUT pricing-settings） | なし | membership（会員料金の計算で会員割引を読むため） |
 | 22 | `courseboard.reservation_report_import` | `golf/reservation-report-import`, `…/documents(/:jobId)` | reservation-report-imports, preview, entries, migration, common-import-owner | `ListReservationReports` | `ImportReservationReports` | **あり** `feature.courseboard.reservation-report-import` | courses |
 | 23 | `courseboard.data_imports` | `golf/data-imports(/:target)` | `/v1/course/data-imports/*` | `field:ListBridgeDefinitions` | `field:PreviewBridgeRun`, `field:ExecuteBridgeDrafts` | なし | — |
 | 24 | `courseboard.data_exports` | `settings/data-exports` | `/v1/course/data-exports/*`, Field `/v1/bridge/exports/*` | `field:ListBridgeExportDefinitions` | `field:ManageBridgeExportDefinitions` | なし | — |

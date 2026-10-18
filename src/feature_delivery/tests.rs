@@ -1147,3 +1147,9 @@ async fn the_invoice_api_is_admitted_only_inside_the_cancellation_fee_workflow()
         )
     );
 }
+
+#[test]
+fn member_pricing_in_the_simulator_needs_the_membership_feature() {
+    let simulator = catalog::feature("courseboard.fee_simulator").unwrap();
+    assert!(super::required_closure(simulator).contains(&"courseboard.membership"));
+}

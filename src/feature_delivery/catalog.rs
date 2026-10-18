@@ -185,7 +185,7 @@ pub const FEATURES: &[FeatureDefinition] = &[
         ui: ["golf/settlement"]),
     feature!("courseboard.fee_simulator", "Fee and golf-course-tax simulations and their pricing settings.",
         read: [CALCULATE_FEES], manage: [MANAGE_RESERVATION_POLICY],
-        requires: [], gates: [],
+        requires: ["courseboard.membership"], gates: [],
         ui: ["golf/simulator"]),
     feature!("courseboard.reservation_report_import", "Taking a reservation report off a spreadsheet or document and onto the board.",
         read: [LIST_RESERVATION_REPORTS], manage: [IMPORT_RESERVATION_REPORTS],

@@ -130,6 +130,8 @@ describe('feature catalog on screens', () => {
         'courseboard.reservation_report_import',
         'courseboard.data_imports',
       ]))
+    expect(routeFeatureKeys('staff')).toEqual(['courseboard.staff'])
+    expect(routeFeatureKeys('staff/stf_1')).toEqual(['courseboard.staff'])
     expect(routeFeatureKeys('golf')).toBeNull()
   })
 
