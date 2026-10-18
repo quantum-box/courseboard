@@ -41,6 +41,7 @@ import {
   ACTIVE_CONSENT_ITEMS_CACHE_KEY,
   analyzeReceptionForm,
   createReceptionConsentItem,
+  updateReceptionConsentItem,
   draftReceptionSheets,
   listReceptionConsentItems,
   listReceptionFields,
@@ -1154,6 +1155,7 @@ export function ReceptionFieldSettingsPanel({
     ReceptionConsentCandidate[]
   >([])
   const [manualConsentItems, setManualConsentItems] = useState<ReceptionConsentCandidate[]>([])
+  const [archiveChoices, setArchiveChoices] = useState<Record<string, 'existing' | 'candidate' | 'skip'>>({})
   const [proposedConsentItems, setProposedConsentItems] = useState<ReceptionConsentCandidate[]>([])
   const [analysisCustomFieldCandidateCount, setAnalysisCustomFieldCandidateCount] = useState<
     number | null
@@ -1209,6 +1211,7 @@ export function ReceptionFieldSettingsPanel({
     setAnalysisDisplayFile(null)
     setAnalysisRotation(0)
     setAnalysisConsentItems([])
+    setArchiveChoices({})
     setProposedConsentItems([])
     setAnalysisCustomFieldCandidateCount(null)
     proposalSnapshotRef.current = null
@@ -1229,12 +1232,34 @@ export function ReceptionFieldSettingsPanel({
     })
   }, [consentItems])
 
+  const archivedCandidates = analysisConsentItems.flatMap(candidate => {
+    const item = consentItems.find(item => item.consentKey === candidate.consentKey && !item.active)
+    return item ? [{ candidate, item }] : []
+  })
+  const unresolvedArchives = archivedCandidates.some(({ item }) => !archiveChoices[item.consentKey])
+  const restores = archivedCandidates.filter(({ item }) =>
+    archiveChoices[item.consentKey] === 'existing' || archiveChoices[item.consentKey] === 'candidate',
+  )
+  const restoreCandidates = restores.map(({ candidate, item }) =>
+    archiveChoices[item.consentKey] === 'candidate' ? candidate : item,
+  )
   const pendingConsentItems = [...proposedConsentItems, ...manualConsentItems]
-  const consentPromptTooLong = pendingConsentItems.some(item =>
+  const savingConsentItems = [...pendingConsentItems, ...restoreCandidates]
+  const consentPromptTooLong = savingConsentItems.some(item =>
     [...(item.body?.trim() || item.label.trim())].length > 120,
   )
-  const invalidConsent = consentPromptTooLong || pendingConsentItems.some(item => !item.label.trim())
-  const dirty = !settingsEqual(drafts, fields) || pendingConsentItems.length > 0
+  const consentFieldConflicts = savingConsentItems.flatMap(candidate => {
+    const field = drafts.find(field => field.enabled && field.fieldKey.trim() === candidate.consentKey)
+    return field ? [{ candidate, field }] : []
+  })
+  // The standalone create action validates against saved fields. Saving the
+  // settings first also applies any field removal/disablement in the draft.
+  const consentConflictsWithSavedFields = pendingConsentItems.some(candidate =>
+    fields.some(field => field.enabled && field.fieldKey === candidate.consentKey),
+  )
+  const invalidConsent = consentPromptTooLong || consentFieldConflicts.length > 0
+    || savingConsentItems.some(item => !item.label.trim())
+  const dirty = !settingsEqual(drafts, fields) || pendingConsentItems.length > 0 || archivedCandidates.length > 0
   const invalidCustomKey = customFieldKeyIsInvalid(drafts)
   const standard = drafts.filter(field => field.kind === 'standard')
   const custom = drafts.filter(field => field.kind === 'custom')
@@ -1309,6 +1334,7 @@ export function ReceptionFieldSettingsPanel({
     setAnalysisDisplayFile(null)
     setAnalysisRotation(0)
     setAnalysisConsentItems([])
+    setArchiveChoices({})
     setProposedConsentItems([])
     setAnalysisCustomFieldCandidateCount(null)
     proposalSnapshotRef.current = null
@@ -1367,6 +1393,7 @@ export function ReceptionFieldSettingsPanel({
         candidate => !existingConsentKeys.has(candidate.consentKey),
       )
       setAnalysisConsentItems(proposal.consentItems)
+      setArchiveChoices({})
       setProposedConsentItems(newConsentCandidates)
       setAnalysisCustomFieldCandidateCount(
         proposal.fields.filter(field => field.kind === 'custom').length,
@@ -1463,7 +1490,8 @@ export function ReceptionFieldSettingsPanel({
   }
 
   async function save() {
-    if (invalidCustomKey || invalidConsent) return
+    if (invalidCustomKey || invalidConsent || unresolvedArchives
+      || ((pendingConsentItems.length > 0 || archivedCandidates.length > 0) && !canCreateConsentItems)) return
     setSaving(true)
     try {
       const next = await saveReceptionFields(drafts.map(field => ({
@@ -1475,7 +1503,7 @@ export function ReceptionFieldSettingsPanel({
           ? true
           : field.required,
         label: field.customLabel ? field.label?.trim() || null : null,
-        customLabel: field.customLabel,
+        customLabel: field.customLabel && Boolean(field.label?.trim()),
         sortOrder: field.sortOrder,
         options: field.fieldType === 'select' ? field.options : [],
       })))
@@ -1485,6 +1513,24 @@ export function ReceptionFieldSettingsPanel({
       proposalSnapshotRef.current = null
       savedFieldsRef.current = next
       onSaved(next)
+      for (const { candidate, item } of restores) {
+        try {
+          if (!item.id) throw new Error(t('customers:reception.settings.consentSaveFailed'))
+          const updated = await updateReceptionConsentItem(item.id, {
+            active: true,
+            ...(archiveChoices[item.consentKey] === 'candidate' ? {
+              label: candidate.label.trim(), body: candidate.body?.trim() || null,
+              required: candidate.required,
+            } : {}),
+          })
+          onConsentItemsCreated?.([updated])
+          // Retain only unfinished decisions if a later write fails.
+          setAnalysisConsentItems(current => current.filter(candidate => candidate.consentKey !== item.consentKey))
+        } catch (error) {
+          showToast({ tone: 'danger', title: t('customers:reception.settings.consentSaveFailed'), message: resourceErrorText(error) })
+          return
+        }
+      }
       if (pendingConsentItems.length > 0 && !await createProposedConsentItems()) return
       setProposalActive(false)
       setAnalysisWarnings([])
@@ -1495,6 +1541,7 @@ export function ReceptionFieldSettingsPanel({
       setAnalysisDisplayFile(null)
       setAnalysisRotation(0)
       setAnalysisConsentItems([])
+      setArchiveChoices({})
       setProposedConsentItems([])
       setAnalysisCustomFieldCandidateCount(null)
       proposalSnapshotRef.current = null
@@ -1555,7 +1602,7 @@ export function ReceptionFieldSettingsPanel({
           <Button
             type="button"
             variant="primary"
-            disabled={!dirty || changing || loading || invalidCustomKey || invalidConsent || (pendingConsentItems.length > 0 && !canCreateConsentItems)}
+            disabled={!dirty || changing || loading || invalidCustomKey || invalidConsent || unresolvedArchives || ((pendingConsentItems.length > 0 || archivedCandidates.length > 0) && !canCreateConsentItems)}
             onClick={() => void save()}
           >
             <Save />
@@ -1721,31 +1768,35 @@ export function ReceptionFieldSettingsPanel({
                       ) : null}
                     </td>
                     <td>
-                      <Input
-                        aria-label={t('customers:reception.settings.labelLabel', { field: receptionFieldLabel(field) })}
-                        value={field.customLabel ? field.label ?? '' : receptionFieldLabel(field)}
-                        disabled={changing}
-                        onChange={event => update(field.editorKey, {
-                          label: event.target.value,
-                          customLabel: event.target.value.trim().length > 0,
-                        })}
-                      />
-                      {field.customLabel ? (
-                        <Button
-                          type="button"
-                          variant="ghost"
-                          size="sm"
-                          aria-label={t('customers:reception.settings.resetLabel')}
+                      <div className="reception-label-editor">
+                        <Input
+                          aria-label={t('customers:reception.settings.labelLabel', { field: receptionFieldLabel(field) })}
+                          value={field.customLabel ? field.label ?? '' : receptionFieldLabel(field)}
                           disabled={changing}
-                          onClick={() => update(field.editorKey, {
-                            label: receptionFieldDefaultLabel(field.fieldKey),
-                            customLabel: false,
+                          onChange={event => update(field.editorKey, {
+                            label: event.target.value,
+                            customLabel: true,
                           })}
-                        >
-                          <RotateCcw />
-                          {t('customers:reception.settings.resetLabel')}
-                        </Button>
-                      ) : null}
+                        />
+                        <span className="reception-label-reset">
+                          {field.customLabel ? (
+                            <Button
+                              type="button"
+                              variant="ghost"
+                              size="sm"
+                              aria-label={t('customers:reception.settings.resetLabel')}
+                              title={t('customers:reception.settings.resetLabel')}
+                              disabled={changing}
+                              onClick={() => update(field.editorKey, {
+                                label: receptionFieldDefaultLabel(field.fieldKey),
+                                customLabel: false,
+                              })}
+                            >
+                              <RotateCcw />
+                            </Button>
+                          ) : null}
+                        </span>
+                      </div>
                     </td>
                   </tr>
                 )
@@ -1800,30 +1851,34 @@ export function ReceptionFieldSettingsPanel({
                     />
                   </Field>
                   <Field label={t('customers:reception.settings.customLabel')}>
-                    <Input
-                      value={field.customLabel ? field.label ?? '' : receptionFieldLabel(field)}
-                      disabled={changing}
-                      onChange={event => update(field.editorKey, {
-                        label: event.target.value,
-                        customLabel: event.target.value.trim().length > 0,
-                      })}
-                    />
-                    {field.customLabel ? (
-                      <Button
-                        type="button"
-                        variant="ghost"
-                        size="sm"
-                        aria-label={t('customers:reception.settings.resetLabel')}
+                    <div className="reception-label-editor">
+                      <Input
+                        value={field.customLabel ? field.label ?? '' : receptionFieldLabel(field)}
                         disabled={changing}
-                        onClick={() => update(field.editorKey, {
-                          label: receptionFieldDefaultLabel(field.fieldKey),
-                          customLabel: false,
+                        onChange={event => update(field.editorKey, {
+                          label: event.target.value,
+                          customLabel: true,
                         })}
-                      >
-                        <RotateCcw />
-                        {t('customers:reception.settings.resetLabel')}
-                      </Button>
-                    ) : null}
+                      />
+                      <span className="reception-label-reset">
+                        {field.customLabel ? (
+                          <Button
+                            type="button"
+                            variant="ghost"
+                            size="sm"
+                            aria-label={t('customers:reception.settings.resetLabel')}
+                            title={t('customers:reception.settings.resetLabel')}
+                            disabled={changing}
+                            onClick={() => update(field.editorKey, {
+                              label: receptionFieldDefaultLabel(field.fieldKey),
+                              customLabel: false,
+                            })}
+                          >
+                            <RotateCcw />
+                          </Button>
+                        ) : null}
+                      </span>
+                    </div>
                   </Field>
                   <Field label={t('customers:reception.settings.customType')}>
                     <NativeSelect
@@ -1935,7 +1990,7 @@ export function ReceptionFieldSettingsPanel({
               type="button"
               variant="secondary"
               size="sm"
-              disabled={changing || !canCreateConsentItems || invalidConsent}
+              disabled={changing || !canCreateConsentItems || invalidConsent || consentConflictsWithSavedFields}
               onClick={() => void createProposedConsentItems()}
             >
               {creatingConsentItems
@@ -1946,6 +2001,29 @@ export function ReceptionFieldSettingsPanel({
             </Button>
           ) : null}
         </div>
+        {unresolvedArchives ? (
+          <Notice>{t('customers:reception.settings.archiveChooseHint')}</Notice>
+        ) : null}
+        {consentFieldConflicts.map(({ candidate, field }) => (
+          <Notice tone="warning" key={candidate.consentKey} actions={
+            proposedConsentItems.some(item => item.consentKey === candidate.consentKey) ? (
+              <Button type="button" variant="secondary" size="sm" disabled={changing}
+                onClick={() => {
+                  setProposedConsentItems(current => current.filter(item => item.consentKey !== candidate.consentKey))
+                  setAnalysisConsentItems(current => current.filter(item => item.consentKey !== candidate.consentKey))
+                }}>
+                {t('customers:reception.settings.keepAsAdditionalField')}
+              </Button>
+            ) : null
+          }>
+            {t('customers:reception.settings.consentFieldConflict', {
+              consent: candidate.label, field: field.label || field.fieldKey, key: candidate.consentKey,
+            })}
+          </Notice>
+        ))}
+        {consentFieldConflicts.length === 0 && consentConflictsWithSavedFields ? (
+          <Notice tone="warning">{t('customers:reception.settings.consentSaveFieldsFirst')}</Notice>
+        ) : null}
         {consentPromptTooLong ? (
           <Notice tone="warning">{t('customers:reception.settings.consentPromptTooLong')}</Notice>
         ) : null}
@@ -2026,6 +2104,15 @@ export function ReceptionFieldSettingsPanel({
                     {status}
                   </small>
                   {candidate.body ? <span>{candidate.body}</span> : null}
+                  {catalogItem && !catalogItem.active ? (
+                    <ArchivedConsentChoice
+                      item={catalogItem}
+                      candidate={candidate}
+                      choice={archiveChoices[candidate.consentKey]}
+                      disabled={changing || !canCreateConsentItems}
+                      onChoose={choice => setArchiveChoices(current => ({ ...current, [candidate.consentKey]: choice }))}
+                    />
+                  ) : null}
                 </li>
               )
             })}
@@ -2037,6 +2124,65 @@ export function ReceptionFieldSettingsPanel({
         )}
       </div>
     </Panel>
+  )
+}
+
+function ArchivedConsentChoice({ item, candidate, choice, disabled, onChoose }: {
+  item: ReceptionConsentItem
+  candidate: ReceptionConsentCandidate
+  choice?: 'existing' | 'candidate' | 'skip'
+  disabled: boolean
+  onChoose: (choice: 'existing' | 'candidate' | 'skip') => void
+}) {
+  const { t } = useTranslation('customers')
+  const differs = item.label.trim() !== candidate.label.trim()
+    || (item.body?.trim() || '') !== (candidate.body?.trim() || '')
+    || item.required !== candidate.required
+  return (
+    <div className="reception-archive-choice">
+      <p className="reception-settings-hint">{t('reception.settings.archiveSaveHint')}</p>
+      {differs ? (
+        <>
+          <div className="reception-consent-comparison">
+            {[{ title: 'archiveExisting' as const, value: item }, { title: 'archiveCandidate' as const, value: candidate }].map(({ title, value }) => (
+              <section key={title} aria-label={t(`reception.settings.${title}`)}
+                data-selected={(title === 'archiveExisting' && choice === 'existing') || (title === 'archiveCandidate' && choice === 'candidate')}>
+                <h4>{t(`reception.settings.${title}`)}</h4>
+                <strong>{value.label}</strong>
+                <p>{value.body || t('reception.settings.archiveNoBody')}</p>
+                <p>{t(value.required ? 'reception.settings.archiveRequired' : 'reception.settings.archiveOptional')}</p>
+              </section>
+            ))}
+          </div>
+          <p className="reception-settings-hint">{t('reception.settings.consentVersionNote')}</p>
+        </>
+      ) : null}
+      <div className="reception-consent-item-actions">
+        <Button type="button" variant={choice === 'existing' ? 'primary' : 'secondary'} size="sm" disabled={disabled || !item.id}
+          aria-pressed={choice === 'existing'} onClick={() => onChoose('existing')}>
+          {choice === 'existing' ? <CheckCircle2 aria-hidden="true" /> : null}
+          {t(differs ? 'reception.settings.archiveRestoreExisting' : 'reception.settings.archiveRestore')}
+        </Button>
+        {differs ? (
+          <Button type="button" variant={choice === 'candidate' ? 'primary' : 'secondary'} size="sm" disabled={disabled || !item.id}
+            aria-pressed={choice === 'candidate'} onClick={() => onChoose('candidate')}>
+            {choice === 'candidate' ? <CheckCircle2 aria-hidden="true" /> : null}
+            {t('reception.settings.archiveRestoreCandidate')}
+          </Button>
+        ) : null}
+        <Button type="button" variant={choice === 'skip' ? 'primary' : 'ghost'} size="sm" disabled={disabled}
+          aria-pressed={choice === 'skip'} onClick={() => onChoose('skip')}>
+          {choice === 'skip' ? <CheckCircle2 aria-hidden="true" /> : null}
+          {t('reception.settings.archiveSkip')}
+        </Button>
+      </div>
+      {choice ? (
+        <p role="status" className="reception-archive-selection">
+          <CheckCircle2 aria-hidden="true" />
+          {t(`reception.settings.archiveSelected_${choice}`)}
+        </p>
+      ) : null}
+    </div>
   )
 }
 

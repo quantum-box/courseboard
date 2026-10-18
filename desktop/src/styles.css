@@ -6473,6 +6473,55 @@ button,
   gap: 4px;
 }
 
+.reception-archive-choice {
+  display: grid;
+  gap: 8px;
+  padding-block: 8px;
+}
+
+.reception-consent-comparison {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(min(100%, 240px), 1fr));
+  gap: 12px;
+}
+
+.reception-consent-comparison section {
+  padding: 12px;
+  border: 1px solid hsl(var(--nui-border));
+  border-radius: 8px;
+  overflow-wrap: anywhere;
+  white-space: pre-wrap;
+}
+
+.reception-consent-comparison section[data-selected="true"] {
+  border-color: hsl(var(--nui-primary));
+  box-shadow: inset 0 0 0 1px hsl(var(--nui-primary));
+  background: hsl(var(--nui-primary) / .08);
+}
+
+.reception-archive-selection {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin: 0;
+  padding: 10px 12px;
+  border-radius: 8px;
+  background: hsl(var(--nui-primary) / .1);
+  font-weight: 600;
+}
+
+.reception-archive-selection svg {
+  width: 18px;
+  height: 18px;
+  flex-shrink: 0;
+  color: hsl(var(--nui-primary));
+}
+
+.reception-consent-comparison h4,
+.reception-consent-comparison p {
+  margin: 0 0 6px;
+}
+
 .reception-consent-edit {
   grid-column: 1 / -1;
   display: grid;
@@ -6547,6 +6596,28 @@ button,
 .reception-custom-field-list {
   display: grid;
   gap: 8px;
+}
+
+.reception-label-editor {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) 32px;
+  align-items: center;
+  gap: 4px;
+  min-width: 0;
+}
+
+.reception-label-reset {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 32px;
+  height: 32px;
+}
+
+.reception-label-reset button {
+  width: 32px;
+  height: 32px;
+  padding: 0;
 }
 
 .reception-custom-field {

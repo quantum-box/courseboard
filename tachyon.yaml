@@ -18,6 +18,9 @@ spec:
       # Tachyon uses `worker` as the deployment runner classification. The UI
       # itself is still the Vite-built React SPA served from static assets.
       framework: worker
+      # Register production and preview origins for presigned Storage uploads.
+      storage:
+        browserUpload: true
       deploymentTarget: cloudflare_workers
       watchPaths:
         - desktop/**

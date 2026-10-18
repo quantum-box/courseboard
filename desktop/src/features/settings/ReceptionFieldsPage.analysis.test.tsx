@@ -68,6 +68,153 @@ describe('ReceptionFieldsPage analysis proposal', () => {
     })
   })
 
+  it('keeps an emptied display name editable without substituting or changing its field key', async () => {
+    const field = {
+      fieldKey: 'reservation_contact', kind: 'custom', fieldType: 'text',
+      enabled: true, required: false, label: '予約者', customLabel: true, sortOrder: 10, options: [],
+    }
+    api.json.mockImplementation(async (path: string, init?: RequestInit) => {
+      if (path === '/v1/course/customer-reception-fields') {
+        return { items: init?.method === 'PUT' ? JSON.parse(String(init.body)).items : [...DEFAULT_RECEPTION_FIELDS, field] }
+      }
+      if (path === '/v1/course/customer-consent-items?includeInactive=true') return { items: [] }
+      throw new Error(`Unexpected API call: ${path}`)
+    })
+    renderPage()
+    const label = await screen.findByDisplayValue('予約者')
+    const key = screen.getByRole('textbox', { name: '項目キー' }) as HTMLInputElement
+    fireEvent.change(label, { target: { value: '' } })
+    expect((label as HTMLInputElement).value).toBe('')
+    expect(key.value).toBe('reservation_contact')
+    fireEvent.change(label, { target: { value: '予約した人' } })
+    fireEvent.click(screen.getByRole('button', { name: '項目設定を保存' }))
+    await waitFor(() => expect(toast.show).toHaveBeenCalledWith(expect.objectContaining({ message: '受付票の項目設定を保存しました' })))
+    const write = api.json.mock.calls.find(([, init]) => init?.method === 'PUT')
+    expect(JSON.parse(String(write?.[1].body)).items.find((item: { fieldKey: string }) => item.fieldKey === field.fieldKey)).toMatchObject({ label: '予約した人', customLabel: true })
+  })
+
+  it('blocks colliding consent keys before saving and lets the operator keep the additional field', async () => {
+    const field = {
+      fieldKey: 'club_information_opt_out', kind: 'custom', fieldType: 'boolean',
+      enabled: true, required: false, label: '情報配信の拒否', customLabel: true,
+      sortOrder: 10, options: [],
+    }
+    api.json.mockImplementation(async (path: string, init?: RequestInit) => {
+      if (path === '/v1/course/customer-reception-fields' && !init?.method) {
+        return { items: [...DEFAULT_RECEPTION_FIELDS, field] }
+      }
+      if (path === '/v1/course/customer-consent-items?includeInactive=true') return { items: [] }
+      if (path === '/v1/course/customer-reception-fields/analysis') return {
+        fields: [], warnings: [],
+        consentItems: [{ consentKey: field.fieldKey, label: '情報配信を希望しない', body: null, required: false }],
+      }
+      throw new Error(`Unexpected API call: ${path}`)
+    })
+    const { container } = renderPage()
+    await screen.findByDisplayValue('情報配信の拒否')
+    fireEvent.change(container.querySelector('input[type="file"]') as HTMLInputElement, {
+      target: { files: [new File(['blank'], 'blank.png', { type: 'image/png' })] },
+    })
+    await screen.findByText(/キー（club_information_opt_out）が重複/)
+    expect(screen.getByRole('button', { name: '未登録の1件を作成' }).hasAttribute('disabled')).toBe(true)
+    expect(screen.getByRole('button', { name: '項目設定を保存' }).hasAttribute('disabled')).toBe(true)
+    expect(api.json.mock.calls.some(([path, init]) => path === '/v1/course/customer-consent-items' && init?.method === 'POST')).toBe(false)
+    fireEvent.click(screen.getByRole('button', { name: '追加項目として使う（同意候補から外す）' }))
+    expect(screen.queryByRole('button', { name: '未登録の1件を作成' })).toBeNull()
+    expect(screen.queryByText(/キー（club_information_opt_out）が重複/)).toBeNull()
+    expect(screen.getByDisplayValue('情報配信の拒否')).toBeTruthy()
+  })
+
+  describe('archived analysis candidates', () => {
+    const archived = {
+      id: 'archived_privacy', consentKey: 'golf_privacy', label: '登録した個人情報の同意',
+      body: '登録した説明文', required: false, active: false, termsVersion: '3', sortOrder: 0,
+    }
+    const candidate = { consentKey: archived.consentKey, label: '今回の個人情報の同意', body: '今回の説明文', required: true }
+
+    async function analyzeArchive(same = false, fail = false, conflicting = false) {
+      api.json.mockImplementation(async (path: string, init?: RequestInit) => {
+        if (path === '/v1/course/customer-reception-fields') {
+          return { items: init?.method === 'PUT' ? JSON.parse(String(init.body)).items : [
+            ...DEFAULT_RECEPTION_FIELDS,
+            ...(conflicting ? [{ fieldKey: archived.consentKey, kind: 'custom', fieldType: 'boolean', enabled: true, required: false, label: '重複する追加項目', customLabel: true, sortOrder: 10, options: [] }] : []),
+          ] }
+        }
+        if (path === '/v1/course/customer-consent-items?includeInactive=true') return { items: [archived] }
+        if (path === '/v1/course/customer-reception-fields/analysis') return {
+          fields: [], warnings: [], consentItems: [same ? { ...candidate, label: archived.label, body: archived.body, required: archived.required } : candidate],
+        }
+        if (path === '/v1/course/customer-consent-items/archived_privacy' && init?.method === 'PUT') {
+          if (fail) throw new Error('restore failed')
+          return { ...archived, ...JSON.parse(String(init.body)) }
+        }
+        throw new Error(`Unexpected API call: ${path}`)
+      })
+      const { container } = renderPage()
+      if (conflicting) await screen.findByDisplayValue('重複する追加項目')
+      await screen.findByRole('button', { name: '同意項目を追加' })
+      await waitFor(() => expect(screen.getByRole('button', { name: '同意項目を追加' }).hasAttribute('disabled')).toBe(false))
+      fireEvent.change(container.querySelector('input[type="file"]') as HTMLInputElement, {
+        target: { files: [new File(['blank'], 'blank.png', { type: 'image/png' })] },
+      })
+      await screen.findByRole('button', { name: '今回は見送る' })
+    }
+
+    it.each([
+      ['登録済みの内容で復活させる', { active: true }],
+      ['今回の内容に更新して復活させる', { active: true, label: candidate.label, body: candidate.body, required: true }],
+    ])('compares content and saves the explicit choice: %s', async (button, expected) => {
+      await analyzeArchive()
+      expect(screen.getByRole('region', { name: '登録済みの内容' })).toBeTruthy()
+      expect(screen.getByRole('region', { name: '今回の候補' })).toBeTruthy()
+      const save = screen.getByRole('button', { name: '項目設定を保存' })
+      expect(save.hasAttribute('disabled')).toBe(true)
+      expect(screen.queryByRole('button', { name: '未登録の1件を作成' })).toBeNull()
+      fireEvent.click(screen.getByRole('button', { name: button as string }))
+      expect(save.hasAttribute('disabled')).toBe(false)
+      expect(api.json.mock.calls.some(([, init]) => init?.method === 'PUT')).toBe(false)
+      fireEvent.click(save)
+      await waitFor(() => expect(toast.show).toHaveBeenCalledWith(expect.objectContaining({ message: '受付票の項目設定を保存しました' })))
+      const writes = api.json.mock.calls.filter(([path]) => path === '/v1/course/customer-consent-items/archived_privacy')
+      expect(writes).toHaveLength(1)
+      expect(JSON.parse(String(writes[0][1].body))).toEqual(expected)
+      expect(api.json.mock.calls.some(([path]) => path === '/v1/course/customer-consent-items')).toBe(false)
+    })
+
+    it('keeps a skipped item archived without creating or updating it', async () => {
+      await analyzeArchive()
+      fireEvent.click(screen.getByRole('button', { name: '今回は見送る' }))
+      fireEvent.click(screen.getByRole('button', { name: '項目設定を保存' }))
+      await waitFor(() => expect(toast.show).toHaveBeenCalledWith(expect.objectContaining({ message: '受付票の項目設定を保存しました' })))
+      expect(api.json.mock.calls.some(([path, init]) => path.includes('customer-consent-items') && init?.method)).toBe(false)
+    })
+
+    it('requires a conflicting field to be removed and saves that change before restoring', async () => {
+      await analyzeArchive(false, false, true)
+      fireEvent.click(screen.getByRole('button', { name: '登録済みの内容で復活させる' }))
+      const save = screen.getByRole('button', { name: '項目設定を保存' })
+      expect(save.hasAttribute('disabled')).toBe(true)
+      expect(screen.getByText(/キー（golf_privacy）が重複/)).toBeTruthy()
+      fireEvent.click(screen.getByRole('button', { name: '追加項目を削除' }))
+      expect(save.hasAttribute('disabled')).toBe(false)
+      fireEvent.click(save)
+      await waitFor(() => expect(toast.show).toHaveBeenCalledWith(expect.objectContaining({ message: '受付票の項目設定を保存しました' })))
+      const writes = api.json.mock.calls.filter(([, init]) => init?.method === 'PUT')
+      expect(writes.map(([path]) => path)).toEqual(['/v1/course/customer-reception-fields', '/v1/course/customer-consent-items/archived_privacy'])
+      expect(JSON.parse(String(writes[0][1].body)).items.some((field: { fieldKey: string }) => field.fieldKey === archived.consentKey)).toBe(false)
+    })
+
+    it('offers a simple restore when content matches and retains the choice after failure', async () => {
+      await analyzeArchive(true, true)
+      expect(screen.queryByRole('region', { name: '今回の候補' })).toBeNull()
+      fireEvent.click(screen.getByRole('button', { name: '復活させる' }))
+      fireEvent.click(screen.getByRole('button', { name: '項目設定を保存' }))
+      await waitFor(() => expect(toast.show).toHaveBeenCalledWith(expect.objectContaining({ title: '同意項目を保存できませんでした' })))
+      expect(screen.getByRole('button', { name: '復活させる' }).getAttribute('aria-pressed')).toBe('true')
+      expect(screen.getByRole('button', { name: '今回は見送る' })).toBeTruthy()
+    })
+  })
+
   it('saves manual and OCR consent items together with the top save button, retaining failures for retry', async () => {
     let failManual = true
     const created: string[] = []
@@ -138,7 +285,7 @@ describe('ReceptionFieldsPage analysis proposal', () => {
     fireEvent.change(screen.getByRole('textbox', { name: '電話番号の表示名' }), { target: { value: '保存された連絡先' } })
     fireEvent.click(screen.getByRole('button', { name: '項目設定を保存' }))
     await waitFor(() => expect(toast.show).toHaveBeenCalledWith(expect.objectContaining({ title: '同意項目を作成できませんでした' })))
-    expect(screen.getByRole('button', { name: '1件をまとめて作成' })).toBeTruthy()
+    expect(screen.getByRole('button', { name: '未登録の1件を作成' })).toBeTruthy()
     expect(screen.getByDisplayValue('保存された連絡先')).toBeTruthy()
     fireEvent.click(screen.getByRole('button', { name: '提案を取り消す' }))
     expect(screen.getByDisplayValue('保存された連絡先')).toBeTruthy()
@@ -156,7 +303,7 @@ describe('ReceptionFieldsPage analysis proposal', () => {
     fireEvent.change(name, { target: { value: '同意' } })
     fireEvent.change(body, { target: { value: '😀'.repeat(121) } })
     expect(save.hasAttribute('disabled')).toBe(true)
-    expect(screen.getByRole('button', { name: '1件をまとめて作成' }).hasAttribute('disabled')).toBe(true)
+    expect(screen.getByRole('button', { name: '未登録の1件を作成' }).hasAttribute('disabled')).toBe(true)
     expect(screen.getByText(/同意の説明文は120文字以内/)).toBeTruthy()
     fireEvent.click(save)
     expect(api.json.mock.calls.some(([, init]) => init?.method === 'PUT' || init?.method === 'POST')).toBe(false)
@@ -454,7 +601,7 @@ describe('ReceptionFieldsPage analysis proposal', () => {
     })
 
     expect(await screen.findByText('個人情報の取扱い')).toBeTruthy()
-    fireEvent.click(screen.getByRole('button', { name: '1件をまとめて作成' }))
+    fireEvent.click(screen.getByRole('button', { name: '未登録の1件を作成' }))
 
     await waitFor(() => expect(api.json).toHaveBeenCalledWith(
       '/v1/course/customer-consent-items',
@@ -513,7 +660,7 @@ describe('ReceptionFieldsPage analysis proposal', () => {
     const consentLabel = await screen.findByText('個人情報の取扱い')
     const candidate = consentLabel.closest('li')
     expect(candidate?.textContent).toContain('登録状況未確認')
-    expect(screen.getByRole('button', { name: '1件をまとめて作成' }).hasAttribute('disabled')).toBe(true)
+    expect(screen.getByRole('button', { name: '未登録の1件を作成' }).hasAttribute('disabled')).toBe(true)
 
     failCatalogRequest?.()
     await waitFor(() => expect(screen.queryByText('同意項目を読み込んでいます。')).toBeNull())
