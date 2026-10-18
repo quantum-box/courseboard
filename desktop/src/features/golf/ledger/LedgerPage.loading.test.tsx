@@ -162,6 +162,7 @@ beforeEach(async () => {
           })
     }
     if (path.startsWith('/v1/course/extension-status')) return Promise.resolve(null)
+    if (path.startsWith('/v1/course/tenant-timezone')) return Promise.resolve({ timezone: null })
     if (path.startsWith('/v1/course/caddie-assignments')) return Promise.resolve({ items: [] })
     if (path.startsWith('/v1/course/caddie-shifts')) return Promise.resolve({ items: [] })
     throw new Error(`unexpected request: ${path}`)

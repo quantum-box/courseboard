@@ -47,10 +47,10 @@ describe('TenantTimezoneProvider', () => {
   afterEach(cleanup)
 
   it('uses the configured zone once it arrives', async () => {
-    api.context.mockResolvedValue({ configJson: { timezone: 'Asia/Taipei' } })
+    api.context.mockResolvedValue({ timezone: 'Asia/Taipei' })
     renderProvider()
     await waitFor(() => expect(zone()).toBe('Asia/Taipei'))
-    expect(api.context).toHaveBeenCalledWith('/v1/course/extension-status')
+    expect(api.context).toHaveBeenCalledWith('/v1/course/tenant-timezone')
     expect(warning()).toBeNull()
   })
 
@@ -75,7 +75,7 @@ describe('TenantTimezoneProvider', () => {
   it('falls back and warns when the stored zone is not a real one', async () => {
     // A configuration mistake, not a transient failure — substituting silently
     // would leave every date on screen quietly wrong.
-    api.context.mockResolvedValue({ configJson: { timezone: 'JST' } })
+    api.context.mockResolvedValue({ timezone: 'JST' })
     renderProvider()
     await waitFor(() => expect(warning()).not.toBeNull())
     expect(zone()).toBe(DEFAULT_TIME_ZONE)
@@ -83,7 +83,7 @@ describe('TenantTimezoneProvider', () => {
 
   it.each([424, 502, 503, 504])('recovers from an upstream %s with one retry', async status => {
     api.context.mockRejectedValueOnce(new ApiError('upstream unavailable', status))
-      .mockResolvedValueOnce({ configJson: { timezone: 'Asia/Taipei' } })
+      .mockResolvedValueOnce({ timezone: 'Asia/Taipei' })
     renderProvider()
     await waitFor(() => expect(zone()).toBe('Asia/Taipei'))
     expect(api.context).toHaveBeenCalledTimes(2)
@@ -106,7 +106,7 @@ describe('TenantTimezoneProvider', () => {
     expect(zone()).toBe(DEFAULT_TIME_ZONE)
   })
 
-  it.each([null, {}, { configJson: null }, { configJson: {} }, { configJson: { timezone: ' ' } }])(
+  it.each([null, {}, { configJson: null }, { configJson: {} }, { timezone: ' ' }])(
     'treats absent settings %j as Tokyo without warning', async settings => {
       api.context.mockResolvedValue(settings)
       await act(async () => { renderProvider() })
@@ -117,7 +117,7 @@ describe('TenantTimezoneProvider', () => {
   )
 
   it('keeps a cached configured zone when revalidation fails', async () => {
-    api.context.mockResolvedValue({ configJson: { timezone: 'America/New_York' } })
+    api.context.mockResolvedValue({ timezone: 'America/New_York' })
     const view = renderProvider()
     await waitFor(() => expect(zone()).toBe('America/New_York'))
     view.unmount()
@@ -130,7 +130,7 @@ describe('TenantTimezoneProvider', () => {
   })
 
   it('clears the warning when the settings screen saves a zone', async () => {
-    api.context.mockResolvedValue({ configJson: { timezone: 'JST' } })
+    api.context.mockResolvedValue({ timezone: 'JST' })
     renderProvider()
     await waitFor(() => expect(warning()).not.toBeNull())
 

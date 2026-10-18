@@ -9,6 +9,10 @@ const state = vi.hoisted(() => ({ gate: 'hidden', route: 'golf/data-imports/cour
 vi.mock('./lib/router', () => ({ useRoute: () => state.route, navigate: vi.fn() }))
 vi.mock('./feature-flags/gated-routes', () => ({ useRouteGate: () => state.gate }))
 vi.mock('./feature-flags/FeatureFlags', () => ({ FeatureFlagProvider: ({ children }: { children: ReactNode }) => children }))
+vi.mock('./feature-delivery/FeatureDelivery', () => ({
+  FeatureDeliveryProvider: ({ children }: { children: ReactNode }) => children,
+  useRouteDelivery: () => ({ decision: true, error: false, refresh: () => undefined }),
+}))
 vi.mock('./auth/AuthProvider', () => ({ AuthProvider: ({ children }: { children: ReactNode }) => children }))
 vi.mock('./auth/EffectiveCapabilitiesProvider', () => ({
   EffectiveCapabilitiesProvider: ({ children }: { children: ReactNode }) => children,

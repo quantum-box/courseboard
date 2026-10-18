@@ -3740,6 +3740,11 @@ function resolveMutation(path: string, init?: RequestInit): MockFieldResult<Json
     return hit(cloneMockInvoice(invoice))
   }
 
+  if (pathname === '/v1/course/feature-deliveries/evaluate' && method === 'POST') {
+    // Mock mode runs with delivery enforcement off, like a fresh deployment.
+    return hit({ enforcement: 'off', values: [] })
+  }
+
   if (pathname === '/v1/course/feature-flags/evaluate' && method === 'POST') {
     // Mock mode behaves like an all-enabled flag store so gated features stay
     // reachable in fixture-driven development.

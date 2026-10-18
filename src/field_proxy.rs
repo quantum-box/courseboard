@@ -218,7 +218,7 @@ fn is_allowed_path(path: &str) -> bool {
         || is_bridge_export_path(path)
 }
 
-fn is_allowed_route(method: &Method, path: &str) -> bool {
+pub(crate) fn is_allowed_route(method: &Method, path: &str) -> bool {
     if !is_allowed_path(path) {
         return false;
     }

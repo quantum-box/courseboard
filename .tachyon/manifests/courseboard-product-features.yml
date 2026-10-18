@@ -1,0 +1,934 @@
+# Generated from src/feature_delivery/catalog.rs. Do not edit by hand.
+# Regenerate: COURSEBOARD_UPDATE_FEATURE_MANIFEST=1 cargo test feature_delivery
+apiVersion: apps.tachy.one/v1alpha
+kind: ProductFeatures
+metadata:
+  name: courseboard-product-features
+  tenantId: tn_01ks18jhh1xvggktfzjx5jqsen
+spec:
+  revision: "courseboard-product-features-2026-10-19.1"
+  productScope: courseboard
+  sourceProductKey: courseboard
+  features:
+  - key: courseboard.tee_sheet
+    revision: "1"
+    featureDefinitionRevision: "1"
+    description: "Tee sheet and booking ledger: taking, moving, and cancelling bookings."
+    deliveryKey: feature.courseboard.tee_sheet
+    requiredActions:
+    - "field_extension_golf:ListTeeSheet"
+    - "field_extension_golf:ManageReservations"
+    apiRefs:
+    - id: "GET /v1/course/player-tag-options"
+      status: implemented
+    - id: "* /v1/course/tee-sheet"
+      status: implemented
+    - id: "* /v1/course/tee-ledger"
+      status: implemented
+    - id: "* /v1/course/reservations"
+      status: implemented
+    - id: "* /v1/course/reservations/:reservation_id"
+      status: implemented
+    - id: "* /v1/course/reservations/:reservation_id/cancel"
+      status: implemented
+    - id: "* /v1/course/reservations/:reservation_id/party"
+      status: implemented
+    - id: "* /v1/course/reservations/:reservation_id/plan"
+      status: implemented
+    - id: "GET /field-api/v1/erp/reservation-types"
+      status: implemented
+    uiRefs:
+    - id: "route:golf/ledger"
+      status: implemented
+    - id: "route:golf/timeline"
+      status: implemented
+    optionalIntegration: null
+    releaseGates: []
+    requiredFeatureKeys:
+    - "courseboard.courses"
+    internalDependencies: []
+    operationBindings:
+    - operation: read
+      requiredActions:
+      - "field_extension_golf:ListTeeSheet"
+    - operation: manage
+      requiredActions:
+      - "field_extension_golf:ListTeeSheet"
+      - "field_extension_golf:ManageReservations"
+  - key: courseboard.tee_sheet.slot_overrides
+    revision: "1"
+    featureDefinitionRevision: "1"
+    description: "Opening and closing tee times by hand."
+    deliveryKey: feature.courseboard.tee_sheet.slot_overrides
+    requiredActions:
+    - "field_extension_golf:ListSlotOverrides"
+    - "field_extension_golf:ManageSlotOverrides"
+    apiRefs:
+    - id: "GET /v1/course/slot-overrides"
+      status: implemented
+    - id: "PUT /v1/course/slot-overrides"
+      status: implemented
+    - id: "DELETE /v1/course/slot-overrides"
+      status: implemented
+    uiRefs: []
+    optionalIntegration: null
+    releaseGates: []
+    requiredFeatureKeys:
+    - "courseboard.tee_sheet"
+    internalDependencies: []
+    operationBindings:
+    - operation: read
+      requiredActions:
+      - "field_extension_golf:ListSlotOverrides"
+    - operation: manage
+      requiredActions:
+      - "field_extension_golf:ListSlotOverrides"
+      - "field_extension_golf:ManageSlotOverrides"
+  - key: courseboard.tee_sheet.checkin
+    revision: "1"
+    featureDefinitionRevision: "1"
+    description: "Checking a booked party in on arrival."
+    deliveryKey: feature.courseboard.tee_sheet.checkin
+    requiredActions:
+    - "field_extension_golf:ListTeeSheet"
+    - "field_extension_golf:ManageReservations"
+    apiRefs:
+    - id: "GET /v1/course/reservations/:reservation_id/checkins"
+      status: implemented
+    - id: "POST /v1/course/reservations/:reservation_id/checkins"
+      status: implemented
+    uiRefs: []
+    optionalIntegration: null
+    releaseGates: []
+    requiredFeatureKeys:
+    - "courseboard.tee_sheet"
+    internalDependencies: []
+    operationBindings:
+    - operation: read
+      requiredActions:
+      - "field_extension_golf:ListTeeSheet"
+    - operation: manage
+      requiredActions:
+      - "field_extension_golf:ListTeeSheet"
+      - "field_extension_golf:ManageReservations"
+  - key: courseboard.courses
+    revision: "1"
+    featureDefinitionRevision: "1"
+    description: "Courses, their order, resources, schedules, and booking horizon."
+    deliveryKey: feature.courseboard.courses
+    requiredActions:
+    - "field_extension_golf:ListCourses"
+    - "field_extension_golf:ManageCourses"
+    apiRefs:
+    - id: "GET /v1/course/course-order"
+      status: implemented
+    - id: "PUT /v1/course/course-order"
+      status: implemented
+    - id: "* /v1/course/courses"
+      status: implemented
+    - id: "* /v1/course/courses/:id"
+      status: implemented
+    - id: "* /v1/course/courses/:id/resource"
+      status: implemented
+    - id: "* /v1/course/courses/:id/schedule"
+      status: implemented
+    - id: "* /v1/course/courses/:id/time-slots/generate"
+      status: implemented
+    - id: "* /v1/course/booking-horizon"
+      status: implemented
+    - id: "* /v1/course/resources"
+      status: implemented
+    uiRefs:
+    - id: "route:golf/courses"
+      status: implemented
+    - id: "route:golf/courses/:courseId"
+      status: implemented
+    optionalIntegration: null
+    releaseGates: []
+    requiredFeatureKeys: []
+    internalDependencies: []
+    operationBindings:
+    - operation: read
+      requiredActions:
+      - "field_extension_golf:ListCourses"
+    - operation: manage
+      requiredActions:
+      - "field_extension_golf:ListCourses"
+      - "field_extension_golf:ManageCourses"
+  - key: courseboard.products
+    revision: "1"
+    featureDefinitionRevision: "1"
+    description: "The plans sold on the tee sheet and their slots."
+    deliveryKey: feature.courseboard.products
+    requiredActions:
+    - "field_extension_golf:ListProducts"
+    - "field_extension_golf:ManageProducts"
+    apiRefs:
+    - id: "* /v1/course/reservation-products"
+      status: implemented
+    - id: "* /v1/course/reservation-products/:service_id"
+      status: implemented
+    - id: "* /v1/course/reservation-products/:service_id/slots"
+      status: implemented
+    uiRefs:
+    - id: "route:golf/products"
+      status: implemented
+    - id: "route:golf/products/:serviceId"
+      status: implemented
+    optionalIntegration: null
+    releaseGates: []
+    requiredFeatureKeys:
+    - "courseboard.courses"
+    internalDependencies: []
+    operationBindings:
+    - operation: read
+      requiredActions:
+      - "field_extension_golf:ListProducts"
+    - operation: manage
+      requiredActions:
+      - "field_extension_golf:ListProducts"
+      - "field_extension_golf:ManageProducts"
+  - key: courseboard.reservation_policy
+    revision: "1"
+    featureDefinitionRevision: "1"
+    description: "Booking rules, player tags, and the golf extension config."
+    deliveryKey: feature.courseboard.reservation_policy
+    requiredActions:
+    - "field_extension_golf:ListReservationPolicy"
+    - "field_extension_golf:ListExtensionStatus"
+    - "field_extension_golf:ManageReservationPolicy"
+    apiRefs:
+    - id: "PUT /v1/course/player-tag-options"
+      status: implemented
+    - id: "* /v1/course/reservation-policy"
+      status: implemented
+    - id: "* /v1/course/extension-status"
+      status: implemented
+    - id: "* /v1/course/config"
+      status: implemented
+    uiRefs:
+    - id: "route:golf/policy"
+      status: implemented
+    - id: "route:settings/advanced"
+      status: implemented
+    optionalIntegration: null
+    releaseGates: []
+    requiredFeatureKeys: []
+    internalDependencies: []
+    operationBindings:
+    - operation: read
+      requiredActions:
+      - "field_extension_golf:ListReservationPolicy"
+      - "field_extension_golf:ListExtensionStatus"
+    - operation: manage
+      requiredActions:
+      - "field_extension_golf:ListReservationPolicy"
+      - "field_extension_golf:ListExtensionStatus"
+      - "field_extension_golf:ManageReservationPolicy"
+  - key: courseboard.customers
+    revision: "1"
+    featureDefinitionRevision: "1"
+    description: "The customer ledger, visits, call list, and grade rules."
+    deliveryKey: feature.courseboard.customers
+    requiredActions:
+    - "field_extension_golf:ListCustomers"
+    - "field_extension_golf:ManageCustomers"
+    apiRefs:
+    - id: "* /v1/course/customers"
+      status: implemented
+    - id: "* /v1/course/customers/:customer_id"
+      status: implemented
+    - id: "* /v1/course/customers/:customer_id/visits"
+      status: implemented
+    - id: "* /v1/course/customers/:customer_id/registration"
+      status: implemented
+    - id: "GET /v1/course/customer-summaries"
+      status: implemented
+    - id: "GET /v1/course/customer-grade-rules"
+      status: implemented
+    - id: "PUT /v1/course/customer-grade-rules"
+      status: implemented
+    uiRefs:
+    - id: "route:golf/customers"
+      status: implemented
+    - id: "route:golf/customers/:customerId"
+      status: implemented
+    - id: "route:golf/customers/call-list"
+      status: implemented
+    - id: "route:settings/customer-grades"
+      status: implemented
+    optionalIntegration: null
+    releaseGates: []
+    requiredFeatureKeys: []
+    internalDependencies: []
+    operationBindings:
+    - operation: read
+      requiredActions:
+      - "field_extension_golf:ListCustomers"
+    - operation: manage
+      requiredActions:
+      - "field_extension_golf:ListCustomers"
+      - "field_extension_golf:ManageCustomers"
+  - key: courseboard.customers.reception
+    revision: "1"
+    featureDefinitionRevision: "1"
+    description: "Reception sheets: OCR drafts, reception fields, and consent items."
+    deliveryKey: feature.courseboard.customers.reception
+    requiredActions:
+    - "field_extension_golf:ListCustomers"
+    - "field_extension_golf:ManageCustomers"
+    apiRefs:
+    - id: "* /v1/course/customer-consent-items"
+      status: implemented
+    - id: "* /v1/course/customer-consent-items/:consent_item_id"
+      status: implemented
+    - id: "GET /v1/course/customer-reception-fields"
+      status: implemented
+    - id: "PUT /v1/course/customer-reception-fields"
+      status: implemented
+    - id: "POST /v1/course/customer-reception-fields/analysis"
+      status: implemented
+    - id: "* /v1/course/customers/reception-draft"
+      status: implemented
+    - id: "* /v1/course/customers/reception-draft/jobs"
+      status: implemented
+    - id: "* /v1/course/customers/reception-draft/jobs/:job_id"
+      status: implemented
+    - id: "* /v1/course/customers/reception-draft/jobs/:job_id/confirm"
+      status: implemented
+    - id: "* /v1/course/customers/reception-draft/jobs/:job_id/advance"
+      status: implemented
+    - id: "PUT /v1/course/customers/:customer_id/reception-values"
+      status: implemented
+    uiRefs:
+    - id: "route:golf/customers/reception"
+      status: implemented
+    - id: "route:settings/reception-fields"
+      status: implemented
+    optionalIntegration: null
+    releaseGates: []
+    requiredFeatureKeys:
+    - "courseboard.customers"
+    internalDependencies: []
+    operationBindings:
+    - operation: read
+      requiredActions:
+      - "field_extension_golf:ListCustomers"
+    - operation: manage
+      requiredActions:
+      - "field_extension_golf:ListCustomers"
+      - "field_extension_golf:ManageCustomers"
+  - key: courseboard.customers.cancellations
+    revision: "1"
+    featureDefinitionRevision: "1"
+    description: "The cancelled-booking list and its billing sheet."
+    deliveryKey: feature.courseboard.customers.cancellations
+    requiredActions:
+    - "field_extension_golf:ListCustomers"
+    apiRefs:
+    - id: "GET /v1/course/reservation-cancellations"
+      status: implemented
+    - id: "GET /field-api/v1/invoices"
+      status: implemented
+    uiRefs:
+    - id: "route:golf/customers/cancellations"
+      status: implemented
+    optionalIntegration: null
+    releaseGates: []
+    requiredFeatureKeys:
+    - "courseboard.customers"
+    internalDependencies: []
+    operationBindings:
+    - operation: read
+      requiredActions:
+      - "field_extension_golf:ListCustomers"
+  - key: courseboard.membership
+    revision: "1"
+    featureDefinitionRevision: "1"
+    description: "Membership plans, discounts, play windows, and who holds one."
+    deliveryKey: feature.courseboard.membership
+    requiredActions:
+    - "field_extension_golf:ListMembership"
+    - "field:ListMembership"
+    - "field_extension_golf:ManageMembershipPlans"
+    - "field_extension_golf:AssignMembership"
+    apiRefs:
+    - id: "* /v1/course/customers/:customer_id/membership-activities"
+      status: implemented
+    - id: "* /v1/course/customers/:customer_id/member-number"
+      status: implemented
+    - id: "* /v1/course/customers/:customer_id/membership"
+      status: implemented
+    - id: "GET /v1/course/membership-discounts"
+      status: implemented
+    - id: "PUT /v1/course/membership-discounts"
+      status: implemented
+    - id: "GET /v1/course/membership-play-windows"
+      status: implemented
+    - id: "PUT /v1/course/membership-play-windows"
+      status: implemented
+    - id: "* /v1/course/membership-plans"
+      status: implemented
+    - id: "* /v1/course/membership-plans/:plan_id"
+      status: implemented
+    uiRefs:
+    - id: "route:settings/membership-plans"
+      status: implemented
+    - id: "route:settings/membership-discounts"
+      status: implemented
+    - id: "route:settings/membership-play-windows"
+      status: implemented
+    optionalIntegration: null
+    releaseGates: []
+    requiredFeatureKeys:
+    - "courseboard.customers"
+    internalDependencies: []
+    operationBindings:
+    - operation: read
+      requiredActions:
+      - "field_extension_golf:ListMembership"
+      - "field:ListMembership"
+    - operation: manage
+      requiredActions:
+      - "field_extension_golf:ListMembership"
+      - "field:ListMembership"
+      - "field_extension_golf:ManageMembershipPlans"
+      - "field_extension_golf:AssignMembership"
+  - key: courseboard.caddies
+    revision: "1"
+    featureDefinitionRevision: "1"
+    description: "The caddie roster and which courses each caddie works."
+    deliveryKey: feature.courseboard.caddies
+    requiredActions:
+    - "field_extension_golf:ListCaddies"
+    - "field_extension_golf:ManageCaddies"
+    apiRefs:
+    - id: "* /admin/caddies"
+      status: implemented
+    - id: "* /admin/caddies/:id"
+      status: implemented
+    - id: "* /admin/shifts"
+      status: implemented
+    - id: "* /admin/shifts/:id"
+      status: implemented
+    - id: "* /admin/shifts/:id/cancel"
+      status: implemented
+    - id: "* /v1/course/caddie-profiles"
+      status: implemented
+    - id: "* /v1/course/caddie-profiles/:id"
+      status: implemented
+    - id: "* /v1/course/caddie-profiles/:id/courses"
+      status: implemented
+    uiRefs:
+    - id: "route:golf/caddies"
+      status: implemented
+    - id: "route:golf/caddies/:caddieId"
+      status: implemented
+    optionalIntegration: null
+    releaseGates: []
+    requiredFeatureKeys:
+    - "courseboard.courses"
+    - "courseboard.staff"
+    internalDependencies: []
+    operationBindings:
+    - operation: read
+      requiredActions:
+      - "field_extension_golf:ListCaddies"
+    - operation: manage
+      requiredActions:
+      - "field_extension_golf:ListCaddies"
+      - "field_extension_golf:ManageCaddies"
+  - key: courseboard.caddies.dispatch
+    revision: "1"
+    featureDefinitionRevision: "1"
+    description: "Putting caddies on rounds, by hand or by the auto-placement, and duty rotas."
+    deliveryKey: feature.courseboard.caddies.dispatch
+    requiredActions:
+    - "field_extension_golf:ListCaddieAssignments"
+    - "field_extension_golf:ManageCaddieAssignments"
+    apiRefs:
+    - id: "PUT /v1/course/caddie-assignments/:assignment_id/reassignment"
+      status: implemented
+    - id: "GET /v1/course/caddie-duties"
+      status: implemented
+    - id: "PUT /v1/course/caddie-duties"
+      status: implemented
+    - id: "GET /v1/course/caddie-duty-assignments"
+      status: implemented
+    - id: "POST /v1/course/caddie-duty-assignments"
+      status: implemented
+    - id: "DELETE /v1/course/caddie-duty-assignments/:duty_id"
+      status: implemented
+    - id: "* /admin/reservations"
+      status: implemented
+    - id: "* /admin/reservations/:reservation_id/assign"
+      status: implemented
+    - id: "* /admin/reservations/:reservation_id/unassign"
+      status: implemented
+    - id: "* /admin/dispatch"
+      status: implemented
+    - id: "* /v1/course/caddie-assignments"
+      status: implemented
+    - id: "* /v1/course/caddie-assignments/:id"
+      status: implemented
+    - id: "* /v1/course/caddie-recommendations"
+      status: implemented
+    - id: "* /v1/course/caddie-auto-assignments"
+      status: implemented
+    uiRefs:
+    - id: "route:golf/caddies/dispatch"
+      status: implemented
+    - id: "route:settings/caddie-duties"
+      status: implemented
+    optionalIntegration: null
+    releaseGates: []
+    requiredFeatureKeys:
+    - "courseboard.caddies"
+    - "courseboard.tee_sheet"
+    internalDependencies: []
+    operationBindings:
+    - operation: read
+      requiredActions:
+      - "field_extension_golf:ListCaddieAssignments"
+    - operation: manage
+      requiredActions:
+      - "field_extension_golf:ListCaddieAssignments"
+      - "field_extension_golf:ManageCaddieAssignments"
+  - key: courseboard.caddies.availability
+    revision: "1"
+    featureDefinitionRevision: "1"
+    description: "Who said they can work, and by when they had to say."
+    deliveryKey: feature.courseboard.caddies.availability
+    requiredActions:
+    - "field_extension_golf:ListCaddieAvailability"
+    - "field_extension_golf:ManageCaddieAvailability"
+    apiRefs:
+    - id: "GET /v1/course/caddie-availability-deadlines/:year_month"
+      status: implemented
+    - id: "PUT /v1/course/caddie-availability-deadlines/:year_month"
+      status: implemented
+    - id: "* /v1/course/caddie-availabilities"
+      status: implemented
+    - id: "* /v1/course/caddie-availabilities/:caddie_id/:date"
+      status: implemented
+    - id: "* /v1/course/caddie-availability-submissions/:year_month"
+      status: implemented
+    uiRefs: []
+    optionalIntegration: null
+    releaseGates: []
+    requiredFeatureKeys:
+    - "courseboard.caddies"
+    internalDependencies: []
+    operationBindings:
+    - operation: read
+      requiredActions:
+      - "field_extension_golf:ListCaddieAvailability"
+    - operation: manage
+      requiredActions:
+      - "field_extension_golf:ListCaddieAvailability"
+      - "field_extension_golf:ManageCaddieAvailability"
+  - key: courseboard.caddies.shifts
+    revision: "1"
+    featureDefinitionRevision: "1"
+    description: "Shift plans, the rules they are generated under, and the sync to Field."
+    deliveryKey: feature.courseboard.caddies.shifts
+    requiredActions:
+    - "field_extension_golf:ListShifts"
+    - "field_extension_golf:ManageShifts"
+    apiRefs:
+    - id: "GET /v1/course/caddie-shift-rules"
+      status: implemented
+    - id: "PUT /v1/course/caddie-shift-rules"
+      status: implemented
+    - id: "GET /v1/course/caddie-shifts"
+      status: implemented
+    - id: "PUT /v1/course/caddie-shifts/:caddie_profile_id/:date"
+      status: implemented
+    - id: "POST /v1/course/caddie-shift-plans/:year_month"
+      status: implemented
+    - id: "POST /v1/course/caddie-shift-plans/:year_month/preview"
+      status: implemented
+    - id: "GET /v1/course/caddie-shift-plans/:year_month/field-sync"
+      status: implemented
+    - id: "POST /v1/course/caddie-shift-plans/:year_month/field-sync"
+      status: implemented
+    uiRefs:
+    - id: "route:golf/caddies/shifts"
+      status: implemented
+    optionalIntegration: null
+    releaseGates: []
+    requiredFeatureKeys:
+    - "courseboard.caddies"
+    - "courseboard.caddies.availability"
+    - "courseboard.caddies.dispatch"
+    internalDependencies: []
+    operationBindings:
+    - operation: read
+      requiredActions:
+      - "field_extension_golf:ListShifts"
+    - operation: manage
+      requiredActions:
+      - "field_extension_golf:ListShifts"
+      - "field_extension_golf:ManageShifts"
+  - key: courseboard.caddies.insights
+    revision: "1"
+    featureDefinitionRevision: "1"
+    description: "Attendance, supply, reinforcement, and rating figures."
+    deliveryKey: feature.courseboard.caddies.insights
+    requiredActions:
+    - "field_extension_golf:ListCaddieInsights"
+    apiRefs:
+    - id: "* /v1/course/caddie-attendance-snapshot"
+      status: implemented
+    - id: "* /v1/course/caddie-attendance-snapshots"
+      status: implemented
+    - id: "* /v1/course/caddie-supply"
+      status: implemented
+    - id: "* /v1/course/caddie-course-supply"
+      status: implemented
+    - id: "* /v1/course/caddie-reinforcements"
+      status: implemented
+    - id: "* /v1/course/caddie-ratings"
+      status: implemented
+    uiRefs:
+    - id: "route:golf/caddies/attendance"
+      status: implemented
+    optionalIntegration: null
+    releaseGates: []
+    requiredFeatureKeys:
+    - "courseboard.caddies"
+    internalDependencies: []
+    operationBindings:
+    - operation: read
+      requiredActions:
+      - "field_extension_golf:ListCaddieInsights"
+  - key: courseboard.caddies.rank_fees
+    revision: "1"
+    featureDefinitionRevision: "1"
+    description: "What each caddie grade is paid, and aligning fees to it."
+    deliveryKey: feature.courseboard.caddies.rank_fees
+    requiredActions:
+    - "field_extension_golf:ListCaddieRankFees"
+    - "field_extension_golf:ManageCaddieRankFees"
+    apiRefs:
+    - id: "GET /v1/course/caddie-rank-fees"
+      status: implemented
+    - id: "GET /v1/course/caddie-rank-fees/history"
+      status: implemented
+    - id: "PUT /v1/course/caddie-rank-fees"
+      status: implemented
+    - id: "GET /v1/course/caddie-fee-alignment"
+      status: implemented
+    - id: "POST /v1/course/caddie-fee-alignment"
+      status: implemented
+    uiRefs: []
+    optionalIntegration: null
+    releaseGates: []
+    requiredFeatureKeys:
+    - "courseboard.caddies"
+    internalDependencies: []
+    operationBindings:
+    - operation: read
+      requiredActions:
+      - "field_extension_golf:ListCaddieRankFees"
+    - operation: manage
+      requiredActions:
+      - "field_extension_golf:ListCaddieRankFees"
+      - "field_extension_golf:ManageCaddieRankFees"
+  - key: courseboard.caddies.payroll
+    revision: "1"
+    featureDefinitionRevision: "1"
+    description: "What the caddies are owed, and its CSV."
+    deliveryKey: feature.courseboard.caddies.payroll
+    requiredActions:
+    - "field_extension_golf:ListPayroll"
+    apiRefs:
+    - id: "* /v1/course/caddie-payroll-summary"
+      status: implemented
+    - id: "* /v1/course/caddie-payroll-summary/export.csv"
+      status: implemented
+    uiRefs:
+    - id: "route:golf/caddies/payroll"
+      status: implemented
+    optionalIntegration: null
+    releaseGates: []
+    requiredFeatureKeys:
+    - "courseboard.caddies.rank_fees"
+    internalDependencies: []
+    operationBindings:
+    - operation: read
+      requiredActions:
+      - "field_extension_golf:ListPayroll"
+  - key: courseboard.staff
+    revision: "1"
+    featureDefinitionRevision: "1"
+    description: "The company's staff register held in Field HRM."
+    deliveryKey: feature.courseboard.staff
+    requiredActions:
+    - "field:ListHrm"
+    - "field:ManageHrm"
+    apiRefs:
+    - id: "* /field-api/v1/erp/staff/*"
+      status: implemented
+    uiRefs:
+    - id: "route:staff"
+      status: implemented
+    - id: "route:staff/:staffId"
+      status: implemented
+    optionalIntegration: null
+    releaseGates: []
+    requiredFeatureKeys: []
+    internalDependencies: []
+    operationBindings:
+    - operation: read
+      requiredActions:
+      - "field:ListHrm"
+    - operation: manage
+      requiredActions:
+      - "field:ListHrm"
+      - "field:ManageHrm"
+  - key: courseboard.budgets
+    revision: "1"
+    featureDefinitionRevision: "1"
+    description: "Daily budgets, their import, and how the club tracks against them."
+    deliveryKey: feature.courseboard.budgets
+    requiredActions:
+    - "field_extension_golf:ListBudgets"
+    - "field_extension_golf:ManageBudgets"
+    apiRefs:
+    - id: "* /v1/course/daily-budgets"
+      status: implemented
+    - id: "* /v1/course/daily-budgets/achievement"
+      status: implemented
+    - id: "* /v1/course/daily-budgets/import"
+      status: implemented
+    uiRefs:
+    - id: "route:golf/budgets"
+      status: implemented
+    optionalIntegration: null
+    releaseGates: []
+    requiredFeatureKeys:
+    - "courseboard.courses"
+    internalDependencies: []
+    operationBindings:
+    - operation: read
+      requiredActions:
+      - "field_extension_golf:ListBudgets"
+    - operation: manage
+      requiredActions:
+      - "field_extension_golf:ListBudgets"
+      - "field_extension_golf:ManageBudgets"
+  - key: courseboard.settlement
+    revision: "1"
+    featureDefinitionRevision: "1"
+    description: "The month's takings, their CSV, and the per-booking billing invoice."
+    deliveryKey: feature.courseboard.settlement
+    requiredActions:
+    - "field_extension_golf:ListSettlement"
+    apiRefs:
+    - id: "* /v1/course/monthly-settlement"
+      status: implemented
+    - id: "* /v1/course/monthly-settlement/export.csv"
+      status: implemented
+    - id: "* /field-api/v1/erp/reservations/:reservation_id/billing-invoice"
+      status: implemented
+    - id: "GET /field-api/v1/erp/orders/:order_id"
+      status: implemented
+    uiRefs:
+    - id: "route:golf/settlement"
+      status: implemented
+    optionalIntegration: null
+    releaseGates: []
+    requiredFeatureKeys: []
+    internalDependencies: []
+    operationBindings:
+    - operation: read
+      requiredActions:
+      - "field_extension_golf:ListSettlement"
+  - key: courseboard.fee_simulator
+    revision: "1"
+    featureDefinitionRevision: "1"
+    description: "Fee and golf-course-tax simulations and their pricing settings."
+    deliveryKey: feature.courseboard.fee_simulator
+    requiredActions:
+    - "field_extension_golf:CalculateFees"
+    - "field_extension_golf:ManageReservationPolicy"
+    apiRefs:
+    - id: "POST /v1/course/simulator/calculate"
+      status: implemented
+    - id: "POST /v1/course/simulator/simulate/range"
+      status: implemented
+    - id: "GET /v1/course/pricing-settings"
+      status: implemented
+    - id: "PUT /v1/course/pricing-settings"
+      status: implemented
+    uiRefs:
+    - id: "route:golf/simulator"
+      status: implemented
+    optionalIntegration: null
+    releaseGates: []
+    requiredFeatureKeys:
+    - "courseboard.membership"
+    internalDependencies: []
+    operationBindings:
+    - operation: read
+      requiredActions:
+      - "field_extension_golf:CalculateFees"
+    - operation: manage
+      requiredActions:
+      - "field_extension_golf:CalculateFees"
+      - "field_extension_golf:ManageReservationPolicy"
+  - key: courseboard.reservation_report_import
+    revision: "1"
+    featureDefinitionRevision: "1"
+    description: "Taking a reservation report off a spreadsheet or document and onto the board."
+    deliveryKey: feature.courseboard.reservation_report_import
+    requiredActions:
+    - "field_extension_golf:ListReservationReports"
+    - "field_extension_golf:ImportReservationReports"
+    apiRefs:
+    - id: "POST /v1/course/common-import-owner/:operation"
+      status: implemented
+    - id: "* /v1/course/reservation-report-imports"
+      status: implemented
+    - id: "* /v1/course/reservation-report-imports/preview"
+      status: implemented
+    - id: "* /v1/course/reservation-report-entries"
+      status: implemented
+    - id: "* /v1/course/reservation-report-migration"
+      status: implemented
+    uiRefs:
+    - id: "route:golf/reservation-report-import"
+      status: implemented
+    - id: "route:golf/data-imports/courseboardReservationReports/documents"
+      status: implemented
+    - id: "route:golf/data-imports/courseboardReservationReports/documents/:jobId"
+      status: implemented
+    optionalIntegration: null
+    releaseGates:
+    - "feature.courseboard.reservation-report-import"
+    requiredFeatureKeys:
+    - "courseboard.courses"
+    internalDependencies: []
+    operationBindings:
+    - operation: read
+      requiredActions:
+      - "field_extension_golf:ListReservationReports"
+    - operation: manage
+      requiredActions:
+      - "field_extension_golf:ListReservationReports"
+      - "field_extension_golf:ImportReservationReports"
+  - key: courseboard.data_imports
+    revision: "1"
+    featureDefinitionRevision: "1"
+    description: "Common CSV imports through Field Bridge."
+    deliveryKey: feature.courseboard.data_imports
+    requiredActions:
+    - "field:ListBridgeDefinitions"
+    - "field:PreviewBridgeRun"
+    - "field:ExecuteBridgeDrafts"
+    apiRefs:
+    - id: "* /v1/course/data-imports/*path"
+      status: implemented
+    uiRefs:
+    - id: "route:golf/data-imports"
+      status: implemented
+    - id: "route:golf/data-imports/:target"
+      status: implemented
+    optionalIntegration: null
+    releaseGates: []
+    requiredFeatureKeys: []
+    internalDependencies: []
+    operationBindings:
+    - operation: read
+      requiredActions:
+      - "field:ListBridgeDefinitions"
+    - operation: manage
+      requiredActions:
+      - "field:ListBridgeDefinitions"
+      - "field:PreviewBridgeRun"
+      - "field:ExecuteBridgeDrafts"
+  - key: courseboard.data_exports
+    revision: "1"
+    featureDefinitionRevision: "1"
+    description: "Exports of CourseBoard and Field data through Field Bridge."
+    deliveryKey: feature.courseboard.data_exports
+    requiredActions:
+    - "field:ListBridgeExportDefinitions"
+    - "field:ManageBridgeExportDefinitions"
+    apiRefs:
+    - id: "GET /v1/course/data-exports/objects"
+      status: implemented
+    - id: "GET /v1/course/data-exports/:source_key/rows"
+      status: implemented
+    - id: "* /field-api/v1/bridge/exports/*"
+      status: implemented
+    uiRefs:
+    - id: "route:settings/data-exports"
+      status: implemented
+    optionalIntegration: null
+    releaseGates: []
+    requiredFeatureKeys: []
+    internalDependencies: []
+    operationBindings:
+    - operation: read
+      requiredActions:
+      - "field:ListBridgeExportDefinitions"
+    - operation: manage
+      requiredActions:
+      - "field:ListBridgeExportDefinitions"
+      - "field:ManageBridgeExportDefinitions"
+  - key: courseboard.cancellation_fee
+    revision: "1"
+    featureDefinitionRevision: "1"
+    description: "Billing a cancellation fee and collecting it through a payment link."
+    deliveryKey: feature.courseboard.cancellation_fee
+    requiredActions:
+    - "field:ListCancellationFees"
+    - "field:ManageCancellationFees"
+    apiRefs:
+    - id: "POST /v1/course/reservation-cancellations/fees"
+      status: implemented
+    - id: "* /field-api/v1/cancellation-fees/*"
+      status: implemented
+    - id: "POST /field-api/v1/invoices"
+      status: implemented
+    uiRefs:
+    - id: "route:cancellation-fees"
+      status: implemented
+    - id: "route:cancellation-fees/new"
+      status: implemented
+    - id: "route:cancellation-fees/:invoiceId"
+      status: implemented
+    optionalIntegration: null
+    releaseGates: []
+    requiredFeatureKeys: []
+    internalDependencies: []
+    operationBindings:
+    - operation: read
+      requiredActions:
+      - "field:ListCancellationFees"
+    - operation: manage
+      requiredActions:
+      - "field:ListCancellationFees"
+      - "field:ManageCancellationFees"
+  - key: courseboard.course_map
+    revision: "1"
+    featureDefinitionRevision: "1"
+    description: "The live cart map, fed by the desktop app."
+    deliveryKey: feature.courseboard.course_map
+    requiredActions:
+    - "field_extension_golf:ListCourses"
+    apiRefs: []
+    uiRefs:
+    - id: "route:course-map"
+      status: implemented
+    optionalIntegration: null
+    releaseGates: []
+    requiredFeatureKeys:
+    - "courseboard.courses"
+    internalDependencies: []
+    operationBindings:
+    - operation: read
+      requiredActions:
+      - "field_extension_golf:ListCourses"

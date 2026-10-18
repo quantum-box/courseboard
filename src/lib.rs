@@ -6,11 +6,12 @@ mod admin_ui;
 pub mod auth;
 pub mod cancellation_fees;
 mod common_import_owner;
-mod common_import_proxy;
+pub(crate) mod common_import_proxy;
 pub mod config;
 pub mod course;
 pub mod course_authz;
 pub mod demo_seed;
+pub mod feature_delivery;
 pub mod feature_flags;
 pub mod field_api;
 pub mod field_proxy;
@@ -99,6 +100,7 @@ pub struct AppState {
     field_api: Option<DynFieldApi>,
     field_api_config_error: Option<String>,
     feature_flags: Arc<feature_flags::EvaluateFeatureFlags>,
+    feature_delivery: Arc<feature_delivery::FeatureDeliveryGuard>,
     profile_client: Option<Arc<profile_proxy::ProfileClient>>,
     course_authorization: Arc<course_authz::CourseAuthorization>,
     course_authorizer: Arc<dyn course::domain::CourseAuthorizer>,
@@ -186,6 +188,7 @@ impl AppState {
                 "Field API client is not configured for the admin UI".to_string(),
             ),
             feature_flags: Arc::new(feature_flags::EvaluateFeatureFlags::unavailable()),
+            feature_delivery: Arc::new(feature_delivery::FeatureDeliveryGuard::off()),
             profile_client: None,
             course_authorization: Arc::new(course_authz::CourseAuthorization::disabled()),
             course_authorizer: Arc::new(course::infrastructure::AllowAllAuthorizer),
@@ -272,6 +275,7 @@ impl AppState {
             field_api: Some(field_api),
             field_api_config_error: None,
             feature_flags: Arc::new(feature_flags::EvaluateFeatureFlags::unavailable()),
+            feature_delivery: Arc::new(feature_delivery::FeatureDeliveryGuard::off()),
             profile_client: None,
             course_authorization: Arc::new(course_authz::CourseAuthorization::disabled()),
             course_authorizer: Arc::new(course::infrastructure::AllowAllAuthorizer),
@@ -350,6 +354,7 @@ impl AppState {
                 field_api: Some(Arc::new(client)),
                 field_api_config_error: None,
                 feature_flags: Arc::new(feature_flags::EvaluateFeatureFlags::unavailable()),
+                feature_delivery: Arc::new(feature_delivery::FeatureDeliveryGuard::off()),
                 profile_client: None,
                 course_authorization: Arc::new(course_authz::CourseAuthorization::disabled()),
                 course_authorizer: Arc::new(course::infrastructure::AllowAllAuthorizer),
@@ -419,6 +424,7 @@ impl AppState {
                 field_api: None,
                 field_api_config_error: Some(error.to_string()),
                 feature_flags: Arc::new(feature_flags::EvaluateFeatureFlags::unavailable()),
+                feature_delivery: Arc::new(feature_delivery::FeatureDeliveryGuard::off()),
                 profile_client: None,
                 course_authorization: Arc::new(course_authz::CourseAuthorization::disabled()),
                 course_authorizer: Arc::new(course::infrastructure::AllowAllAuthorizer),
@@ -515,6 +521,15 @@ impl AppState {
 
     pub(crate) fn feature_flags(&self) -> Arc<feature_flags::EvaluateFeatureFlags> {
         self.feature_flags.clone()
+    }
+
+    pub(crate) fn feature_delivery(&self) -> Arc<feature_delivery::FeatureDeliveryGuard> {
+        self.feature_delivery.clone()
+    }
+
+    fn with_feature_delivery(mut self, guard: feature_delivery::FeatureDeliveryGuard) -> Self {
+        self.feature_delivery = Arc::new(guard);
+        self
     }
 
     fn with_feature_flag_evaluator(
@@ -1485,6 +1500,12 @@ pub fn build_router(state: AppState) -> Router {
             ),
         )
         .route(
+            "/v1/course/tenant-timezone",
+            get(course::interfaces::http_commercial::get_tenant_timezone).route_layer(
+                middleware::from_fn_with_state(state.clone(), require_valid_token),
+            ),
+        )
+        .route(
             "/v1/course/config",
             patch(course::interfaces::http_commercial::update_extension_config).route_layer(
                 middleware::from_fn_with_state(state.clone(), require_valid_token),
@@ -1493,6 +1514,12 @@ pub fn build_router(state: AppState) -> Router {
         .route(
             "/v1/course/feature-flags/evaluate",
             post(feature_flags::evaluate_feature_flags).route_layer(
+                middleware::from_fn_with_state(state.clone(), require_valid_token),
+            ),
+        )
+        .route(
+            "/v1/course/feature-deliveries/evaluate",
+            post(feature_delivery::evaluate_feature_deliveries).route_layer(
                 middleware::from_fn_with_state(state.clone(), require_valid_token),
             ),
         )
@@ -1537,8 +1564,14 @@ pub fn build_router(state: AppState) -> Router {
     }
     router
         .with_state(state.clone())
-        // Innermost of the three: every matched route passes the action gate,
-        // and its refusals still get panic handling and CORS headers.
+        // Inside the action gate: only a request IAM already allowed is asked
+        // whether its feature is provided to the tenant.
+        .layer(middleware::from_fn_with_state(
+            state.clone(),
+            feature_delivery::require_feature_delivery,
+        ))
+        // Every matched route passes the action gate, and its refusals still
+        // get panic handling and CORS headers.
         .layer(middleware::from_fn_with_state(
             state,
             course_authz::require_course_authorization,
@@ -1735,6 +1768,12 @@ async fn build_app_with_pool(config: RuntimeConfig, pool: MySqlPool) -> anyhow::
             .with_feature_flag_evaluator(Arc::new(feature_flags::TachyonFeatureFlagEvaluator::new(
                 &tachyon_api_url,
             )))
+            .with_feature_delivery(feature_delivery::FeatureDeliveryGuard::new(
+                Arc::new(feature_delivery::TachyonFeatureDeliveryEvaluator::new(
+                    &tachyon_api_url,
+                )),
+                feature_delivery::DeliveryEnforcement::from_env(),
+            ))
             .with_profile_client(profile_client)
             .with_course_authorization(Arc::new(authorization.course_authorization))
             .with_course_authorizer(authorization.course_authorizer)

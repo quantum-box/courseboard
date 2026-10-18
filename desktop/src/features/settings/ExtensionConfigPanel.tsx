@@ -18,6 +18,7 @@ import {
 import { useRegisterPageReload } from '../../lib/pageReload'
 import { showToast } from '../../lib/toast'
 import { clearResourceCache } from '../../hooks/useResource'
+import { TENANT_TIMEZONE_CACHE_KEY } from '../../context/tenantTimezoneApi'
 import { notifyTenantTimezoneChanged } from '../../context/TenantTimezoneProvider'
 import {
   MAX_PLAYER_TAG_LENGTH,
@@ -191,7 +192,7 @@ export function ExtensionConfigPanel() {
         })
         const next = configJson
         setExtension(current => current ? { ...current, configJson: next } : current)
-        clearResourceCache('course:extension-status')
+        clearResourceCache(TENANT_TIMEZONE_CACHE_KEY)
         notifyTenantTimezoneChanged(draft.timezone.trim())
       }
       setDraft(configDraftFromJson(configJson, storedTags))
