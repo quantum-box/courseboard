@@ -268,6 +268,8 @@ pub enum DeliveryDenial {
     Unavailable,
     /// A protected route no rule maps to a feature.
     UnclassifiedRoute,
+    /// The tenant header and the tenant the request acts on disagree.
+    ScopeMismatch,
 }
 
 impl DeliveryDenial {
@@ -277,6 +279,7 @@ impl DeliveryDenial {
             Self::Unresolved => "FEATURE_DELIVERY_UNRESOLVED",
             Self::Unavailable => "FEATURE_DELIVERY_UNAVAILABLE",
             Self::UnclassifiedRoute => "FEATURE_ROUTE_UNCLASSIFIED",
+            Self::ScopeMismatch => "FEATURE_DELIVERY_SCOPE_MISMATCH",
         }
     }
 
@@ -286,6 +289,7 @@ impl DeliveryDenial {
             Self::Unresolved => "Feature delivery could not be resolved for the tenant",
             Self::Unavailable => "Feature delivery could not be verified",
             Self::UnclassifiedRoute => "This route is not mapped to a CourseBoard feature",
+            Self::ScopeMismatch => "x-operator-id does not match the tenant this request acts on",
         }
     }
 }
@@ -438,7 +442,7 @@ impl FeatureDeliveryGuard {
 
 fn evaluation_context(
     req: &Request<Body>,
-    tenant_fallback: Option<String>,
+    tenant_override: Option<String>,
 ) -> Option<FeatureFlagEvaluationContext> {
     let bearer = crate::course_authz::bearer_from(req)?;
     let header = |name: &str| {
@@ -451,7 +455,7 @@ fn evaluation_context(
     };
     Some(FeatureFlagEvaluationContext::new(
         format!("Bearer {bearer}"),
-        header("x-operator-id").or(tenant_fallback)?,
+        tenant_override.or_else(|| header("x-operator-id"))?,
         header("x-platform-id"),
     ))
 }
@@ -467,25 +471,55 @@ fn tenant_field(pairs: Vec<(String, String)>) -> Option<String> {
         .filter(|value| !value.is_empty())
 }
 
+/// Which tenant a legacy admin request acts on.
+enum AdminScope {
+    /// Not a legacy admin route: `x-operator-id` is the scope.
+    NotAdmin,
+    /// The tenant the handler will act on.
+    Tenant(String),
+    /// No tenant anywhere, or a form too large to read without taking it
+    /// away from the handler. Refused under enforcement.
+    Unknown,
+    /// `x-operator-id` names one tenant and the payload another.
+    Mismatch,
+    /// The body could not be read back; nothing is left to forward.
+    BodyLost,
+}
+
 /// The legacy server-rendered admin names its tenant in a `tenant_id` query
-/// or form field instead of `x-operator-id`. Read it from there so the same
-/// tenant the handler acts on is the one Core is asked about; Core evaluates
-/// it under the caller's own bearer, so naming a tenant one does not belong
-/// to does not make a feature provided. The form body is buffered and put
-/// back for the handler.
-async fn legacy_admin_tenant(req: Request<Body>) -> (Request<Body>, Option<String>) {
-    if !req.uri().path().starts_with(LEGACY_ADMIN_PREFIX)
-        || req.headers().contains_key("x-operator-id")
-    {
-        return (req, None);
+/// or form field, and the handler acts on that tenant. So that is the tenant
+/// Core is asked about, always; a different `x-operator-id` is refused rather
+/// than letting one tenant's plan cover another. Core evaluates under the
+/// caller's own bearer, so naming a tenant one does not belong to does not
+/// make a feature provided.
+///
+/// A form is buffered only when its declared length fits the limit, and is
+/// put back for the handler; a larger or unsized one is left untouched so
+/// shadow mode never changes what the handler receives.
+async fn legacy_admin_scope(req: Request<Body>) -> (Request<Body>, AdminScope) {
+    if !req.uri().path().starts_with(LEGACY_ADMIN_PREFIX) {
+        return (req, AdminScope::NotAdmin);
     }
+    let header = req
+        .headers()
+        .get("x-operator-id")
+        .and_then(|value| value.to_str().ok())
+        .map(str::trim)
+        .filter(|value| !value.is_empty())
+        .map(ToOwned::to_owned);
+    let scope = |payload: Option<String>| match (payload, &header) {
+        (Some(payload), Some(header)) if payload != *header => AdminScope::Mismatch,
+        (Some(payload), _) => AdminScope::Tenant(payload),
+        (None, Some(header)) => AdminScope::Tenant(header.clone()),
+        (None, None) => AdminScope::Unknown,
+    };
     if let Some(tenant) = req
         .uri()
         .query()
         .and_then(|query| serde_urlencoded::from_str(query).ok())
         .and_then(tenant_field)
     {
-        return (req, Some(tenant));
+        return (req, scope(Some(tenant)));
     }
     let is_form = req
         .headers()
@@ -493,16 +527,27 @@ async fn legacy_admin_tenant(req: Request<Body>) -> (Request<Body>, Option<Strin
         .and_then(|value| value.to_str().ok())
         .is_some_and(|value| value.starts_with("application/x-www-form-urlencoded"));
     if !is_form {
-        return (req, None);
+        return (req, scope(None));
+    }
+    let declared_length = req
+        .headers()
+        .get(axum::http::header::CONTENT_LENGTH)
+        .and_then(|value| value.to_str().ok())
+        .and_then(|value| value.parse::<usize>().ok());
+    if !declared_length.is_some_and(|length| length <= LEGACY_ADMIN_FORM_LIMIT) {
+        return (req, AdminScope::Unknown);
     }
     let (parts, body) = req.into_parts();
     let Ok(bytes) = axum::body::to_bytes(body, LEGACY_ADMIN_FORM_LIMIT).await else {
-        return (Request::from_parts(parts, Body::empty()), None);
+        return (
+            Request::from_parts(parts, Body::empty()),
+            AdminScope::BodyLost,
+        );
     };
     let tenant = serde_urlencoded::from_bytes(&bytes)
         .ok()
         .and_then(tenant_field);
-    (Request::from_parts(parts, Body::from(bytes)), tenant)
+    (Request::from_parts(parts, Body::from(bytes)), scope(tenant))
 }
 
 /// Runs inside the action gate, right before the handler, so a request it
@@ -531,15 +576,31 @@ pub async fn require_feature_delivery(
                     _ => AppError::Unauthorized.into_response(),
                 };
             }
-            let (rebuilt, tenant_fallback) = legacy_admin_tenant(req).await;
+            let (rebuilt, admin_scope) = legacy_admin_scope(req).await;
             req = rebuilt;
+            let tenant_override = match admin_scope {
+                AdminScope::NotAdmin => None,
+                AdminScope::Tenant(tenant) => Some(Ok(tenant)),
+                AdminScope::Unknown => Some(Err(DeliveryDenial::Unavailable)),
+                AdminScope::Mismatch => Some(Err(DeliveryDenial::ScopeMismatch)),
+                AdminScope::BodyLost => {
+                    return AppError::BadRequest("request body could not be read").into_response()
+                }
+            };
+            let context = match tenant_override {
+                None => evaluation_context(&req, None).ok_or(DeliveryDenial::Unavailable),
+                Some(Ok(tenant)) => {
+                    evaluation_context(&req, Some(tenant)).ok_or(DeliveryDenial::Unavailable)
+                }
+                Some(Err(denial)) => Err(denial),
+            };
             let decision = match (
                 routes::additional_features(req.method(), req.uri().path()),
-                evaluation_context(&req, tenant_fallback),
+                context,
             ) {
                 (None, _) => Err(DeliveryDenial::UnclassifiedRoute),
-                (Some(_), None) => Err(DeliveryDenial::Unavailable),
-                (Some(additional), Some(context)) => {
+                (Some(_), Err(denial)) => Err(denial),
+                (Some(additional), Ok(context)) => {
                     let mut features = vec![feature];
                     features.extend(additional);
                     guard
@@ -652,9 +713,11 @@ pub async fn evaluate_feature_deliveries(
                 Ok(()) => (true, true, "provided"),
                 Err(DeliveryDenial::NotProvided) => (false, true, "not_provided"),
                 Err(DeliveryDenial::Unresolved) => (false, false, "unresolved"),
-                Err(DeliveryDenial::Unavailable | DeliveryDenial::UnclassifiedRoute) => {
-                    (false, false, "unavailable")
-                }
+                Err(
+                    DeliveryDenial::Unavailable
+                    | DeliveryDenial::UnclassifiedRoute
+                    | DeliveryDenial::ScopeMismatch,
+                ) => (false, false, "unavailable"),
             };
             FeatureDeliveryResult {
                 key: feature.key.to_string(),

@@ -121,7 +121,8 @@ IAM の列は `field_extension_golf:` を省いて書いた。`field:` で始ま
 | `/v1/cancellation-fees*` | `courseboard.cancellation_fee` | なし（`/v1/invoices/**` と cancellation-fee の帳票だけが対象） |
 | `/v1/invoices` | `courseboard.customers.cancellations`（キャンセル一覧から開く請求シート。`CancellationsPage.tsx:923`） | `field.invoice.general` |
 | `/v1/erp/reservations/:id/billing-invoice` | `courseboard.settlement`（月次精算の請求書発行） | なし |
-| `/v1/erp/staff*` | `courseboard.caddies`（キャディ登録と打刻も同じ API を呼ぶため。社員画面は UI 側で `courseboard.staff` を見る） | なし |
+| `POST /v1/erp/staff`、`POST /v1/erp/staff/:id/clock-in`・`clock-out` | `courseboard.caddies`（キャディ登録と打刻） | なし |
+| それ以外の `/v1/erp/staff*`（一覧・編集・削除） | `courseboard.staff` | なし |
 | `/v1/field/iam/users*` | 対象外（設定） | なし |
 | `/v1/bridge/exports/*` | `courseboard.data_exports` | なし |
 

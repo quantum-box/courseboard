@@ -385,28 +385,49 @@ const ROUTE_RULES: &[(&str, &str, FeatureRoute)] = &[
 ];
 
 /// The Field paths the SPA reaches through `/field-api`, as
-/// `course_authz`-style patterns. Field guards its own routes as well; this
-/// is CourseBoard's product boundary on top.
-pub const FIELD_PROXY_RULES: &[(&str, FeatureRoute)] = &[
+/// `(method, course_authz-style pattern, feature)`, first match wins. Field
+/// guards its own routes as well; this is CourseBoard's product boundary on
+/// top.
+pub const FIELD_PROXY_RULES: &[(&str, &str, FeatureRoute)] = &[
     (
+        "*",
         "/v1/cancellation-fees/*",
         Feature("courseboard.cancellation_fee"),
     ),
     // The cancelled-booking list reads and issues cancellation-fee invoices
     // through the generic invoice API.
     (
+        "*",
         "/v1/invoices/*",
         Feature("courseboard.customers.cancellations"),
     ),
     (
+        "*",
         "/v1/erp/reservations/:reservation_id/billing-invoice",
         Feature("courseboard.settlement"),
     ),
-    // The roster registers and clocks caddies as Field staff as well as the
-    // staff screen, so the staff writes ride on the caddie feature.
-    ("/v1/erp/staff/*", Feature("courseboard.caddies")),
-    ("/v1/bridge/exports/*", Feature("courseboard.data_exports")),
-    ("/v1/field/iam/users/*", Exempt(Settings)),
+    // The roster registers a caddie as a Field staff member and clocks them
+    // in and out; only those calls ride on the caddie feature. The staff
+    // register itself (list, edit, delete) is the separately sold staff
+    // feature.
+    (
+        "POST",
+        "/v1/erp/staff/:staff_id/clock-in",
+        Feature("courseboard.caddies"),
+    ),
+    (
+        "POST",
+        "/v1/erp/staff/:staff_id/clock-out",
+        Feature("courseboard.caddies"),
+    ),
+    ("POST", "/v1/erp/staff", Feature("courseboard.caddies")),
+    ("*", "/v1/erp/staff/*", Feature("courseboard.staff")),
+    (
+        "*",
+        "/v1/bridge/exports/*",
+        Feature("courseboard.data_exports"),
+    ),
+    ("*", "/v1/field/iam/users/*", Exempt(Settings)),
 ];
 
 const FIELD_PROXY_PREFIX: &str = "/field-api";
@@ -428,11 +449,19 @@ pub fn feature_for_pattern(method: &str, pattern: &str) -> Option<FeatureRoute> 
         .map(|(_, _, route)| *route)
 }
 
-fn field_proxy_feature(inner_path: &str) -> Option<FeatureRoute> {
+fn field_proxy_feature(method: &Method, inner_path: &str) -> Option<FeatureRoute> {
+    let method = if *method == Method::HEAD {
+        "GET"
+    } else {
+        method.as_str()
+    };
     FIELD_PROXY_RULES
         .iter()
-        .find(|(pattern, _)| course_authz::pattern_matches(pattern, inner_path))
-        .map(|(_, route)| *route)
+        .find(|(rule_method, pattern, _)| {
+            (*rule_method == "*" || *rule_method == method)
+                && course_authz::pattern_matches(pattern, inner_path)
+        })
+        .map(|(_, _, route)| *route)
 }
 
 fn resolve(route: Option<FeatureRoute>) -> RequestFeature {
@@ -459,7 +488,7 @@ pub fn classify_request(method: &Method, path: &str) -> RequestFeature {
     match feature_for_pattern(route_method, pattern) {
         Some(FieldProxy) => {
             let inner = path.strip_prefix(FIELD_PROXY_PREFIX).unwrap_or(path);
-            resolve(field_proxy_feature(inner))
+            resolve(field_proxy_feature(method, inner))
         }
         route => resolve(route),
     }
@@ -474,8 +503,8 @@ pub fn api_refs(key: &str) -> Vec<String> {
         .map(|(method, pattern)| format!("{method} {pattern}"));
     let proxied = FIELD_PROXY_RULES
         .iter()
-        .filter(|(_, route)| matches!(route, Feature(mapped) if *mapped == key))
-        .map(|(pattern, _)| format!("* {FIELD_PROXY_PREFIX}{pattern}"));
+        .filter(|(_, _, route)| matches!(route, Feature(mapped) if *mapped == key))
+        .map(|(method, pattern, _)| format!("{method} {FIELD_PROXY_PREFIX}{pattern}"));
     routes.chain(proxied).collect()
 }
 

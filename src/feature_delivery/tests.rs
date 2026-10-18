@@ -59,7 +59,7 @@ fn every_classified_route_has_a_feature_or_an_exemption() {
 fn every_rule_names_a_catalog_feature() {
     let route_keys = course_authz::route_patterns()
         .filter_map(|(method, pattern)| routes::feature_for_pattern(method, pattern));
-    let proxy_keys = FIELD_PROXY_RULES.iter().map(|(_, route)| *route);
+    let proxy_keys = FIELD_PROXY_RULES.iter().map(|(_, _, route)| *route);
     let unknown: Vec<&str> = route_keys
         .chain(proxy_keys)
         .filter_map(|route| match route {
@@ -110,6 +110,7 @@ fn field_proxy_paths_the_spa_calls_resolve_to_features() {
             "/field-api/v1/erp/staff/stf_1/clock-in",
             "courseboard.caddies",
         ),
+        ("/field-api/v1/erp/staff", "courseboard.caddies"),
         (
             "/field-api/v1/bridge/exports/definitions",
             "courseboard.data_exports",
@@ -119,6 +120,21 @@ fn field_proxy_paths_the_spa_calls_resolve_to_features() {
         match routes::classify_request(&Method::POST, path) {
             RequestFeature::Required(feature) => assert_eq!(feature.key, key, "{path}"),
             other => panic!("{path} resolved to {other:?}"),
+        }
+    }
+    // The staff register itself is the staff feature, whatever the roster
+    // may call.
+    for (method, path) in [
+        (Method::GET, "/field-api/v1/erp/staff"),
+        (Method::PATCH, "/field-api/v1/erp/staff/stf_1"),
+        (Method::DELETE, "/field-api/v1/erp/staff/stf_1"),
+        (Method::GET, "/field-api/v1/erp/staff/stf_1/clock-in"),
+    ] {
+        match routes::classify_request(&method, path) {
+            RequestFeature::Required(feature) => {
+                assert_eq!(feature.key, "courseboard.staff", "{method} {path}")
+            }
+            other => panic!("{method} {path} resolved to {other:?}"),
         }
     }
     assert_eq!(
@@ -749,6 +765,7 @@ fn admin_request(method: Method, uri: &str, body: &str) -> Request<Body> {
         .uri(uri)
         .header(AUTHORIZATION, format!("Bearer {TOKEN}"))
         .header("content-type", "application/x-www-form-urlencoded")
+        .header("content-length", body.len().to_string())
         .body(Body::from(body.to_string()))
         .unwrap()
 }
@@ -794,4 +811,55 @@ async fn legacy_admin_without_a_tenant_is_unavailable() {
         .unwrap();
     assert_eq!(response.status(), StatusCode::FORBIDDEN);
     assert_eq!(evaluator.calls.load(Ordering::SeqCst), 0);
+}
+
+const OTHER_TENANT: &str = "tn_01hjjn348rn3t49zz6hvmfq67p";
+
+#[tokio::test]
+async fn legacy_admin_refuses_a_header_that_names_another_tenant() {
+    let provided = [
+        ("courseboard.caddies", true, true),
+        ("courseboard.courses", true, true),
+    ];
+    let evaluator = Arc::new(ScriptedEvaluator::with(&provided));
+    let app = guarded_app(state(evaluator.clone(), DeliveryEnforcement::Enforce));
+    let mut request = admin_request(
+        Method::POST,
+        "/admin/caddies",
+        &format!("tenant_id={OTHER_TENANT}&display_name=Sato"),
+    );
+    request
+        .headers_mut()
+        .insert("x-operator-id", TENANT.parse().unwrap());
+    let response = app.oneshot(request).await.unwrap();
+    assert_eq!(response.status(), StatusCode::FORBIDDEN);
+    assert_eq!(
+        body_json(response).await["code"],
+        "FEATURE_DELIVERY_SCOPE_MISMATCH"
+    );
+    assert_eq!(evaluator.calls.load(Ordering::SeqCst), 0);
+}
+
+#[tokio::test]
+async fn an_oversized_admin_form_reaches_the_handler_whole_in_shadow() {
+    let form = format!("tenant_id={TENANT}&notes={}", "x".repeat(70 * 1024));
+    let evaluator = Arc::new(ScriptedEvaluator::with(&[]));
+    let app = guarded_app(state(evaluator.clone(), DeliveryEnforcement::Shadow));
+    let response = app
+        .oneshot(admin_request(Method::POST, "/admin/caddies", &form))
+        .await
+        .unwrap();
+    assert_eq!(response.status(), StatusCode::OK);
+    let body = to_bytes(response.into_body(), 1 << 20).await.unwrap();
+    assert_eq!(body.len(), form.len());
+
+    let app = guarded_app(state(
+        Arc::new(ScriptedEvaluator::with(&[])),
+        DeliveryEnforcement::Enforce,
+    ));
+    let response = app
+        .oneshot(admin_request(Method::POST, "/admin/caddies", &form))
+        .await
+        .unwrap();
+    assert_eq!(response.status(), StatusCode::FORBIDDEN);
 }

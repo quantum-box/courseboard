@@ -415,7 +415,11 @@ spec:
       status: implemented
     - id: "* /v1/course/caddie-profiles/:id/courses"
       status: implemented
-    - id: "* /field-api/v1/erp/staff/*"
+    - id: "POST /field-api/v1/erp/staff/:staff_id/clock-in"
+      status: implemented
+    - id: "POST /field-api/v1/erp/staff/:staff_id/clock-out"
+      status: implemented
+    - id: "POST /field-api/v1/erp/staff"
       status: implemented
     uiRefs:
     - id: "route:golf/caddies"
@@ -664,7 +668,9 @@ spec:
     requiredActions:
     - "field:ListHrm"
     - "field:ManageHrm"
-    apiRefs: []
+    apiRefs:
+    - id: "* /field-api/v1/erp/staff/*"
+      status: implemented
     uiRefs:
     - id: "route:staff"
       status: implemented
