@@ -1,4 +1,6 @@
 import { FEATURE_FLAG_KEYS, useOptionalFeatureFlag } from './FeatureFlags'
+import { routeDeliveryDecision, useOptionalFeatureDelivery } from '../feature-delivery/FeatureDelivery'
+import { ROUTE_FEATURES } from '../feature-delivery/routeFeatures'
 
 /**
  * Routes that only exist once the tenant's flag says so.
@@ -53,7 +55,15 @@ export function useRouteGate(route: string): RouteGate {
  */
 export function useHiddenRoutes(): ReadonlySet<string> {
   const reservationReportImport = useRouteGate('golf/reservation-report-import')
+  const delivery = useOptionalFeatureDelivery()
   const hidden = new Set<string>()
   if (reservationReportImport === 'hidden') hidden.add('golf/reservation-report-import')
+  // A screen the tenant's plan does not provide, or that is not confirmed
+  // yet, is left out of every link. Unlike the flag above, the plan is an
+  // entitlement: an unknown answer hides rather than shows (PLT-5229).
+  for (const route of Object.keys(ROUTE_FEATURES)) {
+    if (route.includes(':')) continue
+    if (routeDeliveryDecision(route, delivery) !== true) hidden.add(route)
+  }
   return hidden
 }

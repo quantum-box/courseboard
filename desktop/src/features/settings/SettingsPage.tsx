@@ -13,6 +13,7 @@ import type { LucideIcon } from 'lucide-react'
 import { useTranslation } from 'react-i18next'
 import { useEffectiveCapabilities } from '../../auth/EffectiveCapabilitiesProvider'
 import { capabilityRouteAllowed } from '../../auth/capabilityRoutes'
+import { useHiddenRoutes } from '../../feature-flags/gated-routes'
 import { Panel } from '../../components/Page'
 import { navDescription, navLabel, settingsNavigation } from '../../components/AppShell'
 import { navigateFromClick } from '../../lib/router'
@@ -67,7 +68,8 @@ function MasterLink({
 export function SettingsPage() {
   const { t } = useTranslation(['settings', 'nav', 'dataExports'])
   const { capabilities } = useEffectiveCapabilities()
-  const canOpen = (route: string) => capabilityRouteAllowed(route, capabilities)
+  const hiddenRoutes = useHiddenRoutes()
+  const canOpen = (route: string) => !hiddenRoutes.has(route) && capabilityRouteAllowed(route, capabilities)
 
   return (
     <div className="page-stack">

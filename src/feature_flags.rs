@@ -13,7 +13,7 @@ use crate::{AppError, AppState};
 
 const COURSEBOARD_FEATURE_FLAG_PREFIX: &str = "feature.courseboard.";
 const MAX_FEATURE_FLAG_KEYS: usize = 64;
-const FEATURE_FLAG_REQUEST_TIMEOUT: Duration = Duration::from_secs(8);
+pub(crate) const FEATURE_FLAG_REQUEST_TIMEOUT: Duration = Duration::from_secs(8);
 
 #[derive(Clone)]
 pub struct FeatureFlagEvaluationContext {
@@ -23,7 +23,31 @@ pub struct FeatureFlagEvaluationContext {
 }
 
 impl FeatureFlagEvaluationContext {
-    fn from_headers(headers: &HeaderMap) -> Result<Self, AppError> {
+    pub(crate) fn new(
+        authorization: String,
+        operator_id: String,
+        platform_id: Option<String>,
+    ) -> Self {
+        Self {
+            authorization,
+            operator_id,
+            platform_id,
+        }
+    }
+
+    pub(crate) fn authorization(&self) -> &str {
+        &self.authorization
+    }
+
+    pub(crate) fn operator_id(&self) -> &str {
+        &self.operator_id
+    }
+
+    pub(crate) fn platform_id(&self) -> Option<&str> {
+        self.platform_id.as_deref()
+    }
+
+    pub(crate) fn from_headers(headers: &HeaderMap) -> Result<Self, AppError> {
         let authorization = headers
             .get(AUTHORIZATION)
             .and_then(|value| value.to_str().ok())
@@ -165,7 +189,7 @@ impl fmt::Debug for TachyonFeatureFlagEvaluator {
     }
 }
 
-fn feature_flag_graphql_url(base_url: &str) -> Option<reqwest::Url> {
+pub(crate) fn feature_flag_graphql_url(base_url: &str) -> Option<reqwest::Url> {
     let mut url = reqwest::Url::parse(base_url.trim()).ok()?;
     if !matches!(url.scheme(), "http" | "https")
         || url.host_str().is_none()

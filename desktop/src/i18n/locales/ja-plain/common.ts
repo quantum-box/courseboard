@@ -77,6 +77,8 @@ export const common: DeepPartial<typeof source> = {
     badRequest:
       '送った内容を受け取ってもらえませんでした。入力したところを見直してください。',
     forbidden: 'この操作をする権限がありません。担当の人に聞いてください。',
+    featureNotProvided: 'この機能は、いまの契約では使えません。担当の人に聞いてください。',
+    featureDeliveryUnavailable: 'この機能を使えるか確かめられませんでした。少し待ってから、もう一度ためしてください。',
     notFound: 'さがしているものが見つかりませんでした。すでに消されているかもしれません。',
     conflict:
       'ほかの人が先に直したため、うまくいきませんでした。もう一度開いてから、やり直してください。',

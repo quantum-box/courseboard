@@ -257,6 +257,11 @@ const ROUTES: &[(&str, &str, RouteAuthorization)] = &[
         "/v1/course/feature-flags/evaluate",
         RouteAuthorization::AuthenticatedOnly,
     ),
+    (
+        "POST",
+        "/v1/course/feature-deliveries/evaluate",
+        RouteAuthorization::AuthenticatedOnly,
+    ),
     // ─── Field-enforced ──────────────────────────────────────────────────
     ("*", "/admin/caddies", RouteAuthorization::UpstreamEnforced),
     (
@@ -767,7 +772,7 @@ const PROTECTED_PREFIXES: &[&str] = &[
     "/field-api",
 ];
 
-fn pattern_matches(pattern: &str, path: &str) -> bool {
+pub(crate) fn pattern_matches(pattern: &str, path: &str) -> bool {
     let mut pattern_segments = pattern.split('/').filter(|s| !s.is_empty());
     let mut path_segments = path.split('/').filter(|s| !s.is_empty()).peekable();
     loop {
@@ -782,6 +787,29 @@ fn pattern_matches(pattern: &str, path: &str) -> bool {
             _ => return false,
         }
     }
+}
+
+/// Every classified route as `(method, pattern)`, in table order.
+pub(crate) fn route_patterns() -> impl Iterator<Item = (&'static str, &'static str)> {
+    ROUTES
+        .iter()
+        .map(|(method, pattern, _)| (*method, *pattern))
+}
+
+/// The `ROUTES` entry a request matches, the same way [`classify`] picks it.
+pub(crate) fn matching_route(method: &Method, path: &str) -> Option<(&'static str, &'static str)> {
+    let method = if method == Method::HEAD {
+        &Method::GET
+    } else {
+        method
+    };
+    ROUTES
+        .iter()
+        .find(|(route_method, pattern, _)| {
+            (*route_method == "*" || *route_method == method.as_str())
+                && pattern_matches(pattern, path)
+        })
+        .map(|(route_method, pattern, _)| (*route_method, *pattern))
 }
 
 /// `None` when the route is not classified: the caller must refuse.
@@ -1562,7 +1590,7 @@ fn forbidden_response(denial: &'static str, message: String) -> Response {
     response
 }
 
-fn bearer_from(req: &Request<Body>) -> Option<&str> {
+pub(crate) fn bearer_from(req: &Request<Body>) -> Option<&str> {
     let value = req.headers().get(AUTHORIZATION).or_else(|| {
         req.headers().get(HeaderName::from_static(
             crate::COURSEBOARD_AUTHORIZATION_HEADER,

@@ -87,6 +87,8 @@ export const common: DeepPartial<typeof source> = {
     badRequest:
       'The server rejected the request. Check what you entered and try again.',
     forbidden: 'You do not have permission for this. Ask an administrator.',
+    featureNotProvided: 'This feature is not included in your plan. Ask an administrator.',
+    featureDeliveryUnavailable: 'Could not check whether this feature is available. Wait a moment and try again.',
     notFound: 'That data was not found. It may have been deleted already.',
     conflict:
       'Someone else updated this first. Reload and try again.',

@@ -17,7 +17,7 @@ use super::http_field;
 use super::http_ops;
 use super::http_reservation_report;
 use super::http_simulator;
-use crate::{feature_flags, profile_proxy};
+use crate::{feature_delivery, feature_flags, profile_proxy};
 
 /// Standard API error body returned by [`crate::AppError`].
 #[derive(Debug, Serialize, ToSchema)]
@@ -190,6 +190,7 @@ impl Modify for SecurityAddon {
         http_simulator::get_pricing_settings,
         http_simulator::replace_pricing_settings,
         feature_flags::evaluate_feature_flags,
+        feature_delivery::evaluate_feature_deliveries,
         http_field::get_client_capabilities,
         profile_proxy::get_me,
     ),
@@ -370,6 +371,10 @@ impl Modify for SecurityAddon {
             feature_flags::EvaluateFeatureFlagsRequest,
             feature_flags::EvaluateFeatureFlagsResponse,
             feature_flags::FeatureFlagValue,
+            feature_delivery::EvaluateFeatureDeliveriesRequest,
+            feature_delivery::EvaluateFeatureDeliveriesResponse,
+            feature_delivery::FeatureDeliveryResult,
+            feature_delivery::DeliveryEnforcement,
             http_field::ClientCapabilitiesResponse,
             http_field::AgentDocumentCapabilitiesResponse,
             http_field::DocumentQueueCapabilitiesResponse,

@@ -53,6 +53,7 @@ import { LegalDocumentPage } from './LegalDocumentPage'
 import { MacOSTabStrip } from './components/MacOSTabStrip'
 import { TenantTimezoneProvider } from './context/TenantTimezoneProvider'
 import { FeatureFlagProvider } from './feature-flags/FeatureFlags'
+import { FeatureDeliveryProvider } from './feature-delivery/FeatureDelivery'
 import { useRouteGate } from './feature-flags/gated-routes'
 import { PageMetadata } from './lib/pageMetadata'
 
@@ -93,6 +94,7 @@ function AppContent() {
           <AppShell route={route}>{screen}</AppShell>
         )}>
           <FeatureFlagProvider>
+            <FeatureDeliveryProvider>
             <EffectiveCapabilitiesProvider>
               <TenantTimezoneProvider>
                 <AppShell route={route}>
@@ -102,6 +104,7 @@ function AppContent() {
                 </AppShell>
               </TenantTimezoneProvider>
             </EffectiveCapabilitiesProvider>
+            </FeatureDeliveryProvider>
           </FeatureFlagProvider>
         </AuthGate>
       </AuthProvider>
