@@ -2137,7 +2137,8 @@ function ArchivedConsentChoice({ item, candidate, choice, disabled, onChoose }: 
         <>
           <div className="reception-consent-comparison">
             {[{ title: 'archiveExisting' as const, value: item }, { title: 'archiveCandidate' as const, value: candidate }].map(({ title, value }) => (
-              <section key={title} aria-label={t(`reception.settings.${title}`)}>
+              <section key={title} aria-label={t(`reception.settings.${title}`)}
+                data-selected={(title === 'archiveExisting' && choice === 'existing') || (title === 'archiveCandidate' && choice === 'candidate')}>
                 <h4>{t(`reception.settings.${title}`)}</h4>
                 <strong>{value.label}</strong>
                 <p>{value.body || t('reception.settings.archiveNoBody')}</p>
@@ -2149,22 +2150,30 @@ function ArchivedConsentChoice({ item, candidate, choice, disabled, onChoose }: 
         </>
       ) : null}
       <div className="reception-consent-item-actions">
-        <Button type="button" variant="secondary" size="sm" disabled={disabled || !item.id}
+        <Button type="button" variant={choice === 'existing' ? 'primary' : 'secondary'} size="sm" disabled={disabled || !item.id}
           aria-pressed={choice === 'existing'} onClick={() => onChoose('existing')}>
+          {choice === 'existing' ? <CheckCircle2 aria-hidden="true" /> : null}
           {t(differs ? 'reception.settings.archiveRestoreExisting' : 'reception.settings.archiveRestore')}
         </Button>
         {differs ? (
-          <Button type="button" variant="secondary" size="sm" disabled={disabled || !item.id}
+          <Button type="button" variant={choice === 'candidate' ? 'primary' : 'secondary'} size="sm" disabled={disabled || !item.id}
             aria-pressed={choice === 'candidate'} onClick={() => onChoose('candidate')}>
+            {choice === 'candidate' ? <CheckCircle2 aria-hidden="true" /> : null}
             {t('reception.settings.archiveRestoreCandidate')}
           </Button>
         ) : null}
-        <Button type="button" variant="ghost" size="sm" disabled={disabled}
+        <Button type="button" variant={choice === 'skip' ? 'primary' : 'ghost'} size="sm" disabled={disabled}
           aria-pressed={choice === 'skip'} onClick={() => onChoose('skip')}>
+          {choice === 'skip' ? <CheckCircle2 aria-hidden="true" /> : null}
           {t('reception.settings.archiveSkip')}
         </Button>
       </div>
-      {choice ? <p role="status">{t(`reception.settings.archiveSelected_${choice}`)}</p> : null}
+      {choice ? (
+        <p role="status" className="reception-archive-selection">
+          <CheckCircle2 aria-hidden="true" />
+          {t(`reception.settings.archiveSelected_${choice}`)}
+        </p>
+      ) : null}
     </div>
   )
 }
