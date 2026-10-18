@@ -6473,6 +6473,31 @@ button,
   gap: 4px;
 }
 
+.reception-archive-choice {
+  display: grid;
+  gap: 8px;
+  padding-block: 8px;
+}
+
+.reception-consent-comparison {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(min(100%, 240px), 1fr));
+  gap: 12px;
+}
+
+.reception-consent-comparison section {
+  padding: 12px;
+  border: 1px solid hsl(var(--nui-border));
+  border-radius: 8px;
+  overflow-wrap: anywhere;
+  white-space: pre-wrap;
+}
+
+.reception-consent-comparison h4,
+.reception-consent-comparison p {
+  margin: 0 0 6px;
+}
+
 .reception-consent-edit {
   grid-column: 1 / -1;
   display: grid;
