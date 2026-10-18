@@ -163,7 +163,7 @@ fn public_and_platform_paths_need_no_feature() {
 }
 
 #[test]
-fn catalog_keys_are_unique_namespaced_and_reachable() {
+fn catalog_keys_are_unique_and_namespaced() {
     let mut seen = HashSet::new();
     for feature in FEATURES {
         assert!(seen.insert(feature.key), "duplicate key {}", feature.key);
@@ -174,11 +174,6 @@ fn catalog_keys_are_unique_namespaced_and_reachable() {
                     .chars()
                     .all(|c| c.is_ascii_lowercase() || c.is_ascii_digit() || c == '.' || c == '_'),
             "{} must be courseboard.<snake_case>",
-            feature.key
-        );
-        assert!(
-            !routes::api_refs(feature.key).is_empty() || !feature.ui_routes.is_empty(),
-            "{} has neither a route nor a screen",
             feature.key
         );
         assert!(
@@ -239,7 +234,7 @@ fn release_gates_are_courseboard_flags() {
 
 #[test]
 fn the_manifest_writes_no_defaults() {
-    let rendered = catalog::render_manifest(routes::api_refs);
+    let rendered = catalog::render_manifest();
     for default in [": []", ": null"] {
         assert!(
             !rendered.contains(default),
@@ -252,7 +247,7 @@ fn the_manifest_writes_no_defaults() {
 /// runs. A difference means one of them is lying.
 #[test]
 fn the_product_features_manifest_is_rendered_from_the_catalog() {
-    let rendered = catalog::render_manifest(routes::api_refs);
+    let rendered = catalog::render_manifest();
     if std::env::var_os("COURSEBOARD_UPDATE_FEATURE_MANIFEST").is_some() {
         std::fs::write(MANIFEST_PATH, &rendered).expect("write manifest");
     }

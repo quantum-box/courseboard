@@ -159,7 +159,7 @@ CourseBoard のガードは、`/field-api` の後ろのパスで分類する。�
 ### カタログと manifest
 
 - 正本: `src/feature_delivery/catalog.rs`。key、説明、read / manage の action、`requiredFeatureKeys`、`releaseGates`、画面ルート。
-- 生成物: `.tachyon/manifests/courseboard-product-features.yml`（`apiVersion: apps.tachy.one/v1alpha`、`kind: ProductFeatures`、`metadata.tenantId` は CourseBoard の権利者テナント）。各機能の形は Field の `product-features.json` に合わせた。`apiRefs` は `course_authz::ROUTES` から、`uiRefs` は画面ルートから作る。`catalogFeatureId` と `digest` は、取り込む側（Field / Core）が発行する。
+- 生成物: `.tachyon/manifests/courseboard-product-features.yml`（`apiVersion: apps.tachy.one/v1alpha`、`kind: ProductFeatures`、`metadata.tenantId` は CourseBoard の権利者テナント）。各機能は key、説明、delivery key、`requiredActions`、`releaseGates`、`requiredFeatureKeys`、`operationBindings` を持つ。空の項目は書き出さない。ルート・画面との対応（`apiRefs` / `uiRefs`）は載せない。実行時の判定に使わない記述用の情報なので、正本は `course_authz::ROUTES` と `routes.rs`（API）、`App.tsx` と `routeFeatures.ts`（画面）に置く。`catalogFeatureId` と `digest` は、取り込む側（Field / Core）が発行する。
 - 再生成: `COURSEBOARD_UPDATE_FEATURE_MANIFEST=1 cargo test feature_delivery`。生成結果とファイルが違うと CI が落ちる。
 - apply（受け側ができたら）:
 
@@ -173,7 +173,7 @@ tachyon iac apply --file .tachyon/manifests/courseboard-product-features.yml
 ### key のない機能を CI で検出する
 
 - Rust（`src/feature_delivery/tests.rs`）: `ROUTES` の全ルートに key か対象外の理由があること、ルールの key がカタログにあること、`requiredFeatureKeys` が存在して循環しないこと、action が manifest か `field:` のものであること、manifest が生成結果と同じであること。
-- UI（`desktop/src/feature-delivery/routeFeatures.test.ts`）: `App.tsx` が分岐する全ルートに key か対象外があること、画面と key の対応が manifest の `uiRefs` と一致すること、key の一覧が manifest と一致すること。
+- UI（`desktop/src/feature-delivery/routeFeatures.test.ts`）: `App.tsx` が分岐する全ルートに key か対象外があること、key の一覧が manifest と一致すること、どの key も何らかの画面から使われていること、画面を開くのに必要な action ごとの機能が manifest の `requiredActions` と合っていること。
 
 ### ガード（既定 off）
 
@@ -203,7 +203,7 @@ tachyon iac apply --file .tachyon/manifests/courseboard-product-features.yml
 
 ## 付録. 画面と機能 key の対応（全 42 件）
 
-API ルートと機能 key の対応は、manifest の各機能の `apiRefs` を正とする（`ROUTES` から生成）。
+API ルートと機能 key の対応は、`src/feature_delivery/routes.rs` の規則（`course_authz::ROUTES` の各パターンと `/field-api` の転送先が対象）を正とする。
 
 IAM の列は `auth/capabilityRoutes.ts` の `routeActionRequirement` にある条件。`all` は全部が必要、`any` はどれか 1 つで足りる。`field_extension_golf:` は省いた。
 
