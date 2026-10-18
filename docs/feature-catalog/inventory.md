@@ -119,7 +119,8 @@ IAM の列は `field_extension_golf:` を省いて書いた。`field:` で始ま
 | 転送先 | 機能 key | Field 側のガード（tachyonfield #1642） |
 |---|---|---|
 | `/v1/cancellation-fees*` | `courseboard.cancellation_fee` | なし（`/v1/invoices/**` と cancellation-fee の帳票だけが対象） |
-| `/v1/invoices` | `courseboard.customers.cancellations`（キャンセル一覧から開く請求シート。`CancellationsPage.tsx:923`） | `field.invoice.general` |
+| `GET /v1/invoices*` | `courseboard.customers.cancellations`（キャンセル一覧の請求状況） | `field.invoice.general` |
+| それ以外の `/v1/invoices*`（請求書の作成・更新・送付） | `courseboard.cancellation_fee`（キャンセル一覧の請求・免除。画面でもこの機能がなければボタンを出さない） | `field.invoice.general` |
 | `/v1/erp/reservations/:id/billing-invoice` | `courseboard.settlement`（月次精算の請求書発行） | なし |
 | `/v1/erp/staff*`（一覧・登録・編集・削除・打刻） | `courseboard.staff`（キャディは Field の社員にキャディ情報を付けたものなので、`courseboard.caddies` が `courseboard.staff` を要件に持つ） | なし |
 | `GET /v1/erp/reservation-types` | `courseboard.tee_sheet` | なし |

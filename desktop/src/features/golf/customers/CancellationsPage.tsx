@@ -11,6 +11,7 @@ import {
   fieldUserId,
   yen,
 } from '../../../api'
+import { useFeatureProvided } from '../../../feature-delivery/FeatureDelivery'
 import {
   DataTable,
   type DataTableColumn,
@@ -109,6 +110,9 @@ type CancellationFeeInvoiceSnapshot = {
  * morning's work and has to survive a reload with its filters intact.
  */
 export function CancellationsPage() {
+  // Billing and waiving record a cancellation-fee decision, which is the
+  // cancellation-fee feature's; the list itself is the customer ledger's.
+  const feeBillingProvided = useFeatureProvided('courseboard.cancellation_fee')
   const { t } = useTranslation(['customers', 'cancellationFees', 'common'])
   const timezone = useTenantTimezone()
   const businessDate = today(timezone)
@@ -382,7 +386,7 @@ export function CancellationsPage() {
         description={page
           ? t('customers:cancellations.results.description', { count: page.total })
           : undefined}
-        actions={selectedRows.length > 0 ? (
+        actions={selectedRows.length > 0 && feeBillingProvided ? (
           <>
             <Button type="button" variant="ghost" onClick={() => setWaiving(true)}>
               <Ban /> {t('customers:cancellations.waive.open', { count: selectedRows.length })}

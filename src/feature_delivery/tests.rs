@@ -98,10 +98,7 @@ fn field_proxy_paths_the_spa_calls_resolve_to_features() {
             "/field-api/v1/cancellation-fees/inv_1/send",
             "courseboard.cancellation_fee",
         ),
-        (
-            "/field-api/v1/invoices",
-            "courseboard.customers.cancellations",
-        ),
+        ("/field-api/v1/invoices", "courseboard.cancellation_fee"),
         (
             "/field-api/v1/erp/reservations/rsv_1/billing-invoice",
             "courseboard.settlement",
@@ -1046,4 +1043,15 @@ fn the_fallback_authorization_header_carries_the_evaluation_context() {
     headers.insert("x-operator-id", TENANT.parse().unwrap());
     let context = FeatureFlagEvaluationContext::from_headers(&headers).expect("fallback header");
     assert_eq!(context.authorization(), format!("Bearer {TOKEN}"));
+}
+
+#[test]
+fn reading_cancellation_invoices_is_the_list_but_issuing_one_is_billing() {
+    let key = |method: Method| match routes::classify_request(&method, "/field-api/v1/invoices") {
+        RequestFeature::Required(feature) => feature.key,
+        other => panic!("{other:?}"),
+    };
+    assert_eq!(key(Method::GET), "courseboard.customers.cancellations");
+    assert_eq!(key(Method::POST), "courseboard.cancellation_fee");
+    assert_eq!(key(Method::PATCH), "courseboard.cancellation_fee");
 }

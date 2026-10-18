@@ -175,10 +175,22 @@ export const ACTION_FEATURES: Readonly<Record<string, FeatureKey>> = Object.free
  * it must hold to mount. `null` exempt, `undefined` unknown, as
  * `routeFeatureKey`. The server ANDs each feature's own requirements.
  */
+/**
+ * Screens that run on another feature's API beyond the actions IAM lists:
+ * every screen under the common-import area (the reservation-report document
+ * workflow included) drives `/v1/course/data-imports/*`.
+ */
+const ROUTE_PREFIX_FEATURES: ReadonlyArray<readonly [string, FeatureKey]> = [
+  ['golf/data-imports/', 'courseboard.data_imports'],
+]
+
 export function routeFeatureKeys(route: string): readonly FeatureKey[] | null | undefined {
   const own = routeFeatureKey(route)
   if (own === null || own === undefined) return own
   const keys = new Set<FeatureKey>([own])
+  for (const [prefix, key] of ROUTE_PREFIX_FEATURES) {
+    if (route.startsWith(prefix)) keys.add(key)
+  }
   for (const action of routeActionRequirement(route)?.allOf ?? []) {
     const key = ACTION_FEATURES[action]
     if (key) keys.add(key)

@@ -125,6 +125,11 @@ describe('feature catalog on screens', () => {
       'courseboard.caddies',
       'courseboard.courses',
     ]))
+    expect(routeFeatureKeys('golf/data-imports/courseboardReservationReports/documents/dtj_1'))
+      .toEqual(expect.arrayContaining([
+        'courseboard.reservation_report_import',
+        'courseboard.data_imports',
+      ]))
     expect(routeFeatureKeys('golf')).toBeNull()
   })
 

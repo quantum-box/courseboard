@@ -400,12 +400,18 @@ pub const FIELD_PROXY_RULES: &[(&str, &str, FeatureRoute)] = &[
         "/v1/cancellation-fees/*",
         Feature("courseboard.cancellation_fee"),
     ),
-    // The cancelled-booking list reads and issues cancellation-fee invoices
-    // through the generic invoice API.
+    // The cancelled-booking list reads cancellation-fee invoices through the
+    // generic invoice API; issuing or changing one is billing a cancellation
+    // fee, which is that feature's to allow.
+    (
+        "GET",
+        "/v1/invoices/*",
+        Feature("courseboard.customers.cancellations"),
+    ),
     (
         "*",
         "/v1/invoices/*",
-        Feature("courseboard.customers.cancellations"),
+        Feature("courseboard.cancellation_fee"),
     ),
     (
         "*",
