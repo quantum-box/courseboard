@@ -412,27 +412,27 @@ pub const FIELD_PROXY_RULES: &[(&str, &str, FeatureRoute)] = &[
         "/v1/erp/reservations/:reservation_id/billing-invoice",
         Feature("courseboard.settlement"),
     ),
-    // The roster registers a caddie as a Field staff member and clocks them
-    // in and out; only those calls ride on the caddie feature. The staff
-    // register itself (list, edit, delete) is the separately sold staff
-    // feature.
-    (
-        "POST",
-        "/v1/erp/staff/:staff_id/clock-in",
-        Feature("courseboard.caddies"),
-    ),
-    (
-        "POST",
-        "/v1/erp/staff/:staff_id/clock-out",
-        Feature("courseboard.caddies"),
-    ),
-    ("POST", "/v1/erp/staff", Feature("courseboard.caddies")),
+    // The staff register is the base the caddie roster builds on (a caddie
+    // is a Field staff member with a caddie profile), so every staff call,
+    // the roster's registration and clock-in included, is the staff feature.
     ("*", "/v1/erp/staff/*", Feature("courseboard.staff")),
     (
         "*",
         "/v1/bridge/exports/*",
         Feature("courseboard.data_exports"),
     ),
+    // Allowed by the proxy for the booking and billing flows.
+    (
+        "GET",
+        "/v1/erp/reservation-types",
+        Feature("courseboard.tee_sheet"),
+    ),
+    (
+        "GET",
+        "/v1/erp/orders/:order_id",
+        Feature("courseboard.settlement"),
+    ),
+    ("GET", "/v1/field/client-context", Exempt(Platform)),
     ("*", "/v1/field/iam/users/*", Exempt(Settings)),
 ];
 

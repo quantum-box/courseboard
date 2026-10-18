@@ -35,6 +35,8 @@ spec:
       status: implemented
     - id: "* /v1/course/reservations/:reservation_id/plan"
       status: implemented
+    - id: "GET /field-api/v1/erp/reservation-types"
+      status: implemented
     uiRefs:
     - id: "route:golf/ledger"
       status: implemented
@@ -417,12 +419,6 @@ spec:
       status: implemented
     - id: "* /v1/course/caddie-profiles/:id/courses"
       status: implemented
-    - id: "POST /field-api/v1/erp/staff/:staff_id/clock-in"
-      status: implemented
-    - id: "POST /field-api/v1/erp/staff/:staff_id/clock-out"
-      status: implemented
-    - id: "POST /field-api/v1/erp/staff"
-      status: implemented
     uiRefs:
     - id: "route:golf/caddies"
       status: implemented
@@ -432,6 +428,7 @@ spec:
     releaseGates: []
     requiredFeatureKeys:
     - "courseboard.courses"
+    - "courseboard.staff"
     internalDependencies: []
     operationBindings:
     - operation: read
@@ -680,8 +677,7 @@ spec:
       status: implemented
     optionalIntegration: null
     releaseGates: []
-    requiredFeatureKeys:
-    - "courseboard.caddies"
+    requiredFeatureKeys: []
     internalDependencies: []
     operationBindings:
     - operation: read
@@ -735,6 +731,8 @@ spec:
     - id: "* /v1/course/monthly-settlement/export.csv"
       status: implemented
     - id: "* /field-api/v1/erp/reservations/:reservation_id/billing-invoice"
+      status: implemented
+    - id: "GET /field-api/v1/erp/orders/:order_id"
       status: implemented
     uiRefs:
     - id: "route:golf/settlement"

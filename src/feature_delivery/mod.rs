@@ -548,27 +548,31 @@ async fn legacy_admin_scope(req: Request<Body>) -> (Request<Body>, AdminScope) {
         .map(str::trim)
         .filter(|value| !value.is_empty())
         .map(ToOwned::to_owned);
-    let scope = |payload: Option<String>| match (payload, &header) {
-        (Some(payload), Some(header)) if payload != *header => AdminScope::Mismatch,
-        (Some(payload), _) => AdminScope::Tenant(payload),
-        (None, Some(header)) => AdminScope::Tenant(header.clone()),
-        (None, None) => AdminScope::Unknown,
+    // Every tenant the request names must agree: the header, the query, and
+    // the form body each reach a different handler parameter.
+    let scope = |named: &[Option<String>]| {
+        let mut tenants = named.iter().flatten().chain(header.iter());
+        let Some(first) = tenants.next() else {
+            return AdminScope::Unknown;
+        };
+        if tenants.any(|other| other != first) {
+            AdminScope::Mismatch
+        } else {
+            AdminScope::Tenant(first.clone())
+        }
     };
-    if let Some(tenant) = req
+    let query_tenant = req
         .uri()
         .query()
         .and_then(|query| serde_urlencoded::from_str(query).ok())
-        .and_then(tenant_field)
-    {
-        return (req, scope(Some(tenant)));
-    }
+        .and_then(tenant_field);
     let is_form = req
         .headers()
         .get(axum::http::header::CONTENT_TYPE)
         .and_then(|value| value.to_str().ok())
         .is_some_and(|value| value.starts_with("application/x-www-form-urlencoded"));
     if !is_form {
-        return (req, scope(None));
+        return (req, scope(&[query_tenant]));
     }
     let declared_length = req
         .headers()
@@ -576,6 +580,8 @@ async fn legacy_admin_scope(req: Request<Body>) -> (Request<Body>, AdminScope) {
         .and_then(|value| value.to_str().ok())
         .and_then(|value| value.parse::<usize>().ok());
     if !declared_length.is_some_and(|length| length <= LEGACY_ADMIN_FORM_LIMIT) {
+        // The body may name a tenant of its own, unread: the scope is unknown
+        // even when the query names one.
         return (req, AdminScope::Unknown);
     }
     let (parts, body) = req.into_parts();
@@ -585,10 +591,13 @@ async fn legacy_admin_scope(req: Request<Body>) -> (Request<Body>, AdminScope) {
             AdminScope::BodyLost,
         );
     };
-    let tenant = serde_urlencoded::from_bytes(&bytes)
+    let form_tenant = serde_urlencoded::from_bytes(&bytes)
         .ok()
         .and_then(tenant_field);
-    (Request::from_parts(parts, Body::from(bytes)), scope(tenant))
+    (
+        Request::from_parts(parts, Body::from(bytes)),
+        scope(&[query_tenant, form_tenant]),
+    )
 }
 
 /// Runs inside the action gate, right before the handler, so a request it

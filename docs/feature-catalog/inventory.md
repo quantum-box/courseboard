@@ -81,14 +81,14 @@ key は `courseboard.` で始める。Core に渡す delivery key は、Field �
 | 8 | `courseboard.customers.reception` | `golf/customers/reception`, `settings/reception-fields` | reception-draft（OCR ジョブ）, reception-fields, consent-items, reception-values | `ListCustomers` | `ManageCustomers` | 候補（OCR） | customers |
 | 9 | `courseboard.customers.cancellations` | `golf/customers/cancellations` | GET reservation-cancellations | `ListCustomers` | — | なし | customers |
 | 10 | `courseboard.membership` | `settings/membership-plans`, `-discounts`, `-play-windows` | membership-plans, discounts, play-windows, customers/:id/membership 系 | `ListMembership` + `field:ListMembership` | `ManageMembershipPlans`, `AssignMembership` | なし | customers |
-| 11 | `courseboard.caddies` | `golf/caddies(/:id)` | caddie-profiles, courses | `ListCaddies` | `ManageCaddies` | なし | — |
+| 11 | `courseboard.caddies` | `golf/caddies(/:id)` | caddie-profiles, courses | `ListCaddies` | `ManageCaddies` | なし | courses, staff |
 | 12 | `courseboard.caddies.dispatch` | `golf/caddies/dispatch`, `settings/caddie-duties` | caddie-assignments, reassignment, recommendations, auto-assignments, duties | `ListCaddieAssignments` | `ManageCaddieAssignments` | 候補（自動配置） | caddies, tee_sheet |
 | 13 | `courseboard.caddies.availability` | シフト・タイムラインの出勤可否 | caddie-availabilities, submissions, deadlines | `ListCaddieAvailability` | `ManageCaddieAvailability` | なし | caddies |
 | 14 | `courseboard.caddies.shifts` | `golf/caddies/shifts` | shift-rules, shifts, shift-plans, field-sync | `ListShifts` | `ManageShifts` | なし | caddies, caddies.availability |
 | 15 | `courseboard.caddies.insights` | `golf/caddies/attendance` | attendance-snapshot(s), supply, course-supply, reinforcements, ratings | `ListCaddieInsights` | — | なし | caddies |
 | 16 | `courseboard.caddies.rank_fees` | 精算・配置の単価 | caddie-rank-fees, history, fee-alignment | `ListCaddieRankFees` | `ManageCaddieRankFees` | なし | caddies |
 | 17 | `courseboard.caddies.payroll` | `golf/caddies/payroll` | caddie-payroll-summary, export.csv | `ListPayroll` | — | なし | caddies.rank_fees |
-| 18 | `courseboard.staff` | `staff(/:id)` | Field `/v1/erp/staff`（`/field-api` 経由） | `field:ListHrm` | `field:ManageHrm` | なし | caddies |
+| 18 | `courseboard.staff` | `staff(/:id)` | Field `/v1/erp/staff`（`/field-api` 経由。キャディ登録・打刻も含む） | `field:ListHrm` | `field:ManageHrm` | なし | — |
 | 19 | `courseboard.budgets` | `golf/budgets` | daily-budgets, achievement, import | `ListBudgets` | `ManageBudgets` | なし | courses |
 | 20 | `courseboard.settlement` | `golf/settlement` | monthly-settlement, export.csv | `ListSettlement` | — | なし | — |
 | 21 | `courseboard.fee_simulator` | `golf/simulator` | simulator/calculate, simulate/range, pricing-settings | `CalculateFees` | `ManageReservationPolicy`（PUT pricing-settings） | なし | — |
@@ -121,8 +121,10 @@ IAM の列は `field_extension_golf:` を省いて書いた。`field:` で始ま
 | `/v1/cancellation-fees*` | `courseboard.cancellation_fee` | なし（`/v1/invoices/**` と cancellation-fee の帳票だけが対象） |
 | `/v1/invoices` | `courseboard.customers.cancellations`（キャンセル一覧から開く請求シート。`CancellationsPage.tsx:923`） | `field.invoice.general` |
 | `/v1/erp/reservations/:id/billing-invoice` | `courseboard.settlement`（月次精算の請求書発行） | なし |
-| `POST /v1/erp/staff`、`POST /v1/erp/staff/:id/clock-in`・`clock-out` | `courseboard.caddies`（キャディ登録と打刻） | なし |
-| それ以外の `/v1/erp/staff*`（一覧・編集・削除） | `courseboard.staff` | なし |
+| `/v1/erp/staff*`（一覧・登録・編集・削除・打刻） | `courseboard.staff`（キャディは Field の社員にキャディ情報を付けたものなので、`courseboard.caddies` が `courseboard.staff` を要件に持つ） | なし |
+| `GET /v1/erp/reservation-types` | `courseboard.tee_sheet` | なし |
+| `GET /v1/erp/orders/:id` | `courseboard.settlement` | なし |
+| `GET /v1/field/client-context` | 対象外（基盤） | なし |
 | `/v1/field/iam/users*` | 対象外（設定） | なし |
 | `/v1/bridge/exports/*` | `courseboard.data_exports` | なし |
 

@@ -107,11 +107,6 @@ fn field_proxy_paths_the_spa_calls_resolve_to_features() {
             "courseboard.settlement",
         ),
         (
-            "/field-api/v1/erp/staff/stf_1/clock-in",
-            "courseboard.caddies",
-        ),
-        ("/field-api/v1/erp/staff", "courseboard.caddies"),
-        (
             "/field-api/v1/bridge/exports/definitions",
             "courseboard.data_exports",
         ),
@@ -122,9 +117,11 @@ fn field_proxy_paths_the_spa_calls_resolve_to_features() {
             other => panic!("{path} resolved to {other:?}"),
         }
     }
-    // The staff register itself is the staff feature, whatever the roster
-    // may call.
+    // Every staff call is the staff feature, the roster's registration and
+    // clock-in included: the caddie feature builds on it.
     for (method, path) in [
+        (Method::POST, "/field-api/v1/erp/staff"),
+        (Method::POST, "/field-api/v1/erp/staff/stf_1/clock-in"),
         (Method::GET, "/field-api/v1/erp/staff"),
         (Method::PATCH, "/field-api/v1/erp/staff/stf_1"),
         (Method::DELETE, "/field-api/v1/erp/staff/stf_1"),
@@ -341,6 +338,7 @@ async fn a_feature_is_provided_only_with_everything_it_requires() {
         ("courseboard.caddies.rank_fees", true, true),
         ("courseboard.caddies", true, true),
         ("courseboard.courses", true, true),
+        ("courseboard.staff", true, true),
     ];
     assert_eq!(decide(ScriptedEvaluator::with(&all), key).await, Ok(()));
 
@@ -349,6 +347,7 @@ async fn a_feature_is_provided_only_with_everything_it_requires() {
         ("courseboard.caddies.rank_fees", true, true),
         ("courseboard.caddies", false, true),
         ("courseboard.courses", true, true),
+        ("courseboard.staff", true, true),
     ];
     assert_eq!(
         decide(ScriptedEvaluator::with(&without_parent), key).await,
@@ -775,6 +774,7 @@ async fn legacy_admin_is_judged_for_the_tenant_its_form_names() {
     let provided = [
         ("courseboard.caddies", true, true),
         ("courseboard.courses", true, true),
+        ("courseboard.staff", true, true),
     ];
     let evaluator = Arc::new(ScriptedEvaluator::with(&provided));
     let app = guarded_app(state(evaluator.clone(), DeliveryEnforcement::Enforce));
@@ -820,6 +820,7 @@ async fn legacy_admin_refuses_a_header_that_names_another_tenant() {
     let provided = [
         ("courseboard.caddies", true, true),
         ("courseboard.courses", true, true),
+        ("courseboard.staff", true, true),
     ];
     let evaluator = Arc::new(ScriptedEvaluator::with(&provided));
     let app = guarded_app(state(evaluator.clone(), DeliveryEnforcement::Enforce));
@@ -927,4 +928,73 @@ fn only_the_timezone_read_is_left_to_every_feature() {
         }
         other => panic!("extension-status resolved to {other:?}"),
     }
+}
+
+/// Every route shape the Field proxy lets through has a feature or an
+/// exemption, so enforcement never refuses a proxied call as unclassified.
+#[test]
+fn every_route_the_field_proxy_allows_is_classified() {
+    let allowed = [
+        ("GET", "/v1/erp/staff"),
+        ("POST", "/v1/erp/staff"),
+        ("PATCH", "/v1/erp/staff/stf_1"),
+        ("DELETE", "/v1/erp/staff/stf_1"),
+        ("POST", "/v1/erp/staff/stf_1/clock-in"),
+        ("GET", "/v1/erp/reservation-types"),
+        ("GET", "/v1/field/iam/users"),
+        ("POST", "/v1/field/iam/users/invite"),
+        ("PUT", "/v1/field/iam/users/usr_1/policies"),
+        ("DELETE", "/v1/field/iam/users/usr_1"),
+        ("POST", "/v1/erp/reservations/rsv_1/billing-invoice"),
+        ("GET", "/v1/erp/orders/ord_1"),
+        ("GET", "/v1/field/client-context"),
+        ("GET", "/v1/cancellation-fees"),
+        ("POST", "/v1/cancellation-fees"),
+        ("PATCH", "/v1/cancellation-fees/inv_1"),
+        ("POST", "/v1/cancellation-fees/inv_1/send"),
+        ("GET", "/v1/invoices"),
+        ("PATCH", "/v1/invoices/inv_1"),
+        ("POST", "/v1/invoices/inv_1/fulfill"),
+        ("GET", "/v1/bridge/exports/objects"),
+        ("POST", "/v1/bridge/exports/definitions"),
+        ("GET", "/v1/bridge/exports/definitions/def_1/csv"),
+        ("POST", "/v1/bridge/exports/definitions/def_1/render"),
+    ];
+    for (method, path) in allowed {
+        let method = Method::from_bytes(method.as_bytes()).unwrap();
+        assert!(
+            crate::field_proxy::is_allowed_route(&method, path),
+            "the proxy no longer allows {method} {path}; drop it here"
+        );
+        assert_ne!(
+            routes::classify_request(&method, &format!("/field-api{path}")),
+            RequestFeature::Unclassified,
+            "{method} {path}"
+        );
+    }
+}
+
+#[tokio::test]
+async fn legacy_admin_refuses_a_query_and_form_that_disagree() {
+    let provided = [
+        ("courseboard.caddies", true, true),
+        ("courseboard.courses", true, true),
+        ("courseboard.staff", true, true),
+    ];
+    let evaluator = Arc::new(ScriptedEvaluator::with(&provided));
+    let app = guarded_app(state(evaluator.clone(), DeliveryEnforcement::Enforce));
+    let response = app
+        .oneshot(admin_request(
+            Method::POST,
+            &format!("/admin/caddies?tenant_id={TENANT}"),
+            &format!("tenant_id={OTHER_TENANT}&display_name=Sato"),
+        ))
+        .await
+        .unwrap();
+    assert_eq!(response.status(), StatusCode::FORBIDDEN);
+    assert_eq!(
+        body_json(response).await["code"],
+        "FEATURE_DELIVERY_SCOPE_MISMATCH"
+    );
+    assert_eq!(evaluator.calls.load(Ordering::SeqCst), 0);
 }
