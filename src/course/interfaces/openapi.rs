@@ -176,6 +176,7 @@ impl Modify for SecurityAddon {
         http_commercial::get_monthly_settlement,
         http_commercial::export_monthly_settlement_csv,
         http_commercial::get_extension_status,
+        http_commercial::get_tenant_timezone,
         http_commercial::update_extension_config,
         http_simulator::calculate_fee,
         http_simulator::simulate_range,

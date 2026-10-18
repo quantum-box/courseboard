@@ -6,7 +6,7 @@ mod admin_ui;
 pub mod auth;
 pub mod cancellation_fees;
 mod common_import_owner;
-mod common_import_proxy;
+pub(crate) mod common_import_proxy;
 pub mod config;
 pub mod course;
 pub mod course_authz;
@@ -1496,6 +1496,12 @@ pub fn build_router(state: AppState) -> Router {
         .route(
             "/v1/course/extension-status",
             get(course::interfaces::http_commercial::get_extension_status).route_layer(
+                middleware::from_fn_with_state(state.clone(), require_valid_token),
+            ),
+        )
+        .route(
+            "/v1/course/tenant-timezone",
+            get(course::interfaces::http_commercial::get_tenant_timezone).route_layer(
                 middleware::from_fn_with_state(state.clone(), require_valid_token),
             ),
         )

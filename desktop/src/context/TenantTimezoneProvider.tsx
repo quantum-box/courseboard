@@ -7,21 +7,22 @@ import {
   type ReactNode,
 } from 'react'
 import { useTranslation } from 'react-i18next'
-import { ApiError, courseboardApiJson } from '../api'
+import { ApiError } from '../api'
 import { Notice } from '../components/Page'
 import { useResource } from '../hooks/useResource'
 import { DEFAULT_TIME_ZONE } from '../lib/clock'
 import { isSupportedTimezone } from '../lib/timezone'
+import {
+  fetchTenantTimezone,
+  TENANT_TIMEZONE_CACHE_KEY,
+  type TenantTimezoneSettings as TenantExtensionSettings,
+} from './tenantTimezoneApi'
 
 const TenantTimezoneContext = createContext(DEFAULT_TIME_ZONE)
 const TIMEZONE_CHANGED_EVENT = 'courseboard:tenant-timezone-changed'
 
-type TenantExtensionSettings = {
-  configJson?: { timezone?: unknown } | null
-}
-
 async function loadTimezoneSettings() {
-  const load = () => courseboardApiJson<TenantExtensionSettings | null>('/v1/course/extension-status')
+  const load = fetchTenantTimezone
   try {
     return await load()
   } catch (error) {
@@ -50,7 +51,7 @@ function resolveTimezone(settings: TenantExtensionSettings | null) {
 export function TenantTimezoneProvider({ children }: { children: ReactNode }) {
   const [updatedTimezone, setUpdatedTimezone] = useState<string | null>(null)
   const loader = useMemo(() => loadTimezoneSettings, [])
-  const resource = useResource(loader, [], { cacheKey: 'course:extension-status' })
+  const resource = useResource(loader, [], { cacheKey: TENANT_TIMEZONE_CACHE_KEY })
   useEffect(() => {
     const update = (event: Event) => {
       const timezone = (event as CustomEvent<string>).detail

@@ -11,7 +11,7 @@ use axum::{
 };
 use serde_json::{json, Value};
 
-const TARGETS: &[(&str, &str, &str)] = &[
+pub(crate) const TARGETS: &[(&str, &str, &str)] = &[
     ("customer", actions::MANAGE_CUSTOMERS, "顧客台帳"),
     ("customerReception", actions::MANAGE_CUSTOMERS, "受付用紙"),
     ("dailyBudgets", actions::MANAGE_BUDGETS, "日次予算"),
@@ -114,7 +114,12 @@ fn parsed(status: StatusCode, bytes: &[u8]) -> Result<Value, AppError> {
 }
 async fn permitted(state: &AppState, headers: &HeaderMap, key: &str) -> Result<(), AppError> {
     credentials(state, headers)?.require(target(key)?.0).await?;
-    Ok(())
+    // The router only sees `/v1/course/data-imports/*`; the target's own
+    // product feature is checked here, beside its IAM action.
+    state
+        .feature_delivery()
+        .ensure_import_target(key, headers)
+        .await
 }
 
 #[utoipa::path(method(get, post),path="/v1/course/data-imports/{path}",params(("path"=String,Path,description="objects, jobs, or a permitted target/job operation")),responses((status=200,body=Value),(status=403,body=crate::course::interfaces::openapi::ErrorBody)),security(("bearer_auth"=[])),tag="course")]

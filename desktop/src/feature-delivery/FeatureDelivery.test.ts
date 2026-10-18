@@ -1,8 +1,10 @@
 import { afterEach, describe, expect, it, vi } from 'vitest'
 
 import { ApiError } from '../api'
-import { deliveryDecision, routeDeliveryDecision } from './FeatureDelivery'
+import { deliveryDecision, hasUnresolvedDelivery, routeDeliveryDecision } from './FeatureDelivery'
 import { evaluateFeatureDeliveries, resolveFeatureDeliveries } from './feature-delivery-api'
+import { FEATURE_KEYS } from './routeFeatures'
+import { fetchTenantTimezone } from '../context/tenantTimezoneApi'
 
 vi.mock('../api', async importOriginal => {
   const actual = await importOriginal<typeof import('../api')>()
@@ -92,5 +94,40 @@ describe('evaluateFeatureDeliveries', () => {
   it('leaves any other failure to the caller', async () => {
     courseboardApiJson.mockRejectedValueOnce(new ApiError('down', 503))
     await expect(evaluateFeatureDeliveries(['courseboard.courses'])).rejects.toThrow('down')
+  })
+})
+
+describe('hasUnresolvedDelivery', () => {
+  const all = (resolved: boolean) => Object.fromEntries(FEATURE_KEYS.map(key => [key, { key, enabled: true, resolved }]))
+
+  it('treats a 200 with any unresolved or missing key as a retryable failure', () => {
+    expect(hasUnresolvedDelivery({ enforcement: 'enforce', values: all(true) })).toBe(false)
+    expect(hasUnresolvedDelivery({ enforcement: 'enforce', values: all(false) })).toBe(true)
+    const { 'courseboard.courses': _omitted, ...missingOne } = all(true)
+    expect(hasUnresolvedDelivery({ enforcement: 'enforce', values: missingOne })).toBe(true)
+  })
+
+  it('never flags anything while enforcement is off', () => {
+    expect(hasUnresolvedDelivery({ enforcement: 'off', values: {} })).toBe(false)
+  })
+})
+
+describe('fetchTenantTimezone', () => {
+  it('reads the narrow endpoint', async () => {
+    courseboardApiJson.mockResolvedValueOnce({ timezone: 'Asia/Tokyo' })
+    await expect(fetchTenantTimezone()).resolves.toEqual({ configJson: { timezone: 'Asia/Tokyo' } })
+    expect(courseboardApiJson).toHaveBeenCalledWith('/v1/course/tenant-timezone')
+  })
+
+  it('falls back to the full status only when the endpoint is unknown', async () => {
+    courseboardApiJson.mockRejectedValueOnce(new ApiError('ListExtensionStatus denied', 403))
+    await expect(fetchTenantTimezone()).rejects.toThrow('denied')
+    expect(courseboardApiJson).toHaveBeenCalledTimes(1)
+
+    courseboardApiJson
+      .mockRejectedValueOnce(new ApiError('not found', 404))
+      .mockResolvedValueOnce({ configJson: { timezone: 'Asia/Tokyo' } })
+    await expect(fetchTenantTimezone()).resolves.toEqual({ configJson: { timezone: 'Asia/Tokyo' } })
+    expect(courseboardApiJson).toHaveBeenLastCalledWith('/v1/course/extension-status')
   })
 })

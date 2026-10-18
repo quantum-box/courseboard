@@ -49,6 +49,7 @@ import {
   today,
   currentYearMonth,
 } from '../../api'
+import { fetchTenantTimezone, TENANT_TIMEZONE_CACHE_KEY } from '../../context/tenantTimezoneApi'
 import { useTenantTimezone } from '../../context/TenantTimezoneProvider'
 import { i18next } from '../../i18n'
 import { useRegisterPageReload } from '../../lib/pageReload'
@@ -3567,11 +3568,9 @@ export function AvailabilityCalendar({
   const [note, setNote] = useState('')
   const [busy, setBusy] = useState(false)
   const extensionResource = useResource(
-    () => courseboardApiJson<{ configJson?: Record<string, unknown> | null } | null>(
-      `${COURSE_API}/extension-status`,
-    ),
+    fetchTenantTimezone,
     [],
-    { cacheKey: 'course:extension-status' },
+    { cacheKey: TENANT_TIMEZONE_CACHE_KEY },
   )
   let tenantToday: string | null = null
   let tenantClockError: unknown = extensionResource.error

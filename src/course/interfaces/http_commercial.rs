@@ -709,6 +709,49 @@ pub async fn get_extension_status(
     Ok(Json(status.as_ref().map(ExtensionStatusDto::from)))
 }
 
+/// The tenant's clock, and nothing else of the extension config.
+#[derive(Debug, Serialize, ToSchema)]
+pub struct TenantTimezoneDto {
+    /// IANA zone from the golf extension config, `null` when unset.
+    pub timezone: Option<String>,
+}
+
+/// GET /v1/course/tenant-timezone
+///
+/// What the application shell needs from the extension config. Every feature
+/// reads the tenant's clock, so this stays outside plan delivery, while the
+/// full status and config stay with the reservation-policy feature.
+#[utoipa::path(
+    get,
+    path = "/v1/course/tenant-timezone",
+    tag = "course-commercial",
+    responses(
+        (status = 200, description = "Tenant timezone", body = TenantTimezoneDto),
+        (status = 401, description = "Unauthorized", body = ErrorBody),
+        (status = 424, description = "Upstream provider error", body = ErrorBody),
+    ),
+    security(("bearer_auth" = []))
+)]
+pub async fn get_tenant_timezone(
+    State(state): State<AppState>,
+    headers: HeaderMap,
+) -> Result<Json<TenantTimezoneDto>, AppError> {
+    let credentials = credentials(&state, &headers)?;
+    let status = GetExtensionStatusUseCase::new(commercial_gateway(&state))
+        .execute(credentials)
+        .await
+        .map_err(AppError::from)?;
+    let timezone = status
+        .as_ref()
+        .and_then(|status| status.config_json())
+        .and_then(|config| config.get("timezone"))
+        .and_then(Value::as_str)
+        .map(str::trim)
+        .filter(|value| !value.is_empty())
+        .map(ToOwned::to_owned);
+    Ok(Json(TenantTimezoneDto { timezone }))
+}
+
 #[derive(Debug, Deserialize, ToSchema)]
 #[serde(rename_all = "camelCase")]
 pub struct UpdateExtensionConfigRequest {

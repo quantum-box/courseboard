@@ -750,6 +750,11 @@ const ROUTES: &[(&str, &str, RouteAuthorization)] = &[
         RouteAuthorization::UpstreamEnforced,
     ),
     (
+        "GET",
+        "/v1/course/tenant-timezone",
+        RouteAuthorization::UpstreamEnforced,
+    ),
+    (
         "*",
         "/v1/course/config",
         RouteAuthorization::UpstreamEnforced,
@@ -2038,6 +2043,7 @@ mod tests {
             ("GET", "/v1/course/monthly-settlement"),
             ("GET", "/v1/course/monthly-settlement/export.csv"),
             ("GET", "/v1/course/extension-status"),
+            ("GET", "/v1/course/tenant-timezone"),
             ("PATCH", "/v1/course/config"),
             ("POST", "/v1/course/demo-seed"),
             ("POST", "/v1/course/simulator/calculate"),

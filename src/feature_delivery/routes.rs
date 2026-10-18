@@ -57,7 +57,8 @@ const ROUTE_RULES: &[(&str, &str, FeatureRoute)] = &[
     ("*", "/v1/course/feature-flags", Exempt(Platform)),
     ("*", "/v1/course/feature-deliveries", Exempt(Platform)),
     ("*", "/v1/field/client-capabilities", Exempt(Platform)),
-    ("*", "/v1/course/extension-status", Exempt(Platform)),
+    // The shell's clock only; the full status is the reservation policy's.
+    ("GET", "/v1/course/tenant-timezone", Exempt(Platform)),
     ("*", "/calculate", Exempt(MachineToMachine)),
     ("*", "/simulate", Exempt(MachineToMachine)),
     // The legacy producer: Field core sends the tenant in the body, and new
@@ -143,6 +144,11 @@ const ROUTE_RULES: &[(&str, &str, FeatureRoute)] = &[
     (
         "*",
         "/v1/course/config",
+        Feature("courseboard.reservation_policy"),
+    ),
+    (
+        "*",
+        "/v1/course/extension-status",
         Feature("courseboard.reservation_policy"),
     ),
     // Tee sheet.
@@ -587,4 +593,24 @@ pub fn percent_decode(segment: &str) -> Option<String> {
         }
     }
     String::from_utf8(decoded).ok()
+}
+
+/// Common-import targets (`common_import_proxy::TARGETS`) and the feature each
+/// writes into. The proxy asks for it with the IAM action, on the catalogue,
+/// every object operation, and every job operation.
+pub const IMPORT_TARGET_FEATURES: &[(&str, &str)] = &[
+    ("customer", "courseboard.customers"),
+    ("customerReception", "courseboard.customers.reception"),
+    ("dailyBudgets", "courseboard.budgets"),
+    (
+        "courseboardReservationReports",
+        "courseboard.reservation_report_import",
+    ),
+];
+
+pub fn import_target_feature(target: &str) -> Option<&'static FeatureDefinition> {
+    IMPORT_TARGET_FEATURES
+        .iter()
+        .find(|(key, _)| *key == target)
+        .and_then(|(_, feature)| catalog::feature(feature))
 }

@@ -11,6 +11,7 @@ import {
 import { useAuth } from '../auth/AuthProvider'
 import {
   type DeliveryEnforcement,
+  type FeatureDeliveries,
   type FeatureDeliveryValue,
   evaluateFeatureDeliveries,
 } from './feature-delivery-api'
@@ -75,7 +76,10 @@ export function FeatureDeliveryProvider({ children }: Readonly<{ children: React
     void evaluateFeatureDeliveries(FEATURE_KEYS, controller.signal)
       .then(result => {
         if (controller.signal.aborted) return
-        setState({ tenantId, ...result, error: false, isLoading: false })
+        // A 200 can still carry answers Core could not give (provider down,
+        // incomplete batch). Under enforcement that is a failure to show with
+        // a retry, not a loader that waits for the next background refresh.
+        setState({ tenantId, ...result, error: hasUnresolvedDelivery(result), isLoading: false })
       })
       .catch(() => {
         if (controller.signal.aborted) return
@@ -101,6 +105,12 @@ export function FeatureDeliveryProvider({ children }: Readonly<{ children: React
     }
   }, [refresh, state, tenantId])
   return <FeatureDeliveryContext.Provider value={value}>{children}</FeatureDeliveryContext.Provider>
+}
+
+/** Enforced, and Core could not answer for at least one requested feature. */
+export function hasUnresolvedDelivery(result: FeatureDeliveries) {
+  return result.enforcement === 'enforce'
+    && FEATURE_KEYS.some(key => result.values[key]?.resolved !== true)
 }
 
 export function MockFeatureDeliveryProvider({

@@ -23,6 +23,7 @@ vi.mock('./adapters', () => ({
 
 const FAILED_PATHS = [
   '/v1/course/extension-status',
+  '/v1/course/tenant-timezone',
   '/v1/course/courses',
   '/v1/course/tee-ledger',
   '/v1/course/booking-horizon',

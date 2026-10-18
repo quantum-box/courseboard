@@ -863,3 +863,68 @@ async fn an_oversized_admin_form_reaches_the_handler_whole_in_shadow() {
         .unwrap();
     assert_eq!(response.status(), StatusCode::FORBIDDEN);
 }
+
+// ─── Common imports and the shell's clock ─────────────────────────────────
+
+#[test]
+fn every_import_target_belongs_to_a_feature() {
+    let keyless: Vec<&str> = crate::common_import_proxy::TARGETS
+        .iter()
+        .map(|(key, _, _)| *key)
+        .filter(|key| routes::import_target_feature(key).is_none())
+        .collect();
+    assert!(
+        keyless.is_empty(),
+        "import targets without a feature: {keyless:?}"
+    );
+}
+
+#[tokio::test]
+async fn an_import_target_needs_its_own_feature_under_enforcement() {
+    let only_imports = [("courseboard.data_imports", true, true)];
+    let guard = FeatureDeliveryGuard::new(
+        Arc::new(ScriptedEvaluator::with(&only_imports)),
+        DeliveryEnforcement::Enforce,
+    );
+    assert!(guard
+        .ensure_import_target("courseboardReservationReports", &headers())
+        .await
+        .is_err());
+
+    let with_target = [
+        ("courseboard.data_imports", true, true),
+        ("courseboard.reservation_report_import", true, true),
+        ("courseboard.courses", true, true),
+    ];
+    let guard = FeatureDeliveryGuard::new(
+        Arc::new(ScriptedEvaluator::with(&with_target)),
+        DeliveryEnforcement::Enforce,
+    );
+    assert!(guard
+        .ensure_import_target("courseboardReservationReports", &headers())
+        .await
+        .is_ok());
+
+    let shadow = FeatureDeliveryGuard::new(
+        Arc::new(ScriptedEvaluator::with(&only_imports)),
+        DeliveryEnforcement::Shadow,
+    );
+    assert!(shadow
+        .ensure_import_target("courseboardReservationReports", &headers())
+        .await
+        .is_ok());
+}
+
+#[test]
+fn only_the_timezone_read_is_left_to_every_feature() {
+    assert_eq!(
+        routes::classify_request(&Method::GET, "/v1/course/tenant-timezone"),
+        RequestFeature::Exempt(Exemption::Platform)
+    );
+    match routes::classify_request(&Method::GET, "/v1/course/extension-status") {
+        RequestFeature::Required(feature) => {
+            assert_eq!(feature.key, "courseboard.reservation_policy")
+        }
+        other => panic!("extension-status resolved to {other:?}"),
+    }
+}

@@ -440,6 +440,47 @@ impl FeatureDeliveryGuard {
     }
 }
 
+impl FeatureDeliveryGuard {
+    /// Whether a common-import target may be used: `courseboard.data_imports`
+    /// and the target's own feature. Only `enforce` refuses; `shadow` logs.
+    pub async fn ensure_import_target(
+        &self,
+        target: &str,
+        headers: &HeaderMap,
+    ) -> Result<(), AppError> {
+        if self.enforcement == DeliveryEnforcement::Off {
+            return Ok(());
+        }
+        let data_imports = catalog::feature("courseboard.data_imports").expect("catalog feature");
+        let decision = match (
+            routes::import_target_feature(target),
+            FeatureFlagEvaluationContext::from_headers(headers),
+        ) {
+            (None, _) => Err(DeliveryDenial::UnclassifiedRoute),
+            (Some(_), Err(_)) => Err(DeliveryDenial::Unavailable),
+            (Some(feature), Ok(context)) => self
+                .evaluate(&[data_imports, feature], &context)
+                .await
+                .into_iter()
+                .find(Result::is_err)
+                .unwrap_or(Ok(())),
+        };
+        let Err(denial) = decision else {
+            return Ok(());
+        };
+        tracing::warn!(
+            target,
+            reason = denial.code(),
+            enforcement = ?self.enforcement,
+            "feature delivery denied for import target"
+        );
+        match self.enforcement {
+            DeliveryEnforcement::Enforce => Err(AppError::Forbidden),
+            _ => Ok(()),
+        }
+    }
+}
+
 fn evaluation_context(
     req: &Request<Body>,
     tenant_override: Option<String>,

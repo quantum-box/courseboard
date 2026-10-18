@@ -105,7 +105,7 @@ IAM の列は `field_extension_golf:` を省いて書いた。`field:` で始ま
 | 区分 | ルート・画面 | 理由 |
 |---|---|---|
 | 公開 | `/`, `/healthz`, `/openapi.json`, `/swagger-ui/*`, `/ui/*`, `/public/cancellation-fees/*`、画面 `download`, `privacy`, `terms`, `pay/:token` | 認証前。契約の判定ができない。支払いリンクは、契約が終わった後も発行済みの請求を払えるようにする（PLT-5234）。 |
-| 基盤 | `/v1/me`, `/admin`（リダイレクト）, `/v1/course/feature-flags/evaluate`, `/v1/field/client-capabilities`, `/v1/course/extension-status`、画面 `golf`（ホーム）, `settings`（ハブ） | どの機能を使う場合も必要。ホームとハブは、中のリンクを機能ごとに絞る。 |
+| 基盤 | `/v1/me`, `/admin`（リダイレクト）, `/v1/course/feature-flags/evaluate`, `/v1/course/feature-deliveries/evaluate`, `/v1/field/client-capabilities`, `/v1/course/tenant-timezone`、画面 `golf`（ホーム）, `settings`（ハブ） | どの機能を使う場合も必要。ホームとハブは、中のリンクを機能ごとに絞る。tenant-timezone は時計に使うタイムゾーンだけを返す。拡張設定の全体（`extension-status`）は `courseboard.reservation_policy` に入れる。 |
 | M2M | `POST /calculate`, `POST /simulate/range`（`CalculateTax`、Field core が呼ぶ）、旧 `POST /cancellation-fee-collections` | 利用者の bearer と `x-operator-id` がない。Core の合成は `contract_unavailable` で閉じてしまう（#12209 の「未対応」）。旧 collection は新規作成を 410 で止めている（PLT-4119）。 |
 | 社内 | `POST /v1/course/demo-seed`（`SeedDemoBoard`） | 顧客に売る機能ではない。 |
 | 設定 | `settings/members`（Field `/v1/field/iam/users`, `field:ManageUsers`） | テナントの利用者管理。Field の機能として扱う。 |
@@ -173,12 +173,13 @@ tachyon iac apply --file .tachyon/manifests/courseboard-product-features.yml
 
 - env `COURSEBOARD_FEATURE_DELIVERY_ENFORCEMENT` = `off`（既定）/ `shadow` / `enforce`。未知の値は `enforce`。
 - API: `course_authz` の内側（IAM を通った後、handler の直前）で、ルートの key と、その `requiredFeatureKeys` 全部を Core の `featureDeliveryValues` に 1 回の batch で問い合わせる。`enabled && resolved` 以外は 403（`FEATURE_NOT_PROVIDED` / `FEATURE_DELIVERY_UNRESOLVED` / `FEATURE_DELIVERY_UNAVAILABLE` / `FEATURE_ROUTE_UNCLASSIFIED`）。`shadow` はログだけ出して通す。`off` は Core を呼ばない。
+- 処理の中で別の機能を呼ぶ入口は、その中でも判定する。データ出力（`/objects`、`/{source}/rows`）は出力元ごとに判定し、共通取込み（`/v1/course/data-imports/*`）は取込み先ごとに判定する（一覧・テンプレート・取込み・ジョブ操作のすべて）。
 - UI 向け: `POST /v1/course/feature-deliveries/evaluate`（`{ keys }` → `{ enforcement, values: [{ key, enabled, resolved, reason }] }`）。要件 key の AND はサーバーで行う。`off` のときは値を返さない。
 - UI: `FeatureDeliveryProvider` が全 key を一度に問い合わせる。`enforce` のときだけ、提供なしの画面は `CapabilityGate` で止め、サイドバー・ピン・ホーム・設定ハブからも外す（`useHiddenRoutes`）。判定できないときは、表示せずに読み込み中または再試行を出す（fail-closed）。release flag のゲート（fail-open）はそのまま。この endpoint がない古い API（403 / 404）の場合は `off` として扱う。
 
 ### 段階導入の順序
 
-1. この PR をマージする（既定 off のため、挙動は変わらない）。
+1. この PR をマージする（既定 off のため、挙動は変わらない）。API を UI より先にデプロイする。古い API は `/v1/course/tenant-timezone` を 403 で拒否するので、UI が先に出ると、タイムゾーンの警告が一時的に出る。
 2. tachyon-apps で `kind: ProductFeatures` の apply と、`releaseGates` を見る合成を入れる（§8）。
 3. manifest を apply し、Field の商品プランに key を割り当てる。
 4. 検証環境で `shadow` にして、拒否ログが想定どおりか確かめる。

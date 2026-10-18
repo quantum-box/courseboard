@@ -200,6 +200,8 @@ spec:
       status: implemented
     - id: "* /v1/course/reservation-policy"
       status: implemented
+    - id: "* /v1/course/extension-status"
+      status: implemented
     - id: "* /v1/course/config"
       status: implemented
     uiRefs:

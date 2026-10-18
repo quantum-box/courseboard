@@ -65,8 +65,8 @@ describe('AvailabilityCalendar range entry flow', () => {
     api.json.mockReset()
     api.text.mockReset()
     api.json.mockImplementation(async (path: string, init?: RequestInit) => {
-      if (path === '/v1/course/extension-status') {
-        return { configJson: { timezone: 'Asia/Tokyo' } }
+      if (path === '/v1/course/tenant-timezone') {
+        return { timezone: 'Asia/Tokyo' }
       }
       if (path.startsWith('/v1/course/caddie-availabilities?')) {
         return { items: [...saved.values()] }
