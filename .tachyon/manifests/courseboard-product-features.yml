@@ -328,7 +328,7 @@ spec:
     apiRefs:
     - id: "GET /v1/course/reservation-cancellations"
       status: implemented
-    - id: "GET /field-api/v1/invoices/*"
+    - id: "GET /field-api/v1/invoices"
       status: implemented
     uiRefs:
     - id: "route:golf/customers/cancellations"
@@ -890,7 +890,7 @@ spec:
       status: implemented
     - id: "* /field-api/v1/cancellation-fees/*"
       status: implemented
-    - id: "* /field-api/v1/invoices/*"
+    - id: "POST /field-api/v1/invoices"
       status: implemented
     uiRefs:
     - id: "route:cancellation-fees"

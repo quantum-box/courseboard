@@ -400,17 +400,22 @@ pub const FIELD_PROXY_RULES: &[(&str, &str, FeatureRoute)] = &[
         "/v1/cancellation-fees/*",
         Feature("courseboard.cancellation_fee"),
     ),
-    // The cancelled-booking list reads cancellation-fee invoices through the
-    // generic invoice API; issuing or changing one is billing a cancellation
-    // fee, which is that feature's to allow.
+    // The generic invoice API, narrowed to the two shapes CourseBoard uses:
+    // listing cancellation-fee invoices (`?reason=cancellation_fee`) for the
+    // cancelled-booking list, and issuing one whose every source is a
+    // cancellation fee. The guard checks the filter and the body
+    // (`cancellation_invoice_scope`); detail, edit, and fulfil by invoice id
+    // are not CourseBoard's and stay unclassified, so enforcement refuses
+    // them. Field's own invoice access scope (PLT-5227) still has to hold
+    // behind this.
     (
         "GET",
-        "/v1/invoices/*",
+        "/v1/invoices",
         Feature("courseboard.customers.cancellations"),
     ),
     (
-        "*",
-        "/v1/invoices/*",
+        "POST",
+        "/v1/invoices",
         Feature("courseboard.cancellation_fee"),
     ),
     (

@@ -270,6 +270,9 @@ pub enum DeliveryDenial {
     UnclassifiedRoute,
     /// The tenant header and the tenant the request acts on disagree.
     ScopeMismatch,
+    /// The request reaches past what the feature covers (an invoice that is
+    /// not a cancellation fee).
+    ScopeExceeded,
 }
 
 impl DeliveryDenial {
@@ -280,6 +283,7 @@ impl DeliveryDenial {
             Self::Unavailable => "FEATURE_DELIVERY_UNAVAILABLE",
             Self::UnclassifiedRoute => "FEATURE_ROUTE_UNCLASSIFIED",
             Self::ScopeMismatch => "FEATURE_DELIVERY_SCOPE_MISMATCH",
+            Self::ScopeExceeded => "FEATURE_SCOPE_EXCEEDED",
         }
     }
 
@@ -290,6 +294,7 @@ impl DeliveryDenial {
             Self::Unavailable => "Feature delivery could not be verified",
             Self::UnclassifiedRoute => "This route is not mapped to a CourseBoard feature",
             Self::ScopeMismatch => "x-operator-id does not match the tenant this request acts on",
+            Self::ScopeExceeded => "This request reaches past what the feature covers",
         }
     }
 }
@@ -643,6 +648,91 @@ async fn legacy_admin_scope(req: Request<Body>) -> (Request<Body>, AdminScope) {
     )
 }
 
+const CANCELLATION_INVOICES_PATH: &str = "/field-api/v1/invoices";
+const CANCELLATION_FEE_REASON: &str = "cancellation_fee";
+const INVOICE_BODY_LIMIT: usize = 256 * 1024;
+
+/// Whether a request on the generic invoice API stays inside the
+/// cancellation-fee workflow. `None` for any other path.
+enum InvoiceScope {
+    Within,
+    Exceeded,
+    /// A body too large (or unsized) to read without taking it away.
+    Unknown,
+    BodyLost,
+}
+
+fn every_reason_is_cancellation_fee<'a>(reasons: impl Iterator<Item = Option<&'a str>>) -> bool {
+    let mut any = false;
+    for reason in reasons {
+        if reason != Some(CANCELLATION_FEE_REASON) {
+            return false;
+        }
+        any = true;
+    }
+    any
+}
+
+async fn cancellation_invoice_scope(req: Request<Body>) -> (Request<Body>, Option<InvoiceScope>) {
+    if req.uri().path() != CANCELLATION_INVOICES_PATH {
+        return (req, None);
+    }
+    if *req.method() == axum::http::Method::GET || *req.method() == axum::http::Method::HEAD {
+        let pairs: Vec<(String, String)> = req
+            .uri()
+            .query()
+            .and_then(|query| serde_urlencoded::from_str(query).ok())
+            .unwrap_or_default();
+        let within = every_reason_is_cancellation_fee(
+            pairs
+                .iter()
+                .filter(|(name, _)| name == "reason")
+                .map(|(_, value)| Some(value.as_str())),
+        );
+        let scope = if within {
+            InvoiceScope::Within
+        } else {
+            InvoiceScope::Exceeded
+        };
+        return (req, Some(scope));
+    }
+    let declared_length = req
+        .headers()
+        .get(axum::http::header::CONTENT_LENGTH)
+        .and_then(|value| value.to_str().ok())
+        .and_then(|value| value.parse::<usize>().ok());
+    if !declared_length.is_some_and(|length| length <= INVOICE_BODY_LIMIT) {
+        return (req, Some(InvoiceScope::Unknown));
+    }
+    let (parts, body) = req.into_parts();
+    let Ok(bytes) = axum::body::to_bytes(body, INVOICE_BODY_LIMIT).await else {
+        return (
+            Request::from_parts(parts, Body::empty()),
+            Some(InvoiceScope::BodyLost),
+        );
+    };
+    let within = serde_json::from_slice::<serde_json::Value>(&bytes)
+        .ok()
+        .and_then(|body| {
+            body.get("sources")
+                .and_then(|sources| sources.as_array())
+                .cloned()
+        })
+        .is_some_and(|sources| {
+            every_reason_is_cancellation_fee(
+                sources
+                    .iter()
+                    .map(|source| source.get("reason").and_then(|r| r.as_str())),
+            )
+        });
+    let scope = if within {
+        InvoiceScope::Within
+    } else {
+        InvoiceScope::Exceeded
+    };
+    (Request::from_parts(parts, Body::from(bytes)), Some(scope))
+}
+
 /// Runs inside the action gate, right before the handler, so a request it
 /// sees has already passed IAM.
 pub async fn require_feature_delivery(
@@ -680,6 +770,16 @@ pub async fn require_feature_delivery(
                     return AppError::BadRequest("request body could not be read").into_response()
                 }
             };
+            let (rebuilt, invoice_scope) = cancellation_invoice_scope(req).await;
+            req = rebuilt;
+            let scope_denial = match invoice_scope {
+                None | Some(InvoiceScope::Within) => None,
+                Some(InvoiceScope::Exceeded) => Some(DeliveryDenial::ScopeExceeded),
+                Some(InvoiceScope::Unknown) => Some(DeliveryDenial::Unavailable),
+                Some(InvoiceScope::BodyLost) => {
+                    return AppError::BadRequest("request body could not be read").into_response()
+                }
+            };
             let context = match tenant_override {
                 None => evaluation_context(&req, None).ok_or(DeliveryDenial::Unavailable),
                 Some(Ok(tenant)) => {
@@ -688,12 +788,14 @@ pub async fn require_feature_delivery(
                 Some(Err(denial)) => Err(denial),
             };
             let decision = match (
+                scope_denial,
                 routes::additional_features(req.method(), req.uri().path()),
                 context,
             ) {
-                (None, _) => Err(DeliveryDenial::UnclassifiedRoute),
-                (Some(_), Err(denial)) => Err(denial),
-                (Some(additional), Ok(context)) => {
+                (Some(denial), _, _) => Err(denial),
+                (None, None, _) => Err(DeliveryDenial::UnclassifiedRoute),
+                (None, Some(_), Err(denial)) => Err(denial),
+                (None, Some(additional), Ok(context)) => {
                     let mut features = vec![feature];
                     features.extend(additional);
                     guard
@@ -809,7 +911,8 @@ pub async fn evaluate_feature_deliveries(
                 Err(
                     DeliveryDenial::Unavailable
                     | DeliveryDenial::UnclassifiedRoute
-                    | DeliveryDenial::ScopeMismatch,
+                    | DeliveryDenial::ScopeMismatch
+                    | DeliveryDenial::ScopeExceeded,
                 ) => (false, false, "unavailable"),
             };
             FeatureDeliveryResult {

@@ -950,8 +950,7 @@ fn every_route_the_field_proxy_allows_is_classified() {
         ("PATCH", "/v1/cancellation-fees/inv_1"),
         ("POST", "/v1/cancellation-fees/inv_1/send"),
         ("GET", "/v1/invoices"),
-        ("PATCH", "/v1/invoices/inv_1"),
-        ("POST", "/v1/invoices/inv_1/fulfill"),
+        ("POST", "/v1/invoices"),
         ("GET", "/v1/bridge/exports/objects"),
         ("POST", "/v1/bridge/exports/definitions"),
         ("GET", "/v1/bridge/exports/definitions/def_1/csv"),
@@ -1053,5 +1052,98 @@ fn reading_cancellation_invoices_is_the_list_but_issuing_one_is_billing() {
     };
     assert_eq!(key(Method::GET), "courseboard.customers.cancellations");
     assert_eq!(key(Method::POST), "courseboard.cancellation_fee");
-    assert_eq!(key(Method::PATCH), "courseboard.cancellation_fee");
+    // Invoice ids are not CourseBoard's to act on.
+    for (method, path) in [
+        (Method::GET, "/field-api/v1/invoices/inv_1"),
+        (Method::PATCH, "/field-api/v1/invoices/inv_1"),
+        (Method::POST, "/field-api/v1/invoices/inv_1/fulfill"),
+    ] {
+        assert_eq!(
+            routes::classify_request(&method, path),
+            RequestFeature::Unclassified,
+            "{method} {path}"
+        );
+    }
+}
+
+fn json_request(method: Method, uri: &str, body: &str) -> Request<Body> {
+    Request::builder()
+        .method(method)
+        .uri(uri)
+        .header(AUTHORIZATION, format!("Bearer {TOKEN}"))
+        .header("x-operator-id", TENANT)
+        .header("content-type", "application/json")
+        .header("content-length", body.len().to_string())
+        .body(Body::from(body.to_string()))
+        .unwrap()
+}
+
+#[tokio::test]
+async fn the_invoice_api_is_admitted_only_inside_the_cancellation_fee_workflow() {
+    let provided = [
+        ("courseboard.customers.cancellations", true, true),
+        ("courseboard.customers", true, true),
+        ("courseboard.cancellation_fee", true, true),
+    ];
+    let status = |request: Request<Body>| async {
+        let app = guarded_app(state(
+            Arc::new(ScriptedEvaluator::with(&provided)),
+            DeliveryEnforcement::Enforce,
+        ));
+        let response = app.oneshot(request).await.unwrap();
+        let status = response.status();
+        let code = if status == StatusCode::FORBIDDEN {
+            body_json(response).await["code"]
+                .as_str()
+                .unwrap_or_default()
+                .to_string()
+        } else {
+            String::new()
+        };
+        (status, code)
+    };
+    let fee = r#"{"sources":[{"sourceType":"reservation","sourceId":"rsv_1","reason":"cancellation_fee"}]}"#;
+    let general =
+        r#"{"sources":[{"sourceType":"reservation","sourceId":"rsv_1","reason":"green_fee"}]}"#;
+
+    assert_eq!(
+        status(request(
+            Method::GET,
+            "/field-api/v1/invoices?reason=cancellation_fee&limit=50"
+        ))
+        .await,
+        (StatusCode::OK, String::new())
+    );
+    assert_eq!(
+        status(request(Method::GET, "/field-api/v1/invoices")).await,
+        (StatusCode::FORBIDDEN, "FEATURE_SCOPE_EXCEEDED".to_string())
+    );
+    assert_eq!(
+        status(request(
+            Method::GET,
+            "/field-api/v1/invoices?reason=cancellation_fee&reason=green_fee"
+        ))
+        .await,
+        (StatusCode::FORBIDDEN, "FEATURE_SCOPE_EXCEEDED".to_string())
+    );
+    assert_eq!(
+        status(json_request(Method::POST, "/field-api/v1/invoices", fee)).await,
+        (StatusCode::OK, String::new())
+    );
+    assert_eq!(
+        status(json_request(
+            Method::POST,
+            "/field-api/v1/invoices",
+            general
+        ))
+        .await,
+        (StatusCode::FORBIDDEN, "FEATURE_SCOPE_EXCEEDED".to_string())
+    );
+    assert_eq!(
+        status(request(Method::PATCH, "/field-api/v1/invoices/inv_1")).await,
+        (
+            StatusCode::FORBIDDEN,
+            "FEATURE_ROUTE_UNCLASSIFIED".to_string()
+        )
+    );
 }
