@@ -1503,7 +1503,7 @@ export function ReceptionFieldSettingsPanel({
           ? true
           : field.required,
         label: field.customLabel ? field.label?.trim() || null : null,
-        customLabel: field.customLabel,
+        customLabel: field.customLabel && Boolean(field.label?.trim()),
         sortOrder: field.sortOrder,
         options: field.fieldType === 'select' ? field.options : [],
       })))
@@ -1774,7 +1774,7 @@ export function ReceptionFieldSettingsPanel({
                         disabled={changing}
                         onChange={event => update(field.editorKey, {
                           label: event.target.value,
-                          customLabel: event.target.value.trim().length > 0,
+                          customLabel: true,
                         })}
                       />
                       {field.customLabel ? (
@@ -1852,7 +1852,7 @@ export function ReceptionFieldSettingsPanel({
                       disabled={changing}
                       onChange={event => update(field.editorKey, {
                         label: event.target.value,
-                        customLabel: event.target.value.trim().length > 0,
+                        customLabel: true,
                       })}
                     />
                     {field.customLabel ? (

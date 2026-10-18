@@ -68,6 +68,31 @@ describe('ReceptionFieldsPage analysis proposal', () => {
     })
   })
 
+  it('keeps an emptied display name editable without substituting or changing its field key', async () => {
+    const field = {
+      fieldKey: 'reservation_contact', kind: 'custom', fieldType: 'text',
+      enabled: true, required: false, label: '予約者', customLabel: true, sortOrder: 10, options: [],
+    }
+    api.json.mockImplementation(async (path: string, init?: RequestInit) => {
+      if (path === '/v1/course/customer-reception-fields') {
+        return { items: init?.method === 'PUT' ? JSON.parse(String(init.body)).items : [...DEFAULT_RECEPTION_FIELDS, field] }
+      }
+      if (path === '/v1/course/customer-consent-items?includeInactive=true') return { items: [] }
+      throw new Error(`Unexpected API call: ${path}`)
+    })
+    renderPage()
+    const label = await screen.findByDisplayValue('予約者')
+    const key = screen.getByRole('textbox', { name: '項目キー' }) as HTMLInputElement
+    fireEvent.change(label, { target: { value: '' } })
+    expect((label as HTMLInputElement).value).toBe('')
+    expect(key.value).toBe('reservation_contact')
+    fireEvent.change(label, { target: { value: '予約した人' } })
+    fireEvent.click(screen.getByRole('button', { name: '項目設定を保存' }))
+    await waitFor(() => expect(toast.show).toHaveBeenCalledWith(expect.objectContaining({ message: '受付票の項目設定を保存しました' })))
+    const write = api.json.mock.calls.find(([, init]) => init?.method === 'PUT')
+    expect(JSON.parse(String(write?.[1].body)).items.find((item: { fieldKey: string }) => item.fieldKey === field.fieldKey)).toMatchObject({ label: '予約した人', customLabel: true })
+  })
+
   it('blocks colliding consent keys before saving and lets the operator keep the additional field', async () => {
     const field = {
       fieldKey: 'club_information_opt_out', kind: 'custom', fieldType: 'boolean',
