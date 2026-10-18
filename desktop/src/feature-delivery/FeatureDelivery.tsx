@@ -169,6 +169,16 @@ export function useOptionalFeatureDelivery() {
   return useContext(FeatureDeliveryContext)
 }
 
+/**
+ * Whether one feature is provided, for a control embedded in a screen that
+ * belongs to another (the check-in panel on the ledger, the availability tab
+ * on a caddie). Anything but a confirmed yes hides the control under
+ * enforcement; nothing is hidden while enforcement is off.
+ */
+export function useFeatureProvided(key: string) {
+  return deliveryDecision(key, useOptionalFeatureDelivery()) === true
+}
+
 export function useRouteDelivery(route: string) {
   const context = useOptionalFeatureDelivery()
   return {

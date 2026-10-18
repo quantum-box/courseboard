@@ -17,6 +17,7 @@ import { resizeReservationPlayerRows } from './newReservationPlayers'
 import { PlanPicker } from './PlanPicker'
 import { PlayerTagInput } from './PlayerTagInput'
 import { ReservationCheckins } from './ReservationCheckins'
+import { useFeatureProvided } from '../../../feature-delivery/FeatureDelivery'
 
 /** A row being edited. Blank rows are dropped on save rather than refused. */
 type DraftPlayer = {
@@ -87,6 +88,9 @@ export function PartyEditor({
   onReservationChanged: () => void
 }) {
   const { t } = useTranslation(['ledger', 'common'])
+  // Check-in is its own feature: a plan with the tee sheet but without it
+  // keeps the party editor and loses only this panel.
+  const checkinProvided = useFeatureProvided('courseboard.tee_sheet.checkin')
   const [customerName, setCustomerName] = useState('')
   const [customerId, setCustomerId] = useState<string | null>(null)
   const [quantity, setQuantity] = useState('')
@@ -398,11 +402,13 @@ export function PartyEditor({
 
         {/* Below the roster it reads from, and above the save buttons: the desk
             checks a group in against the names it has just confirmed. */}
-        <ReservationCheckins
-          reservationId={reservation.id}
-          players={reservation.party?.players ?? []}
-          dirty={dirty}
-        />
+        {checkinProvided ? (
+          <ReservationCheckins
+            reservationId={reservation.id}
+            players={reservation.party?.players ?? []}
+            dirty={dirty}
+          />
+        ) : null}
 
         <div className="ledger-party-actions">
           <Button type="button" variant="ghost" onClick={requestClose} disabled={saving}>

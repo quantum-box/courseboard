@@ -48,8 +48,11 @@ impl FeatureFlagEvaluationContext {
     }
 
     pub(crate) fn from_headers(headers: &HeaderMap) -> Result<Self, AppError> {
+        // Cloudflare may strip `Authorization`; the SPA then sends the same
+        // bearer in `x-courseboard-authorization`, as every other route reads.
         let authorization = headers
             .get(AUTHORIZATION)
+            .or_else(|| headers.get(crate::COURSEBOARD_AUTHORIZATION_HEADER))
             .and_then(|value| value.to_str().ok())
             .filter(|value| {
                 value

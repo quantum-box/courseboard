@@ -69,6 +69,18 @@ describe('deliveryDecision', () => {
   })
 })
 
+describe('embedded controls', () => {
+  it('drop a child feature the plan leaves out while the parent screen stays', () => {
+    const context = enforced({
+      'courseboard.tee_sheet': { enabled: true, resolved: true },
+      'courseboard.courses': { enabled: true, resolved: true },
+      'courseboard.tee_sheet.checkin': { enabled: false, resolved: true },
+    })
+    expect(deliveryDecision('courseboard.tee_sheet', context)).toBe(true)
+    expect(deliveryDecision('courseboard.tee_sheet.checkin', context)).toBe(false)
+  })
+})
+
 describe('evaluateFeatureDeliveries', () => {
   it('reads a malformed answer as enforced and unresolved', () => {
     const result = resolveFeatureDeliveries(['courseboard.courses'], {

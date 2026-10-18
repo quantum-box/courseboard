@@ -50,6 +50,7 @@ import {
   currentYearMonth,
 } from '../../api'
 import { fetchTenantTimezone, TENANT_TIMEZONE_CACHE_KEY } from '../../context/tenantTimezoneApi'
+import { useFeatureProvided } from '../../feature-delivery/FeatureDelivery'
 import { useTenantTimezone } from '../../context/TenantTimezoneProvider'
 import { i18next } from '../../i18n'
 import { useRegisterPageReload } from '../../lib/pageReload'
@@ -2749,6 +2750,8 @@ function ProfileDetail({
 }) {
   const { t } = useTranslation(['caddies', 'common'])
   const [tab, setTab] = useState<DetailTab>('basic')
+  // Availability is its own feature; without it the tab is not offered.
+  const availabilityProvided = useFeatureProvided('courseboard.caddies.availability')
   const [editOpen, setEditOpen] = useState(false)
   // The day-off form only lives while its tab is mounted, so leaving the tab
   // would silently drop whatever the user typed. Ask first.
@@ -2839,16 +2842,18 @@ function ProfileDetail({
         </MetricGrid>
       </Panel>
 
-      <div className="grid grid-cols-4 gap-1 overflow-x-auto rounded-lg border border-border bg-surface p-1" role="tablist" aria-label={t('caddies:detail.tabs.label')}>
+      <div className={`grid ${availabilityProvided ? 'grid-cols-4' : 'grid-cols-3'} gap-1 overflow-x-auto rounded-lg border border-border bg-surface p-1`} role="tablist" aria-label={t('caddies:detail.tabs.label')}>
         <DetailTabButton active={tab === 'basic'} onClick={() => changeTab('basic')}>
           <Users /> {t('caddies:detail.tabs.basic')}
         </DetailTabButton>
-        <DetailTabButton active={tab === 'availability'} onClick={() => changeTab('availability')}>
-          <CalendarDays /> {t('caddies:detail.tabs.availability')}
-          {availabilityDirty ? (
-            <Badge variant="warning">{t('caddies:calendar.unsaved')}</Badge>
-          ) : null}
-        </DetailTabButton>
+        {availabilityProvided ? (
+          <DetailTabButton active={tab === 'availability'} onClick={() => changeTab('availability')}>
+            <CalendarDays /> {t('caddies:detail.tabs.availability')}
+            {availabilityDirty ? (
+              <Badge variant="warning">{t('caddies:calendar.unsaved')}</Badge>
+            ) : null}
+          </DetailTabButton>
+        ) : null}
         <DetailTabButton active={tab === 'assignments'} onClick={() => changeTab('assignments')}>
           <ClipboardCheck /> {t('caddies:detail.tabs.assignments')}
         </DetailTabButton>
@@ -2878,7 +2883,7 @@ function ProfileDetail({
         </div>
       ) : null}
 
-      {tab === 'availability' ? (
+      {tab === 'availability' && availabilityProvided ? (
         <AvailabilityCalendar
           profile={profile}
           setFlash={setFlash}

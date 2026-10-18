@@ -1035,3 +1035,15 @@ async fn an_import_listing_asks_core_once_whatever_its_length() {
     off.import_target_decisions(&targets, &headers()).await;
     assert_eq!(evaluator.calls.load(Ordering::SeqCst), 0);
 }
+
+#[test]
+fn the_fallback_authorization_header_carries_the_evaluation_context() {
+    let mut headers = axum::http::HeaderMap::new();
+    headers.insert(
+        crate::COURSEBOARD_AUTHORIZATION_HEADER,
+        format!("Bearer {TOKEN}").parse().unwrap(),
+    );
+    headers.insert("x-operator-id", TENANT.parse().unwrap());
+    let context = FeatureFlagEvaluationContext::from_headers(&headers).expect("fallback header");
+    assert_eq!(context.authorization(), format!("Bearer {TOKEN}"));
+}
