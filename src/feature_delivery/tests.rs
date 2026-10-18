@@ -234,13 +234,29 @@ fn release_gates_are_courseboard_flags() {
 
 #[test]
 fn the_manifest_writes_no_defaults() {
+    // Every scalar value is written double-quoted, so a field whose value is
+    // a default is exactly a line ending in an unquoted `[]` or `null`. A
+    // description or annotation that merely mentions `: []` ends in a quote.
+    let is_default_field = |line: &str| {
+        let line = line.trim_end();
+        line.ends_with(": []") || line.ends_with(": null")
+    };
     let rendered = catalog::render_manifest();
-    for default in [": []", ": null"] {
-        assert!(
-            !rendered.contains(default),
-            "the manifest writes a default ({default}); omit it instead"
-        );
-    }
+    let defaults: Vec<&str> = rendered
+        .lines()
+        .filter(|line| is_default_field(line))
+        .collect();
+    assert!(defaults.is_empty(), "omit these defaults: {defaults:?}");
+
+    let mut notes = String::new();
+    catalog::annotations(
+        &mut notes,
+        &[("example", "fallback: null"), ("list", "example: []")],
+    );
+    assert!(
+        !notes.lines().any(is_default_field),
+        "a value that mentions a default is not a default field"
+    );
 }
 
 /// The manifest is what `tachyon` applies; the catalog is what the guard
