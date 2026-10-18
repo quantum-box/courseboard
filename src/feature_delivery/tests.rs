@@ -237,6 +237,17 @@ fn release_gates_are_courseboard_flags() {
     }
 }
 
+#[test]
+fn the_manifest_writes_no_defaults() {
+    let rendered = catalog::render_manifest(routes::api_refs);
+    for default in [": []", ": null"] {
+        assert!(
+            !rendered.contains(default),
+            "the manifest writes a default ({default}); omit it instead"
+        );
+    }
+}
+
 /// The manifest is what `tachyon` applies; the catalog is what the guard
 /// runs. A difference means one of them is lying.
 #[test]

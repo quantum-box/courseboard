@@ -213,6 +213,11 @@ pub const FEATURES: &[FeatureDefinition] = &[
 ///
 /// Hand-written rather than serialized so the file stays stable to review:
 /// the field order and quoting never move under a dependency upgrade.
+///
+/// Defaults are left out: an empty list or a null is not written, and the
+/// importer reads an absent field as empty / none (`optionalIntegration`,
+/// `internalDependencies`, and any empty `apiRefs`, `uiRefs`, `releaseGates`,
+/// or `requiredFeatureKeys`).
 pub fn render_manifest(api_refs: impl Fn(&str) -> Vec<String>) -> String {
     let mut out = String::new();
     let line = |out: &mut String, indent: usize, text: &str| {
@@ -276,7 +281,6 @@ pub fn render_manifest(api_refs: impl Fn(&str) -> Vec<String>) -> String {
             .map(|route| format!("route:{route}"))
             .collect();
         refs(&mut out, "uiRefs", &ui_refs);
-        line(&mut out, 4, "optionalIntegration: null");
         list(&mut out, 4, "releaseGates", feature.release_gates);
         list(
             &mut out,
@@ -284,7 +288,6 @@ pub fn render_manifest(api_refs: impl Fn(&str) -> Vec<String>) -> String {
             "requiredFeatureKeys",
             feature.required_feature_keys,
         );
-        line(&mut out, 4, "internalDependencies: []");
         line(&mut out, 4, "operationBindings:");
         line(&mut out, 4, "- operation: read");
         list(&mut out, 6, "requiredActions", feature.read_actions);
@@ -296,10 +299,10 @@ pub fn render_manifest(api_refs: impl Fn(&str) -> Vec<String>) -> String {
     out
 }
 
+/// An empty list is omitted, not written as `[]`.
 fn list(out: &mut String, indent: usize, name: &str, items: &[&str]) {
     let pad = " ".repeat(indent);
     if items.is_empty() {
-        out.push_str(&format!("{pad}{name}: []\n"));
         return;
     }
     out.push_str(&format!("{pad}{name}:\n"));
@@ -308,9 +311,9 @@ fn list(out: &mut String, indent: usize, name: &str, items: &[&str]) {
     }
 }
 
+/// An empty list is omitted, not written as `[]`.
 fn refs(out: &mut String, name: &str, ids: &[String]) {
     if ids.is_empty() {
-        out.push_str(&format!("    {name}: []\n"));
         return;
     }
     out.push_str(&format!("    {name}:\n"));
