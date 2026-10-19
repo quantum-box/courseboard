@@ -36,9 +36,9 @@ use crate::course::domain::actions::{
     CALCULATE_FEES, LIST_CADDIE_ASSIGNMENTS, LIST_CADDIE_AVAILABILITY, LIST_CADDIE_RANK_FEES,
     LIST_COURSES, LIST_CUSTOMERS, LIST_MEMBERSHIP, LIST_SHIFTS, LIST_SLOT_OVERRIDES,
     LIST_TEE_SHEET, MANAGE_CADDIE_ASSIGNMENTS, MANAGE_CADDIE_AVAILABILITY, MANAGE_CADDIE_RANK_FEES,
-    MANAGE_CANCELLATION_FEES, MANAGE_COURSES, MANAGE_CUSTOMERS, MANAGE_MEMBERSHIP_PLANS,
-    MANAGE_RESERVATIONS, MANAGE_RESERVATION_POLICY, MANAGE_SHIFTS, MANAGE_SLOT_OVERRIDES,
-    SEED_DEMO_BOARD,
+    MANAGE_COURSES, MANAGE_CUSTOMERS, MANAGE_MEMBERSHIP_PLANS, MANAGE_RESERVATIONS,
+    MANAGE_RESERVATION_POLICY, MANAGE_SHIFTS, MANAGE_SLOT_OVERRIDES, SEED_DEMO_BOARD,
+    SETTLE_CANCELLATION_FEES,
 };
 
 /// What standing a route needs before its handler runs.
@@ -57,6 +57,10 @@ pub enum RouteAuthorization {
     /// The handler reads or writes CourseBoard's own database; Tachyon Auth is
     /// asked for this action before it runs.
     Action(&'static str),
+    /// Like `Action`, but any one of these is enough, asked in order. For an
+    /// action being renamed: the new name and the old are both accepted until
+    /// every policy carries the new one.
+    AnyAction(&'static [&'static str]),
     /// The handler asks for itself, because the tenant it acts on is in the
     /// request body rather than `x-operator-id`.
     ///
@@ -522,7 +526,7 @@ const ROUTES: &[(&str, &str, RouteAuthorization)] = &[
     (
         "POST",
         "/v1/course/reservation-cancellations/fees",
-        RouteAuthorization::Action(MANAGE_CANCELLATION_FEES),
+        RouteAuthorization::AnyAction(SETTLE_CANCELLATION_FEES),
     ),
     // CourseBoard's own rows (ADR-0009), so the gate is here rather than at
     // Field: read wherever a customer is read, arranged where customers are
@@ -1611,13 +1615,41 @@ pub(crate) fn bearer_from(req: &Request<Body>) -> Option<&str> {
     }
 }
 
+/// Allowed as soon as one of `actions` is, asked in order; denied only when
+/// every one is. Anything other than a denial — a rejected bearer or tenant, an
+/// unreachable policy store — ends the check, so an outage is never read as a
+/// reason to try the next action.
+async fn check_any(
+    checker: &dyn PolicyChecker,
+    bearer: &str,
+    operator_id: &str,
+    platform_id: Option<&str>,
+    actions: &[&str],
+) -> Result<Decision, CheckError> {
+    for action in actions {
+        match checker
+            .check(bearer, operator_id, platform_id, action)
+            .await?
+        {
+            Decision::Allowed => return Ok(Decision::Allowed),
+            Decision::Denied => continue,
+        }
+    }
+    Ok(Decision::Denied)
+}
+
 pub async fn require_course_authorization(
     State(state): State<crate::AppState>,
     req: Request<Body>,
     next: Next,
 ) -> Result<Response, AppError> {
-    let action = match classify(req.method(), req.uri().path()) {
-        Some(RouteAuthorization::Action(action)) => action,
+    let single: [&'static str; 1];
+    let actions: &[&'static str] = match classify(req.method(), req.uri().path()) {
+        Some(RouteAuthorization::Action(action)) => {
+            single = [action];
+            &single
+        }
+        Some(RouteAuthorization::AnyAction(actions)) => actions,
         Some(_) => return Ok(next.run(req).await),
         None => {
             // A registered-but-unclassified route. Refusing beats shipping it
@@ -1632,6 +1664,7 @@ pub async fn require_course_authorization(
     };
 
     let authorization = state.course_authorization();
+    let action = actions.join(" or ");
     let Some(checker) = authorization.checker.clone() else {
         tracing::debug!(action, "course action authorization is disabled");
         return Ok(next.run(req).await);
@@ -1668,10 +1701,7 @@ pub async fn require_course_authorization(
         .map(str::trim)
         .filter(|value| !value.is_empty());
 
-    match checker
-        .check(bearer, operator_id, platform_id, action)
-        .await
-    {
+    match check_any(checker.as_ref(), bearer, operator_id, platform_id, actions).await {
         Ok(Decision::Allowed) => Ok(next.run(req).await),
         Ok(Decision::Denied) => Ok(forbidden_response(
             "action",
@@ -1695,6 +1725,118 @@ mod tests {
 
     fn get(path: &str) -> Option<RouteAuthorization> {
         classify(&Method::GET, path)
+    }
+
+    /// Grants exactly the actions it was given, and counts what it was asked.
+    struct Granting {
+        granted: &'static [&'static str],
+        asked: Mutex<Vec<String>>,
+    }
+
+    impl Granting {
+        fn new(granted: &'static [&'static str]) -> Self {
+            Self {
+                granted,
+                asked: Mutex::new(Vec::new()),
+            }
+        }
+    }
+
+    #[async_trait::async_trait]
+    impl PolicyChecker for Granting {
+        async fn check(
+            &self,
+            _bearer: &str,
+            _operator_id: &str,
+            _platform_id: Option<&str>,
+            action: &str,
+        ) -> Result<Decision, CheckError> {
+            self.asked.lock().unwrap().push(action.to_string());
+            Ok(if self.granted.contains(&action) {
+                Decision::Allowed
+            } else {
+                Decision::Denied
+            })
+        }
+    }
+
+    #[test]
+    fn settling_cancellation_fees_accepts_the_field_action_or_the_golf_one() {
+        assert_eq!(
+            classify(&Method::POST, "/v1/course/reservation-cancellations/fees"),
+            Some(RouteAuthorization::AnyAction(&[
+                "field:ManageCancellationFees",
+                "field_extension_golf:ManageCancellationFees",
+            ]))
+        );
+    }
+
+    #[tokio::test]
+    async fn settling_cancellation_fees_passes_on_either_action_and_only_on_those() {
+        let route = |checker: &'static Granting| async move {
+            let Some(RouteAuthorization::AnyAction(actions)) =
+                classify(&Method::POST, "/v1/course/reservation-cancellations/fees")
+            else {
+                panic!("the fees route takes any of its actions");
+            };
+            check_any(checker, "token", "tn_a", None, actions)
+                .await
+                .unwrap()
+        };
+        for (granted, expected) in [
+            (
+                &["field_extension_golf:ManageCancellationFees"][..],
+                Decision::Allowed,
+            ),
+            (&["field:ManageCancellationFees"][..], Decision::Allowed),
+            (
+                &[
+                    "field:ManageCancellationFees",
+                    "field_extension_golf:ManageCancellationFees",
+                ][..],
+                Decision::Allowed,
+            ),
+            (&["field:ListCancellationFees"][..], Decision::Denied),
+            (&[][..], Decision::Denied),
+        ] {
+            let checker: &'static Granting = Box::leak(Box::new(Granting::new(granted)));
+            assert_eq!(route(checker).await, expected, "granted {granted:?}");
+        }
+    }
+
+    #[tokio::test]
+    async fn any_action_stops_asking_once_one_is_allowed() {
+        let checker = Granting::new(&["field:ManageCancellationFees"]);
+        let decision = check_any(&checker, "token", "tn_a", None, SETTLE_CANCELLATION_FEES)
+            .await
+            .unwrap();
+        assert_eq!(decision, Decision::Allowed);
+        assert_eq!(
+            *checker.asked.lock().unwrap(),
+            vec!["field:ManageCancellationFees".to_string()]
+        );
+    }
+
+    #[tokio::test]
+    async fn any_action_does_not_try_the_next_action_after_an_outage() {
+        struct Down(Mutex<usize>);
+        #[async_trait::async_trait]
+        impl PolicyChecker for Down {
+            async fn check(
+                &self,
+                _: &str,
+                _: &str,
+                _: Option<&str>,
+                _: &str,
+            ) -> Result<Decision, CheckError> {
+                *self.0.lock().unwrap() += 1;
+                Err(CheckError::Provider("down".to_string()))
+            }
+        }
+        let checker = Down(Mutex::new(0));
+        let result = check_any(&checker, "token", "tn_a", None, SETTLE_CANCELLATION_FEES).await;
+        assert!(matches!(result, Err(CheckError::Provider(_))));
+        assert_eq!(*checker.0.lock().unwrap(), 1);
     }
 
     #[test]

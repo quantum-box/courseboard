@@ -120,6 +120,27 @@ impl<'a> GatewayCredentials<'a> {
     pub async fn require(&self, action: &'static str) -> Result<(), CourseError> {
         self.authorizer.require(*self, action).await
     }
+
+    /// Refuse unless the tenant's policies grant at least one of `actions`,
+    /// asked in order.
+    ///
+    /// For an operation whose action is being renamed: the old and the new
+    /// name are both accepted until every policy carries the new one. Only a
+    /// refusal moves on to the next action; an unreachable policy store or a
+    /// rejected tenant ends the check there, so an outage is never read as a
+    /// reason to try something else.
+    pub async fn require_any(&self, actions: &'static [&'static str]) -> Result<(), CourseError> {
+        let Some((first, _)) = actions.split_first() else {
+            return Err(CourseError::Forbidden("no action was named"));
+        };
+        for action in actions {
+            match self.require(action).await {
+                Err(CourseError::Forbidden(_)) => continue,
+                decided => return decided,
+            }
+        }
+        Err(CourseError::Forbidden(first))
+    }
 }
 
 /// Hand-written so the bearer never reaches a log line, and so the authorizer

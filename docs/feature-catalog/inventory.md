@@ -139,7 +139,7 @@ CourseBoard のガードは、`/field-api` の後ろのパスで分類する。�
 1 と 2 は既存の設計との食い違いで、この PR では直していない。3 と 4 は、この PR の実装で設計に合わせた点。
 
 1. **Core はまだ「flag なしの安定機能」を評価できない（要対応・別リポジトリ）。** tachyon-apps #12209 の `featureDeliveryValues` は、delivery key をそのまま release flag として引く。flag が OFF または未登録なら、契約を見ずに `enabled: false` を返す。一方、PLT-5695 は「公開flagを持たない安定機能は契約とIAMで評価」「flag廃止で提供権を失わせない」としていて、今回合意した方針も同じ。このままだと、flag を付けない 25 件はどれも常に閉じる。さらに、合成の対象（`governs`）は `payment::field_contract_entitlement` に Field の 4 key だけを固定で書いた表になっている。CourseBoard の key を足すには、Core の変更が必要。
-2. **キャンセル料の action が 2 系統ある。** PLT-5223 は「Extensionは使わず `field:ListCancellationFees` / `field:ManageCancellationFees`」と確定した。しかし CourseBoard の `POST /v1/course/reservation-cancellations/fees` は、今も `field_extension_golf:ManageCancellationFees` を要求している（`src/course/domain/actions.rs:100`、`settle_cancellation_fees.rs`、manifest の 405 行目と 521 行目）。画面（`cancellation-fees*`）は Field の `cancellationFees.list/manage`（`field:*`）を見ている。カタログの `requiredActions` には `field:*` だけを書く案にしたが、旧 endpoint は extension action のまま残る。この endpoint を廃止するか `field:*` へ移すかは、PLT-4119 / PLT-5228 の側で決める。
+2. **キャンセル料の action が 2 系統ある。** PLT-5223 は「Extensionは使わず `field:ListCancellationFees` / `field:ManageCancellationFees`」と確定した。しかし CourseBoard の `POST /v1/course/reservation-cancellations/fees` は、今も `field_extension_golf:ManageCancellationFees` を要求している（`src/course/domain/actions.rs:100`、`settle_cancellation_fees.rs`、manifest の 405 行目と 521 行目）。画面（`cancellation-fees*`）は Field の `cancellationFees.list/manage`（`field:*`）を見ている。カタログの `requiredActions` には `field:*` だけを書く案にしたが、旧 endpoint は extension action のまま残る。この endpoint を廃止するか `field:*` へ移すかは、PLT-4119 / PLT-5228 の側で決める。 → 移行期間として、この endpoint は `field:ManageCancellationFees` と旧 action のどちらでも通すようにした（ルート表 `RouteAuthorization::AnyAction` とユースケースの `require_any`）。旧 action を外すのは、本番の policy を新 action へ移した後の別 PR。
 3. **UI の flag ゲートは fail-open。** `gated-routes.ts` は、flag の取得に失敗すると画面を表示する。release flag はこれでよいが、PLT-5229 は「既定で全画面を許可しない」「flag取得エラー時の表示許可を認可へ流用しない」としている。そのため、契約によるゲートは別の関数にして fail-closed にする（判定できないときは読み込み表示のまま、再試行できるようにする）。既存の flag ゲートの挙動は変えない。
 4. **UI の判定を 1 本にするかどうか。** PLT-5695 / PLT-5229 は「画面側に第二の提供権判定を作らない」としている。案では、UI は IAM を `/v1/field/client-capabilities` から、提供権を Core の `featureDeliveryValues`（CourseBoard API 経由）から受け取り、AND するだけにする。UI で独自に計算はしない。ただし、client-capabilities に提供権を合成する（PLT-5695 の実装）なら、受け取り元を 1 本にするべき（§6 Q5）。
 
@@ -200,7 +200,7 @@ tachyon iac apply --file .tachyon/manifests/courseboard-product-features.yml
    - 合成の対象（`governs`）を、`payment::field_contract_entitlement` に固定で書いた表から、登録済みの定義に置き換える。
    - これで「flag を廃止しても提供権は消えない」が成り立つ。
 2. **tachyonfield: 商品プランから CourseBoard の key を選べるようにする。** Core に登録された `productScope: courseboard` の機能を、プランに割り当てる候補として読む。
-3. **キャンセル料の action を揃える。** `POST /v1/course/reservation-cancellations/fees` の `field_extension_golf:ManageCancellationFees` を、`field:ManageCancellationFees` に移すか廃止する（PLT-4119 / PLT-5228）。
+3. **キャンセル料の action を揃える。** `POST /v1/course/reservation-cancellations/fees` の `field_extension_golf:ManageCancellationFees` を、`field:ManageCancellationFees` に移すか廃止する（PLT-4119 / PLT-5228）。 第 1 段（新旧どちらでも通す）は実施済み。残りは本番 policy の移行と旧 action の削除。
 
 ## 付録. 画面と機能 key の対応（全 42 件）
 
