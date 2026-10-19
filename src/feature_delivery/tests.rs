@@ -1,6 +1,7 @@
 use std::collections::{HashMap, HashSet};
 use std::sync::atomic::{AtomicUsize, Ordering};
 use std::sync::{Arc, Mutex};
+use std::time::Duration;
 
 use async_trait::async_trait;
 use axum::{
@@ -337,12 +338,21 @@ impl FeatureDeliveryEvaluator for ScriptedEvaluator {
     }
 }
 
+/// Samples every request and never deduplicates, so each call reads Core.
+fn guard_of(
+    evaluator: Arc<dyn FeatureDeliveryEvaluator>,
+    enforcement: DeliveryEnforcement,
+) -> FeatureDeliveryGuard {
+    FeatureDeliveryGuard::new(evaluator, enforcement)
+        .with_sampler(DeliverySampler::new(1.0, Duration::ZERO))
+}
+
 fn context() -> FeatureFlagEvaluationContext {
     FeatureFlagEvaluationContext::new(format!("Bearer {TOKEN}"), TENANT.to_string(), None)
 }
 
 async fn decide(evaluator: ScriptedEvaluator, key: &str) -> Result<(), DeliveryDenial> {
-    let guard = FeatureDeliveryGuard::new(Arc::new(evaluator), DeliveryEnforcement::Enforce);
+    let guard = guard_of(Arc::new(evaluator), DeliveryEnforcement::Enforce);
     guard
         .evaluate(&[catalog::feature(key).unwrap()], &context())
         .await
@@ -394,7 +404,7 @@ async fn anything_but_a_positive_decision_is_refused() {
 #[tokio::test]
 async fn one_batch_asks_core_for_the_feature_and_its_requirements() {
     let evaluator = Arc::new(ScriptedEvaluator::with(&[]));
-    let guard = FeatureDeliveryGuard::new(evaluator.clone(), DeliveryEnforcement::Enforce);
+    let guard = guard_of(evaluator.clone(), DeliveryEnforcement::Enforce);
     guard
         .evaluate(
             &[
@@ -443,7 +453,7 @@ fn state(evaluator: Arc<ScriptedEvaluator>, enforcement: DeliveryEnforcement) ->
     let pool = sqlx::MySqlPool::connect_lazy("mysql://root@127.0.0.1:4000/courseboard_test")
         .expect("lazy pool");
     AppState::new(pool, Arc::new(StaticBearerVerifier::new(TOKEN.to_string())))
-        .with_feature_delivery(FeatureDeliveryGuard::new(evaluator, enforcement))
+        .with_feature_delivery(guard_of(evaluator, enforcement))
 }
 
 fn guarded_app(state: AppState) -> Router {
@@ -599,19 +609,24 @@ fn evaluate_request(keys: &[&str]) -> Request<Body> {
 }
 
 #[tokio::test]
-async fn evaluate_reports_off_without_values() {
-    let evaluator = Arc::new(ScriptedEvaluator::with(&[]));
-    let app = guarded_app(state(evaluator.clone(), DeliveryEnforcement::Off));
-    let response = app
-        .oneshot(evaluate_request(&["courseboard.courses"]))
-        .await
-        .unwrap();
-    assert_eq!(response.status(), StatusCode::OK);
-    assert_eq!(
-        body_json(response).await,
-        serde_json::json!({ "enforcement": "off", "values": [] })
-    );
-    assert_eq!(evaluator.calls.load(Ordering::SeqCst), 0);
+async fn evaluate_reports_off_and_shadow_without_asking_core() {
+    for (enforcement, name) in [
+        (DeliveryEnforcement::Off, "off"),
+        (DeliveryEnforcement::Shadow, "shadow"),
+    ] {
+        let evaluator = Arc::new(ScriptedEvaluator::with(&[]));
+        let app = guarded_app(state(evaluator.clone(), enforcement));
+        let response = app
+            .oneshot(evaluate_request(&["courseboard.courses"]))
+            .await
+            .unwrap();
+        assert_eq!(response.status(), StatusCode::OK);
+        assert_eq!(
+            body_json(response).await,
+            serde_json::json!({ "enforcement": name, "values": [] })
+        );
+        assert_eq!(evaluator.calls.load(Ordering::SeqCst), 0, "{name}");
+    }
 }
 
 #[tokio::test]
@@ -731,7 +746,7 @@ async fn the_export_catalogue_offers_only_provided_sources_under_enforcement() {
         ("courseboard.caddies.payroll", false, true),
     ];
     let sources = ["settlement", "payroll", "unknown"];
-    let guard = FeatureDeliveryGuard::new(
+    let guard = guard_of(
         Arc::new(ScriptedEvaluator::with(&values)),
         DeliveryEnforcement::Enforce,
     );
@@ -739,7 +754,7 @@ async fn the_export_catalogue_offers_only_provided_sources_under_enforcement() {
         guard.provided_export_sources(&sources, &headers()).await,
         vec![true, false, false]
     );
-    let shadow = FeatureDeliveryGuard::new(
+    let shadow = guard_of(
         Arc::new(ScriptedEvaluator::with(&values)),
         DeliveryEnforcement::Shadow,
     );
@@ -902,7 +917,7 @@ fn every_import_target_belongs_to_a_feature() {
 #[tokio::test]
 async fn an_import_target_needs_its_own_feature_under_enforcement() {
     let only_imports = [("courseboard.data_imports", true, true)];
-    let guard = FeatureDeliveryGuard::new(
+    let guard = guard_of(
         Arc::new(ScriptedEvaluator::with(&only_imports)),
         DeliveryEnforcement::Enforce,
     );
@@ -916,7 +931,7 @@ async fn an_import_target_needs_its_own_feature_under_enforcement() {
         ("courseboard.reservation_report_import", true, true),
         ("courseboard.courses", true, true),
     ];
-    let guard = FeatureDeliveryGuard::new(
+    let guard = guard_of(
         Arc::new(ScriptedEvaluator::with(&with_target)),
         DeliveryEnforcement::Enforce,
     );
@@ -925,7 +940,7 @@ async fn an_import_target_needs_its_own_feature_under_enforcement() {
         .await
         .is_ok());
 
-    let shadow = FeatureDeliveryGuard::new(
+    let shadow = guard_of(
         Arc::new(ScriptedEvaluator::with(&only_imports)),
         DeliveryEnforcement::Shadow,
     );
@@ -1034,7 +1049,7 @@ async fn an_import_listing_asks_core_once_whatever_its_length() {
         "unknown",
     ];
     let evaluator = Arc::new(ScriptedEvaluator::with(&values));
-    let guard = FeatureDeliveryGuard::new(evaluator.clone(), DeliveryEnforcement::Enforce);
+    let guard = guard_of(evaluator.clone(), DeliveryEnforcement::Enforce);
     let decisions = guard.import_target_decisions(&targets, &headers()).await;
     assert_eq!(evaluator.calls.load(Ordering::SeqCst), 1);
     assert!(decisions["customer"]);
@@ -1043,13 +1058,13 @@ async fn an_import_listing_asks_core_once_whatever_its_length() {
 
     // Shadow still asks once, and changes nothing.
     let evaluator = Arc::new(ScriptedEvaluator::failing());
-    let shadow = FeatureDeliveryGuard::new(evaluator.clone(), DeliveryEnforcement::Shadow);
+    let shadow = guard_of(evaluator.clone(), DeliveryEnforcement::Shadow);
     let decisions = shadow.import_target_decisions(&targets, &headers()).await;
     assert_eq!(evaluator.calls.load(Ordering::SeqCst), 1);
     assert!(decisions.values().all(|allowed| *allowed));
 
     let evaluator = Arc::new(ScriptedEvaluator::failing());
-    let off = FeatureDeliveryGuard::new(evaluator.clone(), DeliveryEnforcement::Off);
+    let off = guard_of(evaluator.clone(), DeliveryEnforcement::Off);
     off.import_target_decisions(&targets, &headers()).await;
     assert_eq!(evaluator.calls.load(Ordering::SeqCst), 0);
 }
@@ -1236,4 +1251,229 @@ fn annotations_render_as_a_quoted_map_and_are_omitted_when_empty() {
         out,
         "    annotations:\n      \"owner\": \"desk team\"\n      \"note\": \"line one\\nline \\\"two\\\"\\\\\"\n"
     );
+}
+
+// ─── Shadow sampling and decision logs ────────────────────────────────────
+
+#[derive(Debug, Default)]
+struct SlowEvaluator {
+    calls: AtomicUsize,
+}
+
+#[async_trait]
+impl FeatureDeliveryEvaluator for SlowEvaluator {
+    async fn delivery_values(
+        &self,
+        _delivery_keys: &[String],
+        _context: &FeatureFlagEvaluationContext,
+    ) -> Result<HashMap<String, DeliveryValue>, FeatureFlagProviderError> {
+        self.calls.fetch_add(1, Ordering::SeqCst);
+        tokio::time::sleep(Duration::from_secs(30)).await;
+        Err(FeatureFlagProviderError)
+    }
+}
+
+fn sampled_state(
+    evaluator: Arc<dyn FeatureDeliveryEvaluator>,
+    guard: impl FnOnce(FeatureDeliveryGuard) -> FeatureDeliveryGuard,
+) -> AppState {
+    let pool = sqlx::MySqlPool::connect_lazy("mysql://root@127.0.0.1:4000/courseboard_test")
+        .expect("lazy pool");
+    AppState::new(pool, Arc::new(StaticBearerVerifier::new(TOKEN.to_string())))
+        .with_feature_delivery(guard(FeatureDeliveryGuard::new(
+            evaluator,
+            DeliveryEnforcement::Shadow,
+        )))
+}
+
+#[derive(Clone, Default)]
+struct CapturedLogs(Arc<Mutex<Vec<u8>>>);
+
+impl std::io::Write for CapturedLogs {
+    fn write(&mut self, buf: &[u8]) -> std::io::Result<usize> {
+        self.0.lock().unwrap().extend_from_slice(buf);
+        Ok(buf.len())
+    }
+
+    fn flush(&mut self) -> std::io::Result<()> {
+        Ok(())
+    }
+}
+
+impl<'a> tracing_subscriber::fmt::MakeWriter<'a> for CapturedLogs {
+    type Writer = Self;
+
+    fn make_writer(&'a self) -> Self::Writer {
+        self.clone()
+    }
+}
+
+impl CapturedLogs {
+    fn install(&self) -> tracing::subscriber::DefaultGuard {
+        tracing::subscriber::set_default(
+            tracing_subscriber::fmt()
+                .without_time()
+                .with_ansi(false)
+                .with_writer(self.clone())
+                .finish(),
+        )
+    }
+
+    fn decisions(&self) -> Vec<String> {
+        String::from_utf8(self.0.lock().unwrap().clone())
+            .unwrap()
+            .lines()
+            .filter(|line| line.contains(DECISION_LOG_TARGET))
+            .map(ToOwned::to_owned)
+            .collect()
+    }
+}
+
+#[tokio::test]
+async fn shadow_reads_only_the_sampled_share() {
+    let evaluator = Arc::new(ScriptedEvaluator::with(&[]));
+    let app = guarded_app(sampled_state(evaluator.clone(), |guard| {
+        guard.with_sampler(DeliverySampler::new(0.0, Duration::ZERO))
+    }));
+    for _ in 0..5 {
+        let response = app
+            .clone()
+            .oneshot(request(Method::GET, "/v1/course/tee-sheet"))
+            .await
+            .unwrap();
+        assert_eq!(response.status(), StatusCode::OK);
+    }
+    assert_eq!(evaluator.calls.load(Ordering::SeqCst), 0);
+}
+
+#[tokio::test]
+async fn shadow_reads_a_tenant_and_feature_once_per_window() {
+    let evaluator = Arc::new(ScriptedEvaluator::with(&[]));
+    let app = guarded_app(sampled_state(evaluator.clone(), |guard| {
+        guard.with_sampler(DeliverySampler::new(1.0, SHADOW_DEDUP_WINDOW))
+    }));
+    for _ in 0..3 {
+        app.clone()
+            .oneshot(request(Method::GET, "/v1/course/tee-sheet"))
+            .await
+            .unwrap();
+    }
+    assert_eq!(evaluator.calls.load(Ordering::SeqCst), 1);
+}
+
+#[tokio::test]
+async fn a_slow_core_delays_a_shadow_response_only_up_to_the_budget() {
+    let logs = CapturedLogs::default();
+    let _subscriber = logs.install();
+    let evaluator = Arc::new(SlowEvaluator::default());
+    let app = guarded_app(sampled_state(evaluator.clone(), |guard| {
+        guard
+            .with_sampler(DeliverySampler::new(1.0, Duration::ZERO))
+            .with_shadow_budget(Duration::from_millis(20))
+    }));
+    let started = std::time::Instant::now();
+    let response = app
+        .oneshot(request(Method::GET, "/v1/course/tee-sheet"))
+        .await
+        .unwrap();
+    assert_eq!(response.status(), StatusCode::OK);
+    assert!(started.elapsed() < Duration::from_secs(5));
+    assert_eq!(evaluator.calls.load(Ordering::SeqCst), 1);
+    let decisions = logs.decisions();
+    assert_eq!(decisions.len(), 1, "{decisions:?}");
+    assert!(
+        decisions[0].contains("reason=\"SHADOW_TIMEOUT\""),
+        "{decisions:?}"
+    );
+}
+
+#[tokio::test]
+async fn shadow_logs_a_structured_decision_with_the_tenant_and_no_secret() {
+    let logs = CapturedLogs::default();
+    let _subscriber = logs.install();
+    let evaluator = Arc::new(ScriptedEvaluator::with(&[
+        ("courseboard.tee_sheet", true, true),
+        ("courseboard.courses", false, true),
+    ]));
+    let app = guarded_app(state(evaluator, DeliveryEnforcement::Shadow));
+    let response = app
+        .oneshot(request(Method::GET, "/v1/course/tee-sheet"))
+        .await
+        .unwrap();
+    assert_eq!(response.status(), StatusCode::OK);
+    let decisions = logs.decisions();
+    assert_eq!(decisions.len(), 1, "{decisions:?}");
+    for field in [
+        format!("tenant_id=\"{TENANT}\""),
+        "feature=\"courseboard.tee_sheet\"".to_string(),
+        "decision=\"deny\"".to_string(),
+        "reason=\"FEATURE_NOT_PROVIDED\"".to_string(),
+        "enforcement=\"shadow\"".to_string(),
+    ] {
+        assert!(decisions[0].contains(&field), "{field} in {decisions:?}");
+    }
+    let raw = String::from_utf8(logs.0.lock().unwrap().clone()).unwrap();
+    assert!(!raw.contains(TOKEN), "{raw}");
+}
+
+#[tokio::test]
+async fn enforce_logs_every_denial_and_samples_allows() {
+    let logs = CapturedLogs::default();
+    let _subscriber = logs.install();
+    let evaluator = Arc::new(ScriptedEvaluator::failing());
+    let pool = sqlx::MySqlPool::connect_lazy("mysql://root@127.0.0.1:4000/courseboard_test")
+        .expect("lazy pool");
+    let app = guarded_app(
+        AppState::new(pool, Arc::new(StaticBearerVerifier::new(TOKEN.to_string())))
+            .with_feature_delivery(
+                FeatureDeliveryGuard::new(evaluator, DeliveryEnforcement::Enforce)
+                    .with_sampler(DeliverySampler::new(0.0, Duration::ZERO)),
+            ),
+    );
+    let response = app
+        .oneshot(request(Method::GET, "/v1/course/tee-sheet"))
+        .await
+        .unwrap();
+    assert_eq!(response.status(), StatusCode::FORBIDDEN);
+    let decisions = logs.decisions();
+    assert_eq!(decisions.len(), 1, "{decisions:?}");
+    assert!(decisions[0].contains(&format!("tenant_id=\"{TENANT}\"")));
+    assert!(decisions[0].contains("enforcement=\"enforce\""));
+}
+
+#[tokio::test]
+async fn shadow_never_reads_the_body_so_an_unreadable_one_is_left_to_the_handler() {
+    let evaluator = Arc::new(ScriptedEvaluator::with(&[]));
+    let app = guarded_app(state(evaluator.clone(), DeliveryEnforcement::Shadow));
+    let failing = futures::stream::once(async {
+        Err::<axum::body::Bytes, std::io::Error>(std::io::Error::other("client went away"))
+    });
+    let request = Request::builder()
+        .method(Method::POST)
+        .uri("/field-api/v1/invoices")
+        .header(AUTHORIZATION, format!("Bearer {TOKEN}"))
+        .header("x-operator-id", TENANT)
+        .header("content-type", "application/json")
+        .header("content-length", "16")
+        .body(Body::from_stream(failing))
+        .unwrap();
+    let response = app.oneshot(request).await.unwrap();
+    assert_eq!(response.status(), StatusCode::OK);
+}
+
+#[test]
+fn the_sample_rate_defaults_low_and_rejects_nonsense() {
+    assert_eq!(
+        DeliverySampler::parse_rate(None),
+        DEFAULT_SHADOW_SAMPLE_RATE
+    );
+    assert_eq!(DeliverySampler::parse_rate(Some("0.25")), 0.25);
+    assert_eq!(DeliverySampler::parse_rate(Some("1")), 1.0);
+    for bad in ["1.5", "-0.1", "NaN", "abc"] {
+        assert_eq!(
+            DeliverySampler::parse_rate(Some(bad)),
+            DEFAULT_SHADOW_SAMPLE_RATE,
+            "{bad}"
+        );
+    }
 }
