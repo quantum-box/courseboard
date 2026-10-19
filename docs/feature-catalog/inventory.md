@@ -183,7 +183,7 @@ tachyon iac apply --file .tachyon/manifests/courseboard-product-features.yml
 - `shadow` はリクエストを一切変えない（本文も読まない）。Core の判定 1 回ごとに Field の lease が書かれるので、判定するのは一部だけにする。
   - 判定する割合は `COURSEBOARD_FEATURE_DELIVERY_SHADOW_SAMPLE_RATE`（0〜1、既定 `0.01`）。
   - 同じテナント × 機能は、インスタンスごとに 1 分に 1 回まで。
-  - 判定は handler と並行に走らせる。Lambda は応答の後の処理を止めるため。応答が待つのは最大 1 秒で、超えたら `SHADOW_TIMEOUT` として記録する。
+  - 判定は handler と並行に走らせ、handler が動いている間は打ち切らない。Lambda は応答の後の処理を止めるため、切り離したタスクにはしない。応答ができてから待つのは最大 1 秒で、超えたら `SHADOW_TIMEOUT` として記録する。
   - 本文を読まないため、旧管理画面のフォームに書かれたテナントと、取消料請求書の範囲（`FEATURE_SCOPE_EXCEEDED`）は shadow では確かめない。
 - ログ: target `courseboard::feature_delivery::decision`、メッセージ `feature delivery decision`。項目は `tenant_id` / `feature` / `decision`（allow / deny / unknown）/ `reason` / `enforcement` / `method` / `path`。
   - 拒否は `enforce` では毎回出す。`shadow` では判定したものすべてを出す。

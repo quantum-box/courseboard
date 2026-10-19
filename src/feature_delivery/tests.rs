@@ -1477,3 +1477,53 @@ fn the_sample_rate_defaults_low_and_rejects_nonsense() {
         );
     }
 }
+
+#[tokio::test]
+async fn the_shadow_budget_starts_when_the_handler_is_done() {
+    #[derive(Debug)]
+    struct Late;
+
+    #[async_trait]
+    impl FeatureDeliveryEvaluator for Late {
+        async fn delivery_values(
+            &self,
+            _delivery_keys: &[String],
+            _context: &FeatureFlagEvaluationContext,
+        ) -> Result<HashMap<String, DeliveryValue>, FeatureFlagProviderError> {
+            tokio::time::sleep(Duration::from_millis(100)).await;
+            Err(FeatureFlagProviderError)
+        }
+    }
+
+    let logs = CapturedLogs::default();
+    let _subscriber = logs.install();
+    let state = sampled_state(Arc::new(Late), |guard| {
+        guard
+            .with_sampler(DeliverySampler::new(1.0, Duration::ZERO))
+            .with_shadow_budget(Duration::from_millis(10))
+    });
+    let app = Router::new()
+        .route(
+            "/v1/course/tee-sheet",
+            any(|| async {
+                tokio::time::sleep(Duration::from_millis(300)).await;
+                "handler ran"
+            }),
+        )
+        .with_state(state.clone())
+        .layer(middleware::from_fn_with_state(
+            state,
+            require_feature_delivery,
+        ));
+    let response = app
+        .oneshot(request(Method::GET, "/v1/course/tee-sheet"))
+        .await
+        .unwrap();
+    assert_eq!(response.status(), StatusCode::OK);
+    let decisions = logs.decisions();
+    assert_eq!(decisions.len(), 1, "{decisions:?}");
+    assert!(
+        decisions[0].contains("reason=\"FEATURE_DELIVERY_UNAVAILABLE\""),
+        "{decisions:?}"
+    );
+}
