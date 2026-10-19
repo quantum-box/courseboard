@@ -56,7 +56,8 @@ use tracing::Instrument;
 
 /// How long a sampled `shadow` response may wait for Core after the handler
 /// is done. Lambda freezes work left running after the response, so the read
-/// runs alongside the handler instead of in a detached task.
+/// runs alongside the handler instead of in a detached task, and keeps going
+/// for as long as the handler does.
 pub const SHADOW_EVALUATION_BUDGET: Duration = Duration::from_secs(1);
 
 pub const DELIVERY_ENFORCEMENT_ENV: &str = "COURSEBOARD_FEATURE_DELIVERY_ENFORCEMENT";
@@ -381,22 +382,17 @@ impl FeatureDeliveryGuard {
         self
     }
 
-    /// [`Self::evaluate`] for a sampled `shadow` read: logged, never acted on,
-    /// and given up after the budget.
+    /// [`Self::evaluate`] for a sampled `shadow` read: logged, never acted on.
     async fn shadow_evaluate(
         &self,
         features: &[&'static FeatureDefinition],
         context: &FeatureFlagEvaluationContext,
     ) -> LoggedDecision {
-        let read = tokio::time::timeout(self.shadow_budget, self.evaluate(features, context))
-            .instrument(tracing::Span::current());
-        match read.await {
-            Ok(decisions) => decisions
-                .into_iter()
-                .find_map(Result::err)
-                .map_or(LoggedDecision::Allow, LoggedDecision::Deny),
-            Err(_) => LoggedDecision::TimedOut,
-        }
+        self.evaluate(features, context)
+            .await
+            .into_iter()
+            .find_map(Result::err)
+            .map_or(LoggedDecision::Allow, LoggedDecision::Deny)
     }
 
     /// No evaluation at all: what every deployment runs until it opts in.
@@ -983,7 +979,25 @@ async fn shadow_feature_delivery(
         features.extend(additional);
         guard.shadow_evaluate(&features, context).await
     };
-    let (response, decision) = tokio::join!(next.run(req), read);
+    // The read runs while the handler does; once the response is ready it
+    // waits for the read only up to the budget.
+    let read = read.instrument(tracing::Span::current());
+    tokio::pin!(read);
+    let handler = next.run(req);
+    tokio::pin!(handler);
+    let mut decision = None;
+    let response = loop {
+        tokio::select! {
+            response = &mut handler => break response,
+            outcome = &mut read, if decision.is_none() => decision = Some(outcome),
+        }
+    };
+    let decision = match decision {
+        Some(outcome) => outcome,
+        None => tokio::time::timeout(guard.shadow_budget, read)
+            .await
+            .unwrap_or(LoggedDecision::TimedOut),
+    };
     log.emit(decision);
     response
 }
