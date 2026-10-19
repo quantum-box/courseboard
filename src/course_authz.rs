@@ -794,7 +794,9 @@ pub(crate) fn pattern_matches(pattern: &str, path: &str) -> bool {
     }
 }
 
-/// Every classified route as `(method, pattern)`, in table order.
+/// Every classified route as `(method, pattern)`, in table order. The
+/// feature-coverage tests walk it to catch a route without a key.
+#[cfg(test)]
 pub(crate) fn route_patterns() -> impl Iterator<Item = (&'static str, &'static str)> {
     ROUTES
         .iter()

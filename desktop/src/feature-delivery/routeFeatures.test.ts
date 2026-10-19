@@ -17,30 +17,9 @@ const manifest = readFileSync(
 )
 const appSource = readFileSync(new URL('../App.tsx', import.meta.url), 'utf8')
 
-/** `key → uiRefs` read off the generated manifest. */
-function manifestUiRoutes() {
-  const routes = new Map<string, string[]>()
-  let current = ''
-  let inUiRefs = false
-  for (const line of manifest.split('\n')) {
-    const key = line.match(/^ {2}- key: (\S+)$/)
-    if (key) {
-      current = key[1]
-      routes.set(current, [])
-      continue
-    }
-    if (/^ {4}uiRefs:/.test(line)) {
-      inUiRefs = true
-      continue
-    }
-    const ref = line.match(/^ {4}- id: "route:(.+)"$/)
-    if (inUiRefs && ref) {
-      routes.get(current)?.push(ref[1])
-      continue
-    }
-    if (/^ {4}[^\s-]/.test(line)) inUiRefs = false
-  }
-  return routes
+/** The feature keys the generated manifest declares. */
+function manifestKeys() {
+  return [...manifest.matchAll(/^ {2}- key: (\S+)$/gm)].map(match => match[1])
 }
 
 /** `key → requiredActions` (the feature-level list) off the manifest. */
@@ -81,17 +60,18 @@ function appRoutes() {
 
 describe('feature catalog on screens', () => {
   it('knows exactly the keys the server catalog declares', () => {
-    expect([...FEATURE_KEYS].sort()).toEqual([...manifestUiRoutes().keys()].sort())
+    expect([...FEATURE_KEYS].sort()).toEqual(manifestKeys().sort())
   })
 
-  it('maps each screen to the feature whose uiRefs list it', () => {
-    const fromManifest = [...manifestUiRoutes()]
-      .flatMap(([key, routes]) => routes.map(route => `${route} → ${key}`))
-      .sort()
-    const fromTable = Object.entries(ROUTE_FEATURES)
-      .map(([route, key]) => `${route} → ${key}`)
-      .sort()
-    expect(fromTable).toEqual(fromManifest)
+  it('reaches every catalog key from some screen', () => {
+    const reached = new Set<string>([
+      ...Object.values(ROUTE_FEATURES),
+      ...Object.values(ACTION_FEATURES),
+      // Gated as controls inside another feature's screen.
+      'courseboard.tee_sheet.checkin',
+      'courseboard.caddies.availability',
+    ])
+    expect(FEATURE_KEYS.filter(key => !reached.has(key))).toEqual([])
   })
 
   it('gives every screen the router knows a feature or an exemption', () => {

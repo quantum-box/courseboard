@@ -163,7 +163,7 @@ fn public_and_platform_paths_need_no_feature() {
 }
 
 #[test]
-fn catalog_keys_are_unique_namespaced_and_reachable() {
+fn catalog_keys_are_unique_and_namespaced() {
     let mut seen = HashSet::new();
     for feature in FEATURES {
         assert!(seen.insert(feature.key), "duplicate key {}", feature.key);
@@ -174,11 +174,6 @@ fn catalog_keys_are_unique_namespaced_and_reachable() {
                     .chars()
                     .all(|c| c.is_ascii_lowercase() || c.is_ascii_digit() || c == '.' || c == '_'),
             "{} must be courseboard.<snake_case>",
-            feature.key
-        );
-        assert!(
-            !routes::api_refs(feature.key).is_empty() || !feature.ui_routes.is_empty(),
-            "{} has neither a route nor a screen",
             feature.key
         );
         assert!(
@@ -237,11 +232,38 @@ fn release_gates_are_courseboard_flags() {
     }
 }
 
+#[test]
+fn the_manifest_writes_no_defaults() {
+    // Every scalar value is written double-quoted, so a field whose value is
+    // a default is exactly a line ending in an unquoted `[]` or `null`. A
+    // description or annotation that merely mentions `: []` ends in a quote.
+    let is_default_field = |line: &str| {
+        let line = line.trim_end();
+        line.ends_with(": []") || line.ends_with(": null")
+    };
+    let rendered = catalog::render_manifest();
+    let defaults: Vec<&str> = rendered
+        .lines()
+        .filter(|line| is_default_field(line))
+        .collect();
+    assert!(defaults.is_empty(), "omit these defaults: {defaults:?}");
+
+    let mut notes = String::new();
+    catalog::annotations(
+        &mut notes,
+        &[("example", "fallback: null"), ("list", "example: []")],
+    );
+    assert!(
+        !notes.lines().any(is_default_field),
+        "a value that mentions a default is not a default field"
+    );
+}
+
 /// The manifest is what `tachyon` applies; the catalog is what the guard
 /// runs. A difference means one of them is lying.
 #[test]
 fn the_product_features_manifest_is_rendered_from_the_catalog() {
-    let rendered = catalog::render_manifest(routes::api_refs);
+    let rendered = catalog::render_manifest();
     if std::env::var_os("COURSEBOARD_UPDATE_FEATURE_MANIFEST").is_some() {
         std::fs::write(MANIFEST_PATH, &rendered).expect("write manifest");
     }
@@ -1152,4 +1174,66 @@ async fn the_invoice_api_is_admitted_only_inside_the_cancellation_fee_workflow()
 fn member_pricing_in_the_simulator_needs_the_membership_feature() {
     let simulator = catalog::feature("courseboard.fee_simulator").unwrap();
     assert!(super::required_closure(simulator).contains(&"courseboard.membership"));
+}
+
+#[test]
+fn annotations_stay_within_cores_limits() {
+    let (max_keys, max_value_bytes) = catalog::ANNOTATION_LIMITS;
+    for feature in FEATURES {
+        assert!(
+            feature.annotations.len() <= max_keys,
+            "{} has more than {max_keys} annotations",
+            feature.key
+        );
+        let mut seen = HashSet::new();
+        for (key, value) in feature.annotations {
+            assert!(
+                catalog::is_annotation_key(key),
+                "{}: bad annotation key {key:?}",
+                feature.key
+            );
+            assert!(
+                seen.insert(key),
+                "{}: duplicate annotation {key}",
+                feature.key
+            );
+            assert!(
+                value.len() <= max_value_bytes,
+                "{}: annotation {key} is over {max_value_bytes} bytes",
+                feature.key
+            );
+        }
+    }
+}
+
+#[test]
+fn annotation_keys_follow_cores_pattern() {
+    for key in [
+        "a",
+        "owner",
+        "docs/runbook",
+        "v1.notes_x-y",
+        &"a".repeat(63),
+    ] {
+        assert!(catalog::is_annotation_key(key), "{key}");
+    }
+    for key in ["", "Owner", "-lead", ".x", "a b", "日本", &"a".repeat(64)] {
+        assert!(!catalog::is_annotation_key(key), "{key}");
+    }
+}
+
+#[test]
+fn annotations_render_as_a_quoted_map_and_are_omitted_when_empty() {
+    let mut out = String::new();
+    catalog::annotations(&mut out, &[]);
+    assert!(out.is_empty());
+
+    catalog::annotations(
+        &mut out,
+        &[("owner", "desk team"), ("note", "line one\nline \"two\"\\")],
+    );
+    assert_eq!(
+        out,
+        "    annotations:\n      \"owner\": \"desk team\"\n      \"note\": \"line one\\nline \\\"two\\\"\\\\\"\n"
+    );
 }

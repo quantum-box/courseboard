@@ -2,9 +2,10 @@
  * Which product feature each screen belongs to.
  *
  * The keys are the server's catalog (`src/feature_delivery/catalog.rs`,
- * rendered to `.tachyon/manifests/courseboard-product-features.yml`). The
- * manifest's `uiRefs` and this table are checked against each other in
- * `routeFeatures.test.ts`, so a screen cannot ship without a key.
+ * rendered to `.tachyon/manifests/courseboard-product-features.yml`). Which
+ * screen belongs to which key is this table's alone; `routeFeatures.test.ts`
+ * checks it covers every route `App.tsx` branches on, so a screen cannot ship
+ * without a key.
  */
 
 import { FIELD_ACTIONS, routeActionRequirement } from '../auth/capabilityRoutes'

@@ -62,8 +62,28 @@ pub struct FeatureDefinition {
     /// Release flags that must be on as well. Empty for a stable feature:
     /// the contract and IAM decide it alone.
     pub release_gates: &'static [&'static str],
-    /// SPA routes (`desktop/src/App.tsx`) that belong to this feature.
-    pub ui_routes: &'static [&'static str],
+    /// Free-form notes for people reading the catalog, as `(key, value)`.
+    /// Carried into the manifest when present; never part of a decision,
+    /// the feature's identity, or its digest. Limits match Core's
+    /// `ProductFeatures`: see [`ANNOTATION_LIMITS`].
+    pub annotations: &'static [(&'static str, &'static str)],
+}
+
+/// Core's limits on `annotations`: at most this many keys, each matching
+/// `[a-z0-9][a-z0-9._/-]{0,62}`, each value at most this many bytes.
+pub const ANNOTATION_LIMITS: (usize, usize) = (32, 1024);
+
+/// Whether an annotation key has the shape Core accepts.
+pub fn is_annotation_key(key: &str) -> bool {
+    let mut chars = key.chars();
+    let Some(first) = chars.next() else {
+        return false;
+    };
+    key.len() <= 63
+        && (first.is_ascii_lowercase() || first.is_ascii_digit())
+        && chars.all(|c| {
+            c.is_ascii_lowercase() || c.is_ascii_digit() || matches!(c, '.' | '_' | '/' | '-')
+        })
 }
 
 impl FeatureDefinition {
@@ -84,8 +104,8 @@ pub fn feature(key: &str) -> Option<&'static FeatureDefinition> {
 macro_rules! feature {
     ($key:literal, $description:literal,
      read: [$($read:expr),*], manage: [$($manage:expr),*],
-     requires: [$($requires:literal),*], gates: [$($gate:expr),*],
-     ui: [$($ui:literal),*]) => {
+     requires: [$($requires:literal),*], gates: [$($gate:expr),*]
+     $(, annotations: [$(($note_key:literal, $note_value:literal)),*])?) => {
         FeatureDefinition {
             key: $key,
             description: $description,
@@ -93,7 +113,7 @@ macro_rules! feature {
             manage_actions: &[$($manage),*],
             required_feature_keys: &[$($requires),*],
             release_gates: &[$($gate),*],
-            ui_routes: &[$($ui),*],
+            annotations: &[$($(($note_key, $note_value)),*)?],
         }
     };
 }
@@ -101,119 +121,103 @@ macro_rules! feature {
 pub const FEATURES: &[FeatureDefinition] = &[
     feature!("courseboard.tee_sheet", "Tee sheet and booking ledger: taking, moving, and cancelling bookings.",
         read: [LIST_TEE_SHEET], manage: [MANAGE_RESERVATIONS],
-        requires: ["courseboard.courses"], gates: [],
-        ui: ["golf/ledger", "golf/timeline"]),
+        requires: ["courseboard.courses"], gates: []),
     feature!("courseboard.tee_sheet.slot_overrides", "Opening and closing tee times by hand.",
         read: [LIST_SLOT_OVERRIDES], manage: [MANAGE_SLOT_OVERRIDES],
-        requires: ["courseboard.tee_sheet"], gates: [],
-        ui: []),
+        requires: ["courseboard.tee_sheet"], gates: []),
     feature!("courseboard.tee_sheet.checkin", "Checking a booked party in on arrival.",
         read: [LIST_TEE_SHEET], manage: [MANAGE_RESERVATIONS],
-        requires: ["courseboard.tee_sheet"], gates: [],
-        ui: []),
+        requires: ["courseboard.tee_sheet"], gates: []),
     feature!("courseboard.courses", "Courses, their order, resources, schedules, and booking horizon.",
         read: [LIST_COURSES], manage: [MANAGE_COURSES],
-        requires: [], gates: [],
-        ui: ["golf/courses", "golf/courses/:courseId"]),
+        requires: [], gates: []),
     feature!("courseboard.products", "The plans sold on the tee sheet and their slots.",
         read: [LIST_PRODUCTS], manage: [MANAGE_PRODUCTS],
-        requires: ["courseboard.courses"], gates: [],
-        ui: ["golf/products", "golf/products/:serviceId"]),
+        requires: ["courseboard.courses"], gates: []),
     feature!("courseboard.reservation_policy", "Booking rules, player tags, and the golf extension config.",
         read: [LIST_RESERVATION_POLICY, LIST_EXTENSION_STATUS], manage: [MANAGE_RESERVATION_POLICY],
-        requires: [], gates: [],
-        ui: ["golf/policy", "settings/advanced"]),
+        requires: [], gates: []),
     feature!("courseboard.customers", "The customer ledger, visits, call list, and grade rules.",
         read: [LIST_CUSTOMERS], manage: [MANAGE_CUSTOMERS],
-        requires: [], gates: [],
-        ui: ["golf/customers", "golf/customers/:customerId", "golf/customers/call-list", "settings/customer-grades"]),
+        requires: [], gates: []),
     feature!("courseboard.customers.reception", "Reception sheets: OCR drafts, reception fields, and consent items.",
         read: [LIST_CUSTOMERS], manage: [MANAGE_CUSTOMERS],
-        requires: ["courseboard.customers"], gates: [],
-        ui: ["golf/customers/reception", "settings/reception-fields"]),
+        requires: ["courseboard.customers"], gates: []),
     feature!("courseboard.customers.cancellations", "The cancelled-booking list and its billing sheet.",
         read: [LIST_CUSTOMERS], manage: [],
-        requires: ["courseboard.customers"], gates: [],
-        ui: ["golf/customers/cancellations"]),
+        requires: ["courseboard.customers"], gates: []),
     feature!("courseboard.membership", "Membership plans, discounts, play windows, and who holds one.",
         read: [LIST_MEMBERSHIP, FIELD_LIST_MEMBERSHIP], manage: [MANAGE_MEMBERSHIP_PLANS, ASSIGN_MEMBERSHIP],
-        requires: ["courseboard.customers"], gates: [],
-        ui: ["settings/membership-plans", "settings/membership-discounts", "settings/membership-play-windows"]),
+        requires: ["courseboard.customers"], gates: []),
     feature!("courseboard.caddies", "The caddie roster and which courses each caddie works.",
         read: [LIST_CADDIES], manage: [MANAGE_CADDIES],
-        requires: ["courseboard.courses", "courseboard.staff"], gates: [],
-        ui: ["golf/caddies", "golf/caddies/:caddieId"]),
+        requires: ["courseboard.courses", "courseboard.staff"], gates: []),
     feature!("courseboard.caddies.dispatch", "Putting caddies on rounds, by hand or by the auto-placement, and duty rotas.",
         read: [LIST_CADDIE_ASSIGNMENTS], manage: [MANAGE_CADDIE_ASSIGNMENTS],
-        requires: ["courseboard.caddies", "courseboard.tee_sheet"], gates: [],
-        ui: ["golf/caddies/dispatch", "settings/caddie-duties"]),
+        requires: ["courseboard.caddies", "courseboard.tee_sheet"], gates: []),
     feature!("courseboard.caddies.availability", "Who said they can work, and by when they had to say.",
         read: [LIST_CADDIE_AVAILABILITY], manage: [MANAGE_CADDIE_AVAILABILITY],
-        requires: ["courseboard.caddies"], gates: [],
-        ui: []),
+        requires: ["courseboard.caddies"], gates: []),
     feature!("courseboard.caddies.shifts", "Shift plans, the rules they are generated under, and the sync to Field.",
         read: [LIST_SHIFTS], manage: [MANAGE_SHIFTS],
         requires: [
             "courseboard.caddies",
             "courseboard.caddies.availability",
             "courseboard.caddies.dispatch"
-        ], gates: [],
-        ui: ["golf/caddies/shifts"]),
+        ], gates: []),
     feature!("courseboard.caddies.insights", "Attendance, supply, reinforcement, and rating figures.",
         read: [LIST_CADDIE_INSIGHTS], manage: [],
-        requires: ["courseboard.caddies"], gates: [],
-        ui: ["golf/caddies/attendance"]),
+        requires: ["courseboard.caddies"], gates: []),
     feature!("courseboard.caddies.rank_fees", "What each caddie grade is paid, and aligning fees to it.",
         read: [LIST_CADDIE_RANK_FEES], manage: [MANAGE_CADDIE_RANK_FEES],
-        requires: ["courseboard.caddies"], gates: [],
-        ui: []),
+        requires: ["courseboard.caddies"], gates: []),
     feature!("courseboard.caddies.payroll", "What the caddies are owed, and its CSV.",
         read: [LIST_PAYROLL], manage: [],
-        requires: ["courseboard.caddies.rank_fees"], gates: [],
-        ui: ["golf/caddies/payroll"]),
+        requires: ["courseboard.caddies.rank_fees"], gates: []),
     feature!("courseboard.staff", "The company's staff register held in Field HRM.",
         read: [FIELD_LIST_HRM], manage: [FIELD_MANAGE_HRM],
-        requires: [], gates: [],
-        ui: ["staff", "staff/:staffId"]),
+        requires: [], gates: []),
     feature!("courseboard.budgets", "Daily budgets, their import, and how the club tracks against them.",
         read: [LIST_BUDGETS], manage: [MANAGE_BUDGETS],
-        requires: ["courseboard.courses"], gates: [],
-        ui: ["golf/budgets"]),
+        requires: ["courseboard.courses"], gates: []),
     feature!("courseboard.settlement", "The month's takings, their CSV, and the per-booking billing invoice.",
         read: [LIST_SETTLEMENT], manage: [],
-        requires: [], gates: [],
-        ui: ["golf/settlement"]),
+        requires: [], gates: []),
     feature!("courseboard.fee_simulator", "Fee and golf-course-tax simulations and their pricing settings.",
         read: [CALCULATE_FEES], manage: [MANAGE_RESERVATION_POLICY],
-        requires: ["courseboard.membership"], gates: [],
-        ui: ["golf/simulator"]),
+        requires: ["courseboard.membership"], gates: []),
     feature!("courseboard.reservation_report_import", "Taking a reservation report off a spreadsheet or document and onto the board.",
         read: [LIST_RESERVATION_REPORTS], manage: [IMPORT_RESERVATION_REPORTS],
-        requires: ["courseboard.courses"], gates: [RESERVATION_REPORT_IMPORT_FLAG],
-        ui: ["golf/reservation-report-import", "golf/data-imports/courseboardReservationReports/documents", "golf/data-imports/courseboardReservationReports/documents/:jobId"]),
+        requires: ["courseboard.courses"], gates: [RESERVATION_REPORT_IMPORT_FLAG]),
     feature!("courseboard.data_imports", "Common CSV imports through Field Bridge.",
         read: [FIELD_LIST_BRIDGE_DEFINITIONS], manage: [FIELD_PREVIEW_BRIDGE_RUN, FIELD_EXECUTE_BRIDGE_DRAFTS],
-        requires: [], gates: [],
-        ui: ["golf/data-imports", "golf/data-imports/:target"]),
+        requires: [], gates: []),
     feature!("courseboard.data_exports", "Exports of CourseBoard and Field data through Field Bridge.",
         read: [FIELD_LIST_BRIDGE_EXPORT_DEFINITIONS], manage: [FIELD_MANAGE_BRIDGE_EXPORT_DEFINITIONS],
-        requires: [], gates: [],
-        ui: ["settings/data-exports"]),
+        requires: [], gates: []),
     feature!("courseboard.cancellation_fee", "Billing a cancellation fee and collecting it through a payment link.",
         read: [FIELD_LIST_CANCELLATION_FEES], manage: [FIELD_MANAGE_CANCELLATION_FEES],
-        requires: [], gates: [],
-        ui: ["cancellation-fees", "cancellation-fees/new", "cancellation-fees/:invoiceId"]),
+        requires: [], gates: []),
     feature!("courseboard.course_map", "The live cart map, fed by the desktop app.",
         read: [LIST_COURSES], manage: [],
-        requires: ["courseboard.courses"], gates: [],
-        ui: ["course-map"]),
+        requires: ["courseboard.courses"], gates: []),
 ];
 
 /// Render the IaC manifest for the tachyon CLI.
 ///
 /// Hand-written rather than serialized so the file stays stable to review:
 /// the field order and quoting never move under a dependency upgrade.
-pub fn render_manifest(api_refs: impl Fn(&str) -> Vec<String>) -> String {
+///
+/// Defaults are left out: an empty list or a null is not written, and the
+/// importer reads an absent field as empty / none (`optionalIntegration`,
+/// `internalDependencies`, and any empty `releaseGates` or
+/// `requiredFeatureKeys`).
+///
+/// Which routes and screens belong to a feature is not written either: it is
+/// `course_authz::ROUTES` with `routes.rs`, and `App.tsx` with
+/// `routeFeatures.ts`, and the tests that catch a keyless route or screen read
+/// those directly. Nothing at run time reads such a list from the manifest.
+pub fn render_manifest() -> String {
     let mut out = String::new();
     let line = |out: &mut String, indent: usize, text: &str| {
         out.push_str(&" ".repeat(indent));
@@ -269,14 +273,6 @@ pub fn render_manifest(api_refs: impl Fn(&str) -> Vec<String>) -> String {
             .copied()
             .collect();
         list(&mut out, 4, "requiredActions", &all_actions);
-        refs(&mut out, "apiRefs", &api_refs(feature.key));
-        let ui_refs: Vec<String> = feature
-            .ui_routes
-            .iter()
-            .map(|route| format!("route:{route}"))
-            .collect();
-        refs(&mut out, "uiRefs", &ui_refs);
-        line(&mut out, 4, "optionalIntegration: null");
         list(&mut out, 4, "releaseGates", feature.release_gates);
         list(
             &mut out,
@@ -284,7 +280,7 @@ pub fn render_manifest(api_refs: impl Fn(&str) -> Vec<String>) -> String {
             "requiredFeatureKeys",
             feature.required_feature_keys,
         );
-        line(&mut out, 4, "internalDependencies: []");
+        annotations(&mut out, feature.annotations);
         line(&mut out, 4, "operationBindings:");
         line(&mut out, 4, "- operation: read");
         list(&mut out, 6, "requiredActions", feature.read_actions);
@@ -296,10 +292,10 @@ pub fn render_manifest(api_refs: impl Fn(&str) -> Vec<String>) -> String {
     out
 }
 
+/// An empty list is omitted, not written as `[]`.
 fn list(out: &mut String, indent: usize, name: &str, items: &[&str]) {
     let pad = " ".repeat(indent);
     if items.is_empty() {
-        out.push_str(&format!("{pad}{name}: []\n"));
         return;
     }
     out.push_str(&format!("{pad}{name}:\n"));
@@ -308,22 +304,36 @@ fn list(out: &mut String, indent: usize, name: &str, items: &[&str]) {
     }
 }
 
-fn refs(out: &mut String, name: &str, ids: &[String]) {
-    if ids.is_empty() {
-        out.push_str(&format!("    {name}: []\n"));
+/// Double-quote a scalar. Every value here is plain ASCII text, so escaping
+/// the quote and the backslash is enough for YAML.
+/// The `annotations` map, in declaration order; omitted when empty.
+pub(crate) fn annotations(out: &mut String, notes: &[(&str, &str)]) {
+    if notes.is_empty() {
         return;
     }
-    out.push_str(&format!("    {name}:\n"));
-    for id in ids {
-        out.push_str(&format!(
-            "    - id: {}\n      status: implemented\n",
-            quote(id)
-        ));
+    out.push_str("    annotations:\n");
+    for (key, value) in notes {
+        out.push_str(&format!("      {}: {}\n", quote(key), quote(value)));
     }
 }
 
-/// Double-quote a scalar. Every value here is plain ASCII text, so escaping
-/// the quote and the backslash is enough for YAML.
+/// A YAML double-quoted scalar. Backslash, quote, and every control
+/// character are escaped, so a free-form annotation value cannot break out
+/// of its line.
 fn quote(value: &str) -> String {
-    format!("\"{}\"", value.replace('\\', "\\\\").replace('"', "\\\""))
+    let mut quoted = String::with_capacity(value.len() + 2);
+    quoted.push('"');
+    for c in value.chars() {
+        match c {
+            '\\' => quoted.push_str("\\\\"),
+            '"' => quoted.push_str("\\\""),
+            '\n' => quoted.push_str("\\n"),
+            '\r' => quoted.push_str("\\r"),
+            '\t' => quoted.push_str("\\t"),
+            c if c.is_control() => quoted.push_str(&format!("\\u{:04x}", c as u32)),
+            c => quoted.push(c),
+        }
+    }
+    quoted.push('"');
+    quoted
 }

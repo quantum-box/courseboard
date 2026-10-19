@@ -511,20 +511,6 @@ pub fn classify_request(method: &Method, path: &str) -> RequestFeature {
     }
 }
 
-/// The `apiRefs` of a feature in the manifest: every route mapped to it.
-pub fn api_refs(key: &str) -> Vec<String> {
-    let routes = course_authz::route_patterns()
-        .filter(|(method, pattern)| {
-            matches!(feature_for_pattern(method, pattern), Some(Feature(mapped)) if mapped == key)
-        })
-        .map(|(method, pattern)| format!("{method} {pattern}"));
-    let proxied = FIELD_PROXY_RULES
-        .iter()
-        .filter(|(_, _, route)| matches!(route, Feature(mapped) if *mapped == key))
-        .map(|(method, pattern, _)| format!("{method} {FIELD_PROXY_PREFIX}{pattern}"));
-    routes.chain(proxied).collect()
-}
-
 const DATA_EXPORT_ROWS_PREFIX: &str = "/v1/course/data-exports/";
 const DATA_EXPORT_KEY_PREFIX: &str = "external:courseboard:";
 
