@@ -39,7 +39,7 @@ impl SettleCancellationFeesUseCase {
         decisions: &[CancellationFeeDecision],
     ) -> Result<Vec<ReservationCancellation>, CourseError> {
         credentials
-            .require(actions::MANAGE_CANCELLATION_FEES)
+            .require_any(actions::SETTLE_CANCELLATION_FEES)
             .await?;
         if decisions.is_empty() {
             return Err(CourseError::BadRequest(
@@ -72,5 +72,116 @@ impl SettleCancellationFeesUseCase {
         self.cancellations
             .settle_cancellation_fees(credentials.operator_id, decisions)
             .await
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::course::domain::{CancellationQuery, CourseAuthorizer, NewReservationCancellation};
+
+    /// Grants exactly the actions it was given.
+    struct Granting(&'static [&'static str]);
+
+    #[async_trait::async_trait]
+    impl CourseAuthorizer for Granting {
+        async fn require(
+            &self,
+            _: GatewayCredentials<'_>,
+            action: &'static str,
+        ) -> Result<(), CourseError> {
+            if self.0.contains(&action) {
+                Ok(())
+            } else {
+                Err(CourseError::Forbidden(action))
+            }
+        }
+    }
+
+    struct Unreached;
+
+    #[async_trait::async_trait]
+    impl ReservationCancellationGateway for Unreached {
+        async fn record_cancellation(
+            &self,
+            _: &str,
+            _: &NewReservationCancellation,
+        ) -> Result<(), CourseError> {
+            unreachable!()
+        }
+        async fn list_cancellations(
+            &self,
+            _: &str,
+            _: &CancellationQuery,
+        ) -> Result<Vec<ReservationCancellation>, CourseError> {
+            unreachable!()
+        }
+        async fn count_cancellations(
+            &self,
+            _: &str,
+            _: &CancellationQuery,
+        ) -> Result<i64, CourseError> {
+            unreachable!()
+        }
+        async fn settle_cancellation_fees(
+            &self,
+            _: &str,
+            _: &[CancellationFeeDecision],
+        ) -> Result<Vec<ReservationCancellation>, CourseError> {
+            unreachable!("an empty batch never reaches storage")
+        }
+    }
+
+    async fn settle_as(granted: &'static [&'static str]) -> Result<(), CourseError> {
+        let authorizer = Granting(granted);
+        let credentials = GatewayCredentials {
+            authorization: "Bearer caller",
+            caller_bearer: "Bearer caller",
+            operator_id: "tenant-a",
+            platform_id: None,
+            authorizer: &authorizer,
+        };
+        // An empty batch: past the permission check it is a 400, before it a
+        // 403, so the error says which side of the check the caller landed on.
+        SettleCancellationFeesUseCase::new(Arc::new(Unreached))
+            .execute(credentials, &[])
+            .await
+            .map(|_| ())
+    }
+
+    #[tokio::test]
+    async fn the_golf_action_alone_still_settles() {
+        assert!(matches!(
+            settle_as(&[actions::MANAGE_CANCELLATION_FEES]).await,
+            Err(CourseError::BadRequest(_))
+        ));
+    }
+
+    #[tokio::test]
+    async fn the_field_action_alone_settles() {
+        assert!(matches!(
+            settle_as(&[actions::FIELD_MANAGE_CANCELLATION_FEES]).await,
+            Err(CourseError::BadRequest(_))
+        ));
+    }
+
+    #[tokio::test]
+    async fn holding_both_actions_settles() {
+        assert!(matches!(
+            settle_as(&[
+                actions::FIELD_MANAGE_CANCELLATION_FEES,
+                actions::MANAGE_CANCELLATION_FEES,
+            ])
+            .await,
+            Err(CourseError::BadRequest(_))
+        ));
+    }
+
+    #[tokio::test]
+    async fn neither_action_is_refused_naming_the_field_action() {
+        assert!(matches!(
+            settle_as(&["field:ListCancellationFees"]).await,
+            Err(CourseError::Forbidden("field:ManageCancellationFees"))
+        ));
     }
 }

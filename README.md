@@ -389,6 +389,9 @@ apply 対象にするため、古い copy が残っていると global な actio
 Field側のAction・Policy登録を確認した後、PLT-5226/5227/5228のサーバー所有の請求目的と
 専用API、PLT-5225/5229のログイン・共通設定・UIガードを揃えて切り替えます。
 旧`field_extension_golf:ManageCancellationFees`の置換はこの切替に合わせて行います。
+移行期間中、`POST /v1/course/reservation-cancellations/fees`は`field:ManageCancellationFees`と
+旧`field_extension_golf:ManageCancellationFees`のどちらか一方で通します（ルート表とユースケースの両方）。
+旧Actionを受け付けから外すのは、本番のPolicyを新Actionへ移した後の別PRです。
 旧Actionや通常請求書・SMSの権限を専用ユーザーへfallbackとして付与しないでください。
 適用手順はFieldの`docs/cancellation-fee-policy-rollout.md`を参照してください。
 
