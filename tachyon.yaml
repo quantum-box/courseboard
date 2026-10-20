@@ -195,6 +195,16 @@ spec:
             # paths, so nothing has to change there.
             - name: COURSEBOARD_FIELD_GENERIC_PATHS
               value: "true"
+            # Product-plan delivery guard (src/feature_delivery/mod.rs).
+            # `shadow` never blocks or changes a request and does not read the
+            # body: it reads a sampled share of decisions from Core (once per
+            # tenant and feature per minute per instance) and logs them under
+            # the `courseboard::feature_delivery::decision` target. Screens
+            # stay as in `off`. Roll back by setting it to "off".
+            - name: COURSEBOARD_FEATURE_DELIVERY_ENFORCEMENT
+              value: shadow
+            - name: COURSEBOARD_FEATURE_DELIVERY_SHADOW_SAMPLE_RATE
+              value: "0.01"
         preview:
           # Tachyon provisions an isolated database and scoped user for each PR.
           # DATABASE_URL is injected from the matching PR-scoped secret.
