@@ -15,15 +15,17 @@
 //!
 //! Enforcement is opted into per deployment with [`DELIVERY_ENFORCEMENT_ENV`]:
 //! the Core definitions for these keys must exist before routes tenants
-//! already use can be closed. `shadow` evaluates and logs denials without
-//! blocking. The same switch tells the SPA whether to hide screens.
+//! already use can be closed. `shadow` never changes a request: it reads a
+//! sampled share of decisions alongside the handler and only logs them (see
+//! [`DeliverySampler`]). The same switch tells the SPA whether to hide screens.
 
 pub mod catalog;
 pub mod routes;
+mod sampling;
 #[cfg(test)]
 mod tests;
 
-use std::{collections::HashMap, fmt, sync::Arc};
+use std::{collections::HashMap, fmt, sync::Arc, time::Duration};
 
 use async_trait::async_trait;
 use axum::{
@@ -45,6 +47,18 @@ use crate::feature_flags::{
 use crate::{AppError, AppState};
 use catalog::FeatureDefinition;
 use routes::RequestFeature;
+use sampling::{DecisionLog, LoggedDecision};
+pub use sampling::{
+    DeliverySampler, DECISION_LOG_TARGET, DEFAULT_SHADOW_SAMPLE_RATE, SHADOW_DEDUP_WINDOW,
+    SHADOW_SAMPLE_RATE_ENV,
+};
+use tracing::Instrument;
+
+/// How long a sampled `shadow` response may wait for Core after the handler
+/// is done. Lambda freezes work left running after the response, so the read
+/// runs alongside the handler instead of in a detached task, and keeps going
+/// for as long as the handler does.
+pub const SHADOW_EVALUATION_BUDGET: Duration = Duration::from_secs(1);
 
 pub const DELIVERY_ENFORCEMENT_ENV: &str = "COURSEBOARD_FEATURE_DELIVERY_ENFORCEMENT";
 const MAX_EVALUATE_KEYS: usize = 64;
@@ -80,6 +94,14 @@ impl DeliveryEnforcement {
 
     pub fn from_env() -> Self {
         Self::parse(std::env::var(DELIVERY_ENFORCEMENT_ENV).ok().as_deref())
+    }
+
+    pub fn as_str(self) -> &'static str {
+        match self {
+            Self::Off => "off",
+            Self::Shadow => "shadow",
+            Self::Enforce => "enforce",
+        }
     }
 }
 
@@ -331,9 +353,12 @@ pub(crate) fn required_closure(feature: &FeatureDefinition) -> Vec<&'static str>
 pub struct FeatureDeliveryGuard {
     evaluator: Arc<dyn FeatureDeliveryEvaluator>,
     enforcement: DeliveryEnforcement,
+    sampler: Arc<DeliverySampler>,
+    shadow_budget: Duration,
 }
 
 impl FeatureDeliveryGuard {
+    /// Samples `shadow` at [`SHADOW_SAMPLE_RATE_ENV`].
     pub fn new(
         evaluator: Arc<dyn FeatureDeliveryEvaluator>,
         enforcement: DeliveryEnforcement,
@@ -341,7 +366,33 @@ impl FeatureDeliveryGuard {
         Self {
             evaluator,
             enforcement,
+            sampler: Arc::new(DeliverySampler::from_env()),
+            shadow_budget: SHADOW_EVALUATION_BUDGET,
         }
+    }
+
+    pub fn with_sampler(mut self, sampler: DeliverySampler) -> Self {
+        self.sampler = Arc::new(sampler);
+        self
+    }
+
+    #[cfg(test)]
+    fn with_shadow_budget(mut self, budget: Duration) -> Self {
+        self.shadow_budget = budget;
+        self
+    }
+
+    /// [`Self::evaluate`] for a sampled `shadow` read: logged, never acted on.
+    async fn shadow_evaluate(
+        &self,
+        features: &[&'static FeatureDefinition],
+        context: &FeatureFlagEvaluationContext,
+    ) -> LoggedDecision {
+        self.evaluate(features, context)
+            .await
+            .into_iter()
+            .find_map(Result::err)
+            .map_or(LoggedDecision::Allow, LoggedDecision::Deny)
     }
 
     /// No evaluation at all: what every deployment runs until it opts in.
@@ -448,8 +499,9 @@ impl FeatureDeliveryGuard {
 impl FeatureDeliveryGuard {
     /// Whether each common-import target may be used: `courseboard.data_imports`
     /// and the target's own feature, decided from one Core batch however many
-    /// targets (or listed jobs) ask. Only `enforce` refuses; `shadow` logs and
-    /// allows; `off` asks nothing.
+    /// targets (or listed jobs) ask. Only `enforce` refuses; `shadow` allows
+    /// everything and reads a sampled share, bounded by the shadow budget,
+    /// only to log it; `off` asks nothing.
     pub async fn import_target_decisions(
         &self,
         targets: &[&str],
@@ -461,21 +513,38 @@ impl FeatureDeliveryGuard {
                 unique.push(target);
             }
         }
-        if self.enforcement == DeliveryEnforcement::Off || unique.is_empty() {
-            return unique
+        let allow_all = |unique: Vec<&str>| {
+            unique
                 .into_iter()
                 .map(|target| (target.to_string(), true))
-                .collect();
+                .collect()
+        };
+        if self.enforcement == DeliveryEnforcement::Off || unique.is_empty() {
+            return allow_all(unique);
         }
         let data_imports = catalog::feature("courseboard.data_imports").expect("catalog feature");
+        let context = FeatureFlagEvaluationContext::from_headers(headers).ok();
+        let header_tenant = operator_header(headers);
+        let tenant_id = context
+            .as_ref()
+            .map(FeatureFlagEvaluationContext::operator_id)
+            .or(header_tenant.as_deref());
+        let shadow = self.enforcement == DeliveryEnforcement::Shadow;
+        if shadow
+            && !self
+                .sampler
+                .admit_shadow(tenant_id.unwrap_or("-"), data_imports.key)
+        {
+            return allow_all(unique);
+        }
         let features: Vec<Option<&'static FeatureDefinition>> = unique
             .iter()
             .map(|target| routes::import_target_feature(target))
             .collect();
-        let decisions: Vec<Result<(), DeliveryDenial>> =
-            match FeatureFlagEvaluationContext::from_headers(headers) {
-                Err(_) => vec![Err(DeliveryDenial::Unavailable); unique.len()],
-                Ok(context) => {
+        let decide = async {
+            match &context {
+                None => vec![Err(DeliveryDenial::Unavailable); unique.len()],
+                Some(context) => {
                     let mut batch = vec![data_imports];
                     for feature in features.iter().flatten() {
                         if !batch.iter().any(|seen| seen.key == feature.key) {
@@ -485,7 +554,7 @@ impl FeatureDeliveryGuard {
                     let results: HashMap<&str, Result<(), DeliveryDenial>> = batch
                         .iter()
                         .map(|feature| feature.key)
-                        .zip(self.evaluate(&batch, &context).await)
+                        .zip(self.evaluate(&batch, context).await)
                         .collect();
                     features
                         .iter()
@@ -495,20 +564,38 @@ impl FeatureDeliveryGuard {
                         })
                         .collect()
                 }
-            };
+            }
+        };
+        let decisions: Option<Vec<Result<(), DeliveryDenial>>> = if shadow {
+            tokio::time::timeout(self.shadow_budget, decide)
+                .instrument(tracing::Span::current())
+                .await
+                .ok()
+        } else {
+            Some(decide.await)
+        };
         unique
             .into_iter()
-            .zip(decisions)
-            .map(|(target, decision)| {
-                if let Err(denial) = decision {
-                    tracing::warn!(
-                        target,
-                        reason = denial.code(),
-                        enforcement = ?self.enforcement,
-                        "feature delivery denied for import target"
-                    );
+            .zip(features)
+            .enumerate()
+            .map(|(index, (target, feature))| {
+                let decision = decisions.as_ref().map(|decisions| decisions[index]);
+                let log = DecisionLog {
+                    enforcement: self.enforcement,
+                    tenant_id,
+                    feature: feature.map_or("-", |feature| feature.key),
+                    method: "IMPORT",
+                    path: target,
+                };
+                match decision {
+                    None => log.emit(LoggedDecision::TimedOut),
+                    Some(Err(denial)) => log.emit(LoggedDecision::Deny(denial)),
+                    Some(Ok(())) if shadow || self.sampler.roll() => {
+                        log.emit(LoggedDecision::Allow)
+                    }
+                    Some(Ok(())) => {}
                 }
-                let allowed = decision.is_ok() || self.enforcement != DeliveryEnforcement::Enforce;
+                let allowed = shadow || decision.is_some_and(|decision| decision.is_ok());
                 (target.to_string(), allowed)
             })
             .collect()
@@ -583,44 +670,20 @@ enum AdminScope {
 /// make a feature provided.
 ///
 /// A form is buffered only when its declared length fits the limit, and is
-/// put back for the handler; a larger or unsized one is left untouched so
-/// shadow mode never changes what the handler receives.
+/// put back for the handler; a larger or unsized one is left untouched.
+/// Only `enforce` reads it: `shadow` uses [`admin_scope`] without the body.
 async fn legacy_admin_scope(req: Request<Body>) -> (Request<Body>, AdminScope) {
     if !req.uri().path().starts_with(LEGACY_ADMIN_PREFIX) {
         return (req, AdminScope::NotAdmin);
     }
-    let header = req
-        .headers()
-        .get("x-operator-id")
-        .and_then(|value| value.to_str().ok())
-        .map(str::trim)
-        .filter(|value| !value.is_empty())
-        .map(ToOwned::to_owned);
-    // Every tenant the request names must agree: the header, the query, and
-    // the form body each reach a different handler parameter.
-    let scope = |named: &[Option<String>]| {
-        let mut tenants = named.iter().flatten().chain(header.iter());
-        let Some(first) = tenants.next() else {
-            return AdminScope::Unknown;
-        };
-        if tenants.any(|other| other != first) {
-            AdminScope::Mismatch
-        } else {
-            AdminScope::Tenant(first.clone())
-        }
-    };
-    let query_tenant = req
-        .uri()
-        .query()
-        .and_then(|query| serde_urlencoded::from_str(query).ok())
-        .and_then(tenant_field);
     let is_form = req
         .headers()
         .get(axum::http::header::CONTENT_TYPE)
         .and_then(|value| value.to_str().ok())
         .is_some_and(|value| value.starts_with("application/x-www-form-urlencoded"));
     if !is_form {
-        return (req, scope(&[query_tenant]));
+        let scope = admin_scope(&req, None);
+        return (req, scope);
     }
     let declared_length = req
         .headers()
@@ -642,10 +705,32 @@ async fn legacy_admin_scope(req: Request<Body>) -> (Request<Body>, AdminScope) {
     let form_tenant = serde_urlencoded::from_bytes(&bytes)
         .ok()
         .and_then(tenant_field);
-    (
-        Request::from_parts(parts, Body::from(bytes)),
-        scope(&[query_tenant, form_tenant]),
-    )
+    let req = Request::from_parts(parts, Body::from(bytes));
+    let scope = admin_scope(&req, form_tenant);
+    (req, scope)
+}
+
+/// The tenant a legacy admin request names in `x-operator-id`, its query, and
+/// `body_tenant` (a form field read by the caller), which must all agree.
+fn admin_scope(req: &Request<Body>, body_tenant: Option<String>) -> AdminScope {
+    if !req.uri().path().starts_with(LEGACY_ADMIN_PREFIX) {
+        return AdminScope::NotAdmin;
+    }
+    let header = operator_header(req.headers());
+    let query_tenant = req
+        .uri()
+        .query()
+        .and_then(|query| serde_urlencoded::from_str(query).ok())
+        .and_then(tenant_field);
+    let mut tenants = [query_tenant, body_tenant, header].into_iter().flatten();
+    let Some(first) = tenants.next() else {
+        return AdminScope::Unknown;
+    };
+    if tenants.any(|other| other != first) {
+        AdminScope::Mismatch
+    } else {
+        AdminScope::Tenant(first)
+    }
 }
 
 const CANCELLATION_INVOICES_PATH: &str = "/field-api/v1/invoices";
@@ -744,86 +829,191 @@ pub async fn require_feature_delivery(
     if guard.enforcement() == DeliveryEnforcement::Off {
         return next.run(req).await;
     }
-    let (feature_key, decision) = match routes::classify_request(req.method(), req.uri().path()) {
+    let feature = match routes::classify_request(req.method(), req.uri().path()) {
         RequestFeature::Exempt(_) => return next.run(req).await,
-        RequestFeature::Unclassified => (None, Err(DeliveryDenial::UnclassifiedRoute)),
-        RequestFeature::Required(feature) => {
-            // Verified here rather than trusted from an outer layer: the action
-            // gate can be switched off (`COURSEBOARD_DISABLE_ACTION_AUTHZ`), and
-            // an unverified bearer must never buy an outbound request to Core.
-            let verified = crate::course_authz::bearer_from(&req)
-                .is_some_and(|bearer| state.token_verifier_for_authz().verify(bearer).is_ok());
-            if !verified {
-                return match guard.enforcement() {
-                    DeliveryEnforcement::Shadow => next.run(req).await,
-                    _ => AppError::Unauthorized.into_response(),
-                };
-            }
-            let (rebuilt, admin_scope) = legacy_admin_scope(req).await;
-            req = rebuilt;
-            let tenant_override = match admin_scope {
-                AdminScope::NotAdmin => None,
-                AdminScope::Tenant(tenant) => Some(Ok(tenant)),
-                AdminScope::Unknown => Some(Err(DeliveryDenial::Unavailable)),
-                AdminScope::Mismatch => Some(Err(DeliveryDenial::ScopeMismatch)),
-                AdminScope::BodyLost => {
-                    return AppError::BadRequest("request body could not be read").into_response()
-                }
-            };
-            let (rebuilt, invoice_scope) = cancellation_invoice_scope(req).await;
-            req = rebuilt;
-            let scope_denial = match invoice_scope {
-                None | Some(InvoiceScope::Within) => None,
-                Some(InvoiceScope::Exceeded) => Some(DeliveryDenial::ScopeExceeded),
-                Some(InvoiceScope::Unknown) => Some(DeliveryDenial::Unavailable),
-                Some(InvoiceScope::BodyLost) => {
-                    return AppError::BadRequest("request body could not be read").into_response()
-                }
-            };
-            let context = match tenant_override {
-                None => evaluation_context(&req, None).ok_or(DeliveryDenial::Unavailable),
-                Some(Ok(tenant)) => {
-                    evaluation_context(&req, Some(tenant)).ok_or(DeliveryDenial::Unavailable)
-                }
-                Some(Err(denial)) => Err(denial),
-            };
-            let decision = match (
-                scope_denial,
-                routes::additional_features(req.method(), req.uri().path()),
-                context,
-            ) {
-                (Some(denial), _, _) => Err(denial),
-                (None, None, _) => Err(DeliveryDenial::UnclassifiedRoute),
-                (None, Some(_), Err(denial)) => Err(denial),
-                (None, Some(additional), Ok(context)) => {
-                    let mut features = vec![feature];
-                    features.extend(additional);
-                    guard
-                        .evaluate(&features, &context)
-                        .await
-                        .into_iter()
-                        .find(Result::is_err)
-                        .unwrap_or(Ok(()))
-                }
-            };
-            (Some(feature.key), decision)
+        RequestFeature::Unclassified => None,
+        RequestFeature::Required(feature) => Some(feature),
+    };
+    let method = req.method().to_string();
+    let path = req.uri().path().to_string();
+    let mut log = DecisionLog {
+        enforcement: guard.enforcement(),
+        tenant_id: None,
+        feature: feature.map_or("-", |feature| feature.key),
+        method: &method,
+        path: &path,
+    };
+    let header_tenant = operator_header(req.headers());
+    log.tenant_id = header_tenant.as_deref();
+    if guard.enforcement() == DeliveryEnforcement::Shadow {
+        return shadow_feature_delivery(&state, &guard, feature, req, next, log).await;
+    }
+
+    let Some(feature) = feature else {
+        log.emit(LoggedDecision::Deny(DeliveryDenial::UnclassifiedRoute));
+        return DeliveryDenial::UnclassifiedRoute.into_response();
+    };
+    // Verified here rather than trusted from an outer layer: the action
+    // gate can be switched off (`COURSEBOARD_DISABLE_ACTION_AUTHZ`), and
+    // an unverified bearer must never buy an outbound request to Core.
+    if !bearer_is_verified(&state, &req) {
+        return AppError::Unauthorized.into_response();
+    }
+    let (rebuilt, admin_scope) = legacy_admin_scope(req).await;
+    req = rebuilt;
+    let tenant_override = match admin_scope {
+        AdminScope::NotAdmin => None,
+        AdminScope::Tenant(tenant) => Some(Ok(tenant)),
+        AdminScope::Unknown => Some(Err(DeliveryDenial::Unavailable)),
+        AdminScope::Mismatch => Some(Err(DeliveryDenial::ScopeMismatch)),
+        AdminScope::BodyLost => {
+            return AppError::BadRequest("request body could not be read").into_response()
         }
     };
-    let Err(denial) = decision else {
+    let (rebuilt, invoice_scope) = cancellation_invoice_scope(req).await;
+    req = rebuilt;
+    let scope_denial = match invoice_scope {
+        None | Some(InvoiceScope::Within) => None,
+        Some(InvoiceScope::Exceeded) => Some(DeliveryDenial::ScopeExceeded),
+        Some(InvoiceScope::Unknown) => Some(DeliveryDenial::Unavailable),
+        Some(InvoiceScope::BodyLost) => {
+            return AppError::BadRequest("request body could not be read").into_response()
+        }
+    };
+    let context = match tenant_override {
+        None => evaluation_context(&req, None).ok_or(DeliveryDenial::Unavailable),
+        Some(Ok(tenant)) => {
+            evaluation_context(&req, Some(tenant)).ok_or(DeliveryDenial::Unavailable)
+        }
+        Some(Err(denial)) => Err(denial),
+    };
+    let scoped_tenant = context
+        .as_ref()
+        .ok()
+        .map(|context| context.operator_id().to_string());
+    if scoped_tenant.is_some() {
+        log.tenant_id = scoped_tenant.as_deref();
+    }
+    let decision = match (
+        scope_denial,
+        routes::additional_features(req.method(), req.uri().path()),
+        context,
+    ) {
+        (Some(denial), _, _) => Err(denial),
+        (None, None, _) => Err(DeliveryDenial::UnclassifiedRoute),
+        (None, Some(_), Err(denial)) => Err(denial),
+        (None, Some(additional), Ok(context)) => {
+            let mut features = vec![feature];
+            features.extend(additional);
+            guard
+                .evaluate(&features, &context)
+                .await
+                .into_iter()
+                .find(Result::is_err)
+                .unwrap_or(Ok(()))
+        }
+    };
+    match decision {
+        Ok(()) => {
+            if guard.sampler.roll() {
+                log.emit(LoggedDecision::Allow);
+            }
+            next.run(req).await
+        }
+        Err(denial) => {
+            log.emit(LoggedDecision::Deny(denial));
+            denial.into_response()
+        }
+    }
+}
+
+/// `shadow` hands the handler the request exactly as `off` would: no body is
+/// read, so a tenant named only in a legacy admin form, and the invoice scope
+/// of a cancellation-fee invoice, are not checked here. A sampled request is
+/// read from Core alongside the handler and only logged.
+async fn shadow_feature_delivery(
+    state: &AppState,
+    guard: &FeatureDeliveryGuard,
+    feature: Option<&'static FeatureDefinition>,
+    req: Request<Body>,
+    next: Next,
+    mut log: DecisionLog<'_>,
+) -> Response {
+    let Some(feature) = feature else {
+        if guard.sampler.roll() {
+            log.emit(LoggedDecision::Deny(DeliveryDenial::UnclassifiedRoute));
+        }
         return next.run(req).await;
     };
-    tracing::warn!(
-        feature = feature_key.unwrap_or("-"),
-        reason = denial.code(),
-        method = %req.method(),
-        path = req.uri().path(),
-        enforcement = ?guard.enforcement(),
-        "feature delivery denied"
-    );
-    match guard.enforcement() {
-        DeliveryEnforcement::Shadow => next.run(req).await,
-        _ => denial.into_response(),
+    if !bearer_is_verified(state, &req) {
+        return next.run(req).await;
     }
+    let (tenant_override, scope_denial) = match admin_scope(&req, None) {
+        AdminScope::NotAdmin | AdminScope::BodyLost => (None, None),
+        AdminScope::Tenant(tenant) => (Some(tenant), None),
+        AdminScope::Unknown => (None, Some(DeliveryDenial::Unavailable)),
+        AdminScope::Mismatch => (None, Some(DeliveryDenial::ScopeMismatch)),
+    };
+    let context = evaluation_context(&req, tenant_override);
+    if let Some(context) = &context {
+        log.tenant_id = Some(context.operator_id());
+    }
+    if !guard
+        .sampler
+        .admit_shadow(log.tenant_id.unwrap_or("-"), feature.key)
+    {
+        return next.run(req).await;
+    }
+    let additional = routes::additional_features(req.method(), req.uri().path());
+    let read = async {
+        if let Some(denial) = scope_denial {
+            return LoggedDecision::Deny(denial);
+        }
+        let Some(additional) = additional else {
+            return LoggedDecision::Deny(DeliveryDenial::UnclassifiedRoute);
+        };
+        let Some(context) = &context else {
+            return LoggedDecision::Deny(DeliveryDenial::Unavailable);
+        };
+        let mut features = vec![feature];
+        features.extend(additional);
+        guard.shadow_evaluate(&features, context).await
+    };
+    // The read runs while the handler does; once the response is ready it
+    // waits for the read only up to the budget.
+    let read = read.instrument(tracing::Span::current());
+    tokio::pin!(read);
+    let handler = next.run(req);
+    tokio::pin!(handler);
+    let mut decision = None;
+    let response = loop {
+        tokio::select! {
+            response = &mut handler => break response,
+            outcome = &mut read, if decision.is_none() => decision = Some(outcome),
+        }
+    };
+    let decision = match decision {
+        Some(outcome) => outcome,
+        None => tokio::time::timeout(guard.shadow_budget, read)
+            .await
+            .unwrap_or(LoggedDecision::TimedOut),
+    };
+    log.emit(decision);
+    response
+}
+
+fn bearer_is_verified(state: &AppState, req: &Request<Body>) -> bool {
+    crate::course_authz::bearer_from(req)
+        .is_some_and(|bearer| state.token_verifier_for_authz().verify(bearer).is_ok())
+}
+
+fn operator_header(headers: &HeaderMap) -> Option<String> {
+    headers
+        .get("x-operator-id")
+        .and_then(|value| value.to_str().ok())
+        .map(str::trim)
+        .filter(|value| !value.is_empty())
+        .map(ToOwned::to_owned)
 }
 
 #[derive(Debug, Deserialize, ToSchema)]
@@ -834,7 +1024,7 @@ pub struct EvaluateFeatureDeliveriesRequest {
 
 #[derive(Debug, Serialize, PartialEq, Eq, ToSchema)]
 pub struct EvaluateFeatureDeliveriesResponse {
-    /// `off` means nothing was evaluated and nothing is gated.
+    /// `off` and `shadow` mean nothing was evaluated and nothing is gated.
     enforcement: DeliveryEnforcement,
     values: Vec<FeatureDeliveryResult>,
 }
@@ -893,9 +1083,11 @@ pub async fn evaluate_feature_deliveries(
     let context = FeatureFlagEvaluationContext::from_headers(&headers)?;
     let features = validate_evaluate_keys(&input.keys)?;
     let guard = state.feature_delivery();
-    if guard.enforcement() == DeliveryEnforcement::Off {
+    // The SPA hides nothing until `enforce`, so `shadow` does not spend a
+    // Core read (and a Field lease) on every screen load.
+    if guard.enforcement() != DeliveryEnforcement::Enforce {
         return Ok(Json(EvaluateFeatureDeliveriesResponse {
-            enforcement: DeliveryEnforcement::Off,
+            enforcement: guard.enforcement(),
             values: Vec::new(),
         }));
     }

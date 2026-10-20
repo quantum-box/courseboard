@@ -179,9 +179,18 @@ tachyon iac apply --file .tachyon/manifests/courseboard-product-features.yml
 ### ガード（既定 off）
 
 - env `COURSEBOARD_FEATURE_DELIVERY_ENFORCEMENT` = `off`（既定）/ `shadow` / `enforce`。未知の値は `enforce`。
-- API: `course_authz` の内側（IAM を通った後、handler の直前）で、ルートの key と、その `requiredFeatureKeys` 全部を Core の `featureDeliveryValues` に 1 回の batch で問い合わせる。`enabled && resolved` 以外は 403（`FEATURE_NOT_PROVIDED` / `FEATURE_DELIVERY_UNRESOLVED` / `FEATURE_DELIVERY_UNAVAILABLE` / `FEATURE_ROUTE_UNCLASSIFIED`）。`shadow` はログだけ出して通す。`off` は Core を呼ばない。
+- API: `course_authz` の内側（IAM を通った後、handler の直前）で、ルートの key と、その `requiredFeatureKeys` 全部を Core の `featureDeliveryValues` に 1 回の batch で問い合わせる。`enabled && resolved` 以外は 403（`FEATURE_NOT_PROVIDED` / `FEATURE_DELIVERY_UNRESOLVED` / `FEATURE_DELIVERY_UNAVAILABLE` / `FEATURE_ROUTE_UNCLASSIFIED`）。`off` は Core を呼ばない。
+- `shadow` はリクエストを一切変えない（本文も読まない）。Core の判定 1 回ごとに Field の lease が書かれるので、判定するのは一部だけにする。
+  - 判定する割合は `COURSEBOARD_FEATURE_DELIVERY_SHADOW_SAMPLE_RATE`（0〜1、既定 `0.01`）。
+  - 同じテナント × 機能は、インスタンスごとに 1 分に 1 回まで。
+  - 判定は handler と並行に走らせ、handler が動いている間は打ち切らない。Lambda は応答の後の処理を止めるため、切り離したタスクにはしない。応答ができてから待つのは最大 1 秒で、超えたら `SHADOW_TIMEOUT` として記録する。
+  - 本文を読まないため、旧管理画面のフォームに書かれたテナントと、取消料請求書の範囲（`FEATURE_SCOPE_EXCEEDED`）は shadow では確かめない。
+- ログ: target `courseboard::feature_delivery::decision`、メッセージ `feature delivery decision`。項目は `tenant_id` / `feature` / `decision`（allow / deny / unknown）/ `reason` / `enforcement` / `method` / `path`。
+  - 拒否は `enforce` では毎回出す。`shadow` では判定したものすべてを出す。
+  - 許可は `enforce` でもサンプリングして出す。
+  - 秘密値は出さない。
 - 処理の中で別の機能を呼ぶ入口は、その中でも判定する。データ出力（`/objects`、`/{source}/rows`）は出力元ごとに判定し、共通取込み（`/v1/course/data-imports/*`）は取込み先ごとに判定する（一覧・テンプレート・取込み・ジョブ操作のすべて）。
-- UI 向け: `POST /v1/course/feature-deliveries/evaluate`（`{ keys }` → `{ enforcement, values: [{ key, enabled, resolved, reason }] }`）。要件 key の AND はサーバーで行う。`off` のときは値を返さない。
+- UI 向け: `POST /v1/course/feature-deliveries/evaluate`（`{ keys }` → `{ enforcement, values: [{ key, enabled, resolved, reason }] }`）。要件 key の AND はサーバーで行う。`off` と `shadow` のときは値を返さず、Core も呼ばない（画面は `enforce` までどれも隠さないため）。
 - UI: `FeatureDeliveryProvider` が全 key を一度に問い合わせる。`enforce` のときだけ、提供なしの画面は `CapabilityGate` で止め、サイドバー・ピン・ホーム・設定ハブからも外す（`useHiddenRoutes`）。判定できないときは、表示せずに読み込み中または再試行を出す（fail-closed）。release flag のゲート（fail-open）はそのまま。この endpoint がない古い API（403 / 404）の場合は `off` として扱う。
 
 ### 段階導入の順序
