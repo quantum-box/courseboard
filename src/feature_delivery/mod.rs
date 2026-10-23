@@ -18,6 +18,15 @@
 //! already use can be closed. `shadow` never changes a request: it reads a
 //! sampled share of decisions alongside the handler and only logs them (see
 //! [`DeliverySampler`]). The same switch tells the SPA whether to hide screens.
+//!
+//! [`DELIVERY_ENFORCE_PLATFORMS_ENV`] and [`DELIVERY_ENFORCE_TENANTS_ENV`]
+//! list platform and operator tenants whose requests are enforced whatever
+//! the deployment mode is. One deployment serves both the production and the
+//! sandbox platform, so a sandbox tenant can run with its plan applied while
+//! production tenants stay in `shadow`. The tenants come from the request's
+//! `x-platform-id` and `x-operator-id`; this is a rollout switch, not a
+//! boundary, and a request outside the lists is never decided more strictly
+//! than the deployment mode.
 
 pub mod catalog;
 pub mod routes;
@@ -25,7 +34,12 @@ mod sampling;
 #[cfg(test)]
 mod tests;
 
-use std::{collections::HashMap, fmt, sync::Arc, time::Duration};
+use std::{
+    collections::{HashMap, HashSet},
+    fmt,
+    sync::Arc,
+    time::Duration,
+};
 
 use async_trait::async_trait;
 use axum::{
@@ -61,6 +75,10 @@ use tracing::Instrument;
 pub const SHADOW_EVALUATION_BUDGET: Duration = Duration::from_secs(1);
 
 pub const DELIVERY_ENFORCEMENT_ENV: &str = "COURSEBOARD_FEATURE_DELIVERY_ENFORCEMENT";
+/// Comma-separated platform tenant IDs whose requests are always enforced.
+pub const DELIVERY_ENFORCE_PLATFORMS_ENV: &str = "COURSEBOARD_FEATURE_DELIVERY_ENFORCE_PLATFORMS";
+/// Comma-separated operator tenant IDs whose requests are always enforced.
+pub const DELIVERY_ENFORCE_TENANTS_ENV: &str = "COURSEBOARD_FEATURE_DELIVERY_ENFORCE_TENANTS";
 const MAX_EVALUATE_KEYS: usize = 64;
 
 /// How the guard treats a denial.
@@ -103,6 +121,50 @@ impl DeliveryEnforcement {
             Self::Enforce => "enforce",
         }
     }
+}
+
+/// The tenant IDs named by an enforce list. An entry that is not a tenant ID
+/// is dropped with a warning: a typo must not enforce an unintended tenant,
+/// and it cannot loosen the deployment mode either.
+pub fn parse_enforce_tenant_ids(setting: &str, value: Option<&str>) -> HashSet<String> {
+    value
+        .unwrap_or_default()
+        .split(',')
+        .map(str::trim)
+        .filter(|entry| !entry.is_empty())
+        .filter(|entry| {
+            let valid = entry.len() == 29
+                && entry.starts_with("tn_")
+                && entry[3..].chars().all(|ch| ch.is_ascii_alphanumeric());
+            if !valid {
+                tracing::warn!(value = *entry, setting, "ignoring a non-tenant entry");
+            }
+            valid
+        })
+        .map(ToOwned::to_owned)
+        .collect()
+}
+
+/// The platforms named by [`DELIVERY_ENFORCE_PLATFORMS_ENV`].
+pub fn parse_enforce_platforms(value: Option<&str>) -> HashSet<String> {
+    parse_enforce_tenant_ids(DELIVERY_ENFORCE_PLATFORMS_ENV, value)
+}
+
+/// The operators named by [`DELIVERY_ENFORCE_TENANTS_ENV`].
+pub fn parse_enforce_tenants(value: Option<&str>) -> HashSet<String> {
+    parse_enforce_tenant_ids(DELIVERY_ENFORCE_TENANTS_ENV, value)
+}
+
+pub fn enforce_platforms_from_env() -> HashSet<String> {
+    parse_enforce_platforms(
+        std::env::var(DELIVERY_ENFORCE_PLATFORMS_ENV)
+            .ok()
+            .as_deref(),
+    )
+}
+
+pub fn enforce_tenants_from_env() -> HashSet<String> {
+    parse_enforce_tenants(std::env::var(DELIVERY_ENFORCE_TENANTS_ENV).ok().as_deref())
 }
 
 /// One canonical decision from Core.
@@ -353,6 +415,8 @@ pub(crate) fn required_closure(feature: &FeatureDefinition) -> Vec<&'static str>
 pub struct FeatureDeliveryGuard {
     evaluator: Arc<dyn FeatureDeliveryEvaluator>,
     enforcement: DeliveryEnforcement,
+    enforce_platforms: Arc<HashSet<String>>,
+    enforce_tenants: Arc<HashSet<String>>,
     sampler: Arc<DeliverySampler>,
     shadow_budget: Duration,
 }
@@ -366,9 +430,23 @@ impl FeatureDeliveryGuard {
         Self {
             evaluator,
             enforcement,
+            enforce_platforms: Arc::new(HashSet::new()),
+            enforce_tenants: Arc::new(HashSet::new()),
             sampler: Arc::new(DeliverySampler::from_env()),
             shadow_budget: SHADOW_EVALUATION_BUDGET,
         }
+    }
+
+    /// Enforce every request from these platforms (see the module docs).
+    pub fn with_enforce_platforms(mut self, platforms: HashSet<String>) -> Self {
+        self.enforce_platforms = Arc::new(platforms);
+        self
+    }
+
+    /// Enforce every request from these operators (see the module docs).
+    pub fn with_enforce_tenants(mut self, tenants: HashSet<String>) -> Self {
+        self.enforce_tenants = Arc::new(tenants);
+        self
     }
 
     pub fn with_sampler(mut self, sampler: DeliverySampler) -> Self {
@@ -403,8 +481,29 @@ impl FeatureDeliveryGuard {
         )
     }
 
+    /// The deployment-wide mode, before any platform override.
     pub fn enforcement(&self) -> DeliveryEnforcement {
         self.enforcement
+    }
+
+    /// The mode for one request: `enforce` for a listed platform or
+    /// operator, otherwise the deployment mode.
+    pub fn enforcement_for(&self, headers: &HeaderMap) -> DeliveryEnforcement {
+        let header = |name: &str| {
+            headers
+                .get(name)
+                .and_then(|value| value.to_str().ok())
+                .map(str::trim)
+        };
+        let listed_platform =
+            header("x-platform-id").is_some_and(|id| self.enforce_platforms.contains(id));
+        let listed_tenant =
+            header("x-operator-id").is_some_and(|id| self.enforce_tenants.contains(id));
+        if listed_platform || listed_tenant {
+            DeliveryEnforcement::Enforce
+        } else {
+            self.enforcement
+        }
     }
 
     /// Decide several features from one Core batch, in the order given.
@@ -459,7 +558,7 @@ impl FeatureDeliveryGuard {
         source_keys: &[&str],
         headers: &HeaderMap,
     ) -> Vec<bool> {
-        if self.enforcement != DeliveryEnforcement::Enforce {
+        if self.enforcement_for(headers) != DeliveryEnforcement::Enforce {
             return vec![true; source_keys.len()];
         }
         let Ok(context) = FeatureFlagEvaluationContext::from_headers(headers) else {
@@ -519,7 +618,8 @@ impl FeatureDeliveryGuard {
                 .map(|target| (target.to_string(), true))
                 .collect()
         };
-        if self.enforcement == DeliveryEnforcement::Off || unique.is_empty() {
+        let enforcement = self.enforcement_for(headers);
+        if enforcement == DeliveryEnforcement::Off || unique.is_empty() {
             return allow_all(unique);
         }
         let data_imports = catalog::feature("courseboard.data_imports").expect("catalog feature");
@@ -529,7 +629,7 @@ impl FeatureDeliveryGuard {
             .as_ref()
             .map(FeatureFlagEvaluationContext::operator_id)
             .or(header_tenant.as_deref());
-        let shadow = self.enforcement == DeliveryEnforcement::Shadow;
+        let shadow = enforcement == DeliveryEnforcement::Shadow;
         if shadow
             && !self
                 .sampler
@@ -581,7 +681,7 @@ impl FeatureDeliveryGuard {
             .map(|(index, (target, feature))| {
                 let decision = decisions.as_ref().map(|decisions| decisions[index]);
                 let log = DecisionLog {
-                    enforcement: self.enforcement,
+                    enforcement,
                     tenant_id,
                     feature: feature.map_or("-", |feature| feature.key),
                     method: "IMPORT",
@@ -826,7 +926,8 @@ pub async fn require_feature_delivery(
     next: Next,
 ) -> Response {
     let guard = state.feature_delivery();
-    if guard.enforcement() == DeliveryEnforcement::Off {
+    let enforcement = guard.enforcement_for(req.headers());
+    if enforcement == DeliveryEnforcement::Off {
         return next.run(req).await;
     }
     let feature = match routes::classify_request(req.method(), req.uri().path()) {
@@ -837,7 +938,7 @@ pub async fn require_feature_delivery(
     let method = req.method().to_string();
     let path = req.uri().path().to_string();
     let mut log = DecisionLog {
-        enforcement: guard.enforcement(),
+        enforcement,
         tenant_id: None,
         feature: feature.map_or("-", |feature| feature.key),
         method: &method,
@@ -845,7 +946,7 @@ pub async fn require_feature_delivery(
     };
     let header_tenant = operator_header(req.headers());
     log.tenant_id = header_tenant.as_deref();
-    if guard.enforcement() == DeliveryEnforcement::Shadow {
+    if enforcement == DeliveryEnforcement::Shadow {
         return shadow_feature_delivery(&state, &guard, feature, req, next, log).await;
     }
 
@@ -1085,9 +1186,10 @@ pub async fn evaluate_feature_deliveries(
     let guard = state.feature_delivery();
     // The SPA hides nothing until `enforce`, so `shadow` does not spend a
     // Core read (and a Field lease) on every screen load.
-    if guard.enforcement() != DeliveryEnforcement::Enforce {
+    let enforcement = guard.enforcement_for(&headers);
+    if enforcement != DeliveryEnforcement::Enforce {
         return Ok(Json(EvaluateFeatureDeliveriesResponse {
-            enforcement: guard.enforcement(),
+            enforcement,
             values: Vec::new(),
         }));
     }
@@ -1116,7 +1218,7 @@ pub async fn evaluate_feature_deliveries(
         })
         .collect();
     Ok(Json(EvaluateFeatureDeliveriesResponse {
-        enforcement: guard.enforcement(),
+        enforcement,
         values,
     }))
 }
