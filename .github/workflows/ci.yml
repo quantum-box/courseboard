@@ -69,7 +69,7 @@ jobs:
       - name: Setup Node
         uses: actions/setup-node@v4
         with:
-          node-version: "24"
+          node-version: "24.22.1"
           cache: npm
           cache-dependency-path: desktop/package-lock.json
 
@@ -112,7 +112,7 @@ jobs:
       - name: Setup Node
         uses: actions/setup-node@v4
         with:
-          node-version: "24"
+          node-version: "24.22.1"
           cache: npm
           cache-dependency-path: desktop/package-lock.json
 
@@ -197,7 +197,7 @@ jobs:
       - name: Setup Node
         uses: actions/setup-node@v4
         with:
-          node-version: "24"
+          node-version: "24.22.1"
           cache: npm
           cache-dependency-path: desktop/package-lock.json
 
@@ -291,7 +291,7 @@ jobs:
       - name: Setup Node
         uses: actions/setup-node@v4
         with:
-          node-version: "24"
+          node-version: "24.22.1"
           cache: npm
           cache-dependency-path: desktop/package-lock.json
 

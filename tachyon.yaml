@@ -25,10 +25,10 @@ spec:
       watchPaths:
         - desktop/**
       build:
-        installCommand: npm ci --no-audit --no-fund
+        installCommand: node --version && npm ci --no-audit --no-fund
         command: npm run build
         outputDirectory: dist
-        nodeVersion: "24"
+        nodeVersion: "24.22.1"
       envVars:
         - name: VITE_BASE_PATH
           value: /

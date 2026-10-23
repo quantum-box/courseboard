@@ -517,3 +517,9 @@ cargo test
 cargo clippy --all-targets --all-features -- -D warnings
 git diff --check
 ```
+
+## Node.js セキュリティ更新
+
+フロントエンド・動画生成・CI・リリース・Docker のビルドには Node.js 24.22.1 以降の 24 系を使用します。`mise install` で固定版を導入してください。`desktop/` と `video/` の依存導入は `.npmrc` の `engine-strict` により旧バージョンでは失敗します。
+
+2026-10-21 の [Node.js セキュリティ更新](https://nodejs.org/en/blog/vulnerability/october-2026-security-releases)への対応です。Cloudflare Workers の配信ランタイムと Rust API は Node.js のビルド環境とは別です。
