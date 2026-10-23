@@ -19,10 +19,20 @@ const FIELD_PROFILE_PATH: &str = "/v1/erp/me";
 const PLATFORM_PROFILE_PATH: &str = "/v1/me";
 const CHECK_TENANTS_PATH: &str = "/v1/auth/policies/check-tenants";
 /// The action whose policy grant means "this tenant is a CourseBoard tenant"
-/// (ADR-0011). Every member policy in the golf auth manifest allows it and the
-/// machine-to-machine calculator policy does not — a test on the manifest copy
-/// below pins that property.
+/// for the existing Golf surface (ADR-0011). Every member policy in the golf
+/// auth manifest allows it and the machine-to-machine calculator policy does
+/// not — a test on the manifest copy below pins that property.
 const REPRESENTATIVE_ACTION: &str = "field_extension_golf:ListTeeSheet";
+/// Canonical Field actions used by the standalone cancellation-fee surface.
+/// These are fixed server-owned discovery actions: the client cannot choose an
+/// action or ask this endpoint for an unfiltered tenant list.
+const CANCELLATION_FEE_LIST_ACTION: &str = "field:ListCancellationFees";
+const CANCELLATION_FEE_MANAGE_ACTION: &str = "field:ManageCancellationFees";
+const TENANT_DISCOVERY_ACTIONS: &[&str] = &[
+    REPRESENTATIVE_ACTION,
+    CANCELLATION_FEE_LIST_ACTION,
+    CANCELLATION_FEE_MANAGE_ACTION,
+];
 const MAX_PROFILE_RESPONSE_BYTES: usize = 1024 * 1024;
 const MAX_PROFILE_TENANTS: usize = 500;
 const PROFILE_REQUEST_TIMEOUT: Duration = Duration::from_secs(7);
@@ -199,8 +209,8 @@ impl ProfileClient {
     }
 
     /// The policy-based tenant list (ADR-0011): the platform's own `/v1/me`,
-    /// filtered by who actually holds the representative CourseBoard action.
-    /// Field is not on this path at all.
+    /// filtered by the fixed union of CourseBoard Golf and cancellation-fee
+    /// actions. Field is not on this path at all.
     async fn policy_profile(
         &self,
         authorization: &str,
@@ -246,12 +256,11 @@ impl ProfileClient {
         decode_platform_profile(&body)
     }
 
-    /// Group the tenants by platform, ask `check-tenants` once per platform,
-    /// and keep the `/v1/me` order. A platform whose check fails is kept
-    /// unfiltered with `partial` set: the tenant list is a discovery
-    /// affordance, not an authorization boundary — every later API authorizes
-    /// independently — and the alternative sends every operator to a dead-end
-    /// screen during an auth outage.
+    /// Group the tenants by platform, ask `check-tenants` for every fixed
+    /// discovery action, and keep the `/v1/me` order. A tenant is included when
+    /// any one action allows it. An unknown or failed action check fails the
+    /// whole policy response closed so an auth outage cannot turn into an
+    /// unfiltered tenant list; the caller can retry the profile request.
     async fn filter_by_policy(
         &self,
         operators_base: &Url,
@@ -272,27 +281,44 @@ impl ProfileClient {
                 .map(|tenant| tenant.id.clone())
                 .collect();
             async move {
-                let allowed = self
-                    .check_tenants(operators_base, platform_id, &tenant_ids, authorization)
-                    .await;
-                (platform_id.clone(), tenant_ids, allowed)
+                let mut allowed_ids = HashSet::new();
+                for action in TENANT_DISCOVERY_ACTIONS {
+                    let allowed = self
+                        .check_tenants(
+                            operators_base,
+                            platform_id,
+                            action,
+                            &tenant_ids,
+                            authorization,
+                        )
+                        .await
+                        .map_err(|reason| (platform_id.clone(), *action, reason))?;
+                    // The final tenant filter below is the trust boundary, but
+                    // keeping only requested IDs here makes the union invariant
+                    // explicit and avoids carrying provider extras further.
+                    allowed_ids.extend(
+                        allowed
+                            .into_iter()
+                            .filter(|tenant_id| tenant_ids.iter().any(|id| id == tenant_id)),
+                    );
+                }
+                Ok::<_, (String, &'static str, String)>((platform_id.clone(), allowed_ids))
             }
         }))
         .await;
 
-        let mut partial = false;
         let mut allowed_ids: HashSet<String> = HashSet::new();
-        for (platform_id, tenant_ids, allowed) in answers {
-            match allowed {
-                Ok(allowed) => allowed_ids.extend(allowed),
-                Err(reason) => {
+        for answer in answers {
+            match answer {
+                Ok((_, platform_allowed_ids)) => allowed_ids.extend(platform_allowed_ids),
+                Err((platform_id, action, reason)) => {
                     tracing::warn!(
                         platform_id,
+                        action,
                         reason,
-                        "check-tenants failed; keeping this platform's tenants unfiltered"
+                        "check-tenants failed; refusing to discover tenants until it can be retried"
                     );
-                    partial = true;
-                    allowed_ids.extend(tenant_ids);
+                    return Err(ProfileProxyError::UpstreamRequest);
                 }
             }
         }
@@ -314,17 +340,18 @@ impl ProfileClient {
             user,
             tenants: filtered,
             default_tenant_id,
-            partial: partial.then_some(true),
+            partial: None,
         })
     }
 
     /// `POST {tachyon-api}/v1/auth/policies/check-tenants` — which of these
-    /// tenants grant the caller the representative action. Unscoped, like the
-    /// platform profile call.
+    /// tenants grant the fixed discovery action. Unscoped, like the platform
+    /// profile call, and always forwarded with the caller's bearer.
     async fn check_tenants(
         &self,
         operators_base: &Url,
         platform_id: &str,
+        action: &str,
         tenant_ids: &[String],
         authorization: &str,
     ) -> Result<Vec<String>, String> {
@@ -340,7 +367,7 @@ impl ProfileClient {
             .header(header::AUTHORIZATION.as_str(), authorization)
             .header(header::ACCEPT.as_str(), "application/json")
             .json(&CheckTenantsRequest {
-                action: REPRESENTATIVE_ACTION,
+                action,
                 platform_id,
                 tenant_ids,
             })
@@ -514,8 +541,9 @@ pub struct ProfileResponse {
     pub user: ProfileUser,
     pub tenants: Vec<ProfileTenant>,
     pub default_tenant_id: Option<String>,
-    /// Set when the policy filter could not run for some platform and its
-    /// tenants are listed unfiltered. The UI already reads this flag.
+    /// Retained for clients that understand the former partial-discovery
+    /// response. The policy source now fails closed on an unknown check rather
+    /// than returning an unfiltered list, so it does not set this flag.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub partial: Option<bool>,
 }
@@ -594,19 +622,37 @@ struct PlatformTenant {
 }
 
 #[derive(Debug, Deserialize)]
-#[serde(rename_all = "camelCase")]
 struct PlatformProfileWire {
-    user: Option<FieldProfileUserWire>,
+    user: Option<PlatformProfileUserWire>,
     tenants: Option<Vec<PlatformTenantWire>>,
 }
 
+/// The platform `/v1/me` contract is canonical snake_case. Keep the one
+/// camelCase alias seen in older fixtures during the transition, but do not
+/// make the live decoder depend on the fixture spelling.
 #[derive(Debug, Deserialize)]
-#[serde(rename_all = "camelCase")]
+struct PlatformProfileUserWire {
+    id: Option<String>,
+    #[serde(default)]
+    sub: Option<String>,
+    #[serde(default)]
+    email: Option<String>,
+    username: Option<String>,
+    #[serde(default, alias = "onboardingCompleted")]
+    onboarding_completed: Option<bool>,
+}
+
+#[derive(Debug, Deserialize)]
 struct PlatformTenantWire {
     id: Option<String>,
     name: Option<String>,
-    #[serde(default)]
+    #[serde(default, alias = "platformId")]
     platform_id: Option<String>,
+    /// Core includes host/root and other non-landing memberships in `/v1/me`.
+    /// Only an explicit `true` is eligible for tenant selection; missing or
+    /// false is fail-closed so an incomplete response cannot expose a parent.
+    #[serde(default)]
+    switchable: Option<bool>,
 }
 
 #[derive(Serialize)]
@@ -694,8 +740,12 @@ fn decode_platform_profile(
             return Err(ProfileProxyError::InvalidContract);
         }
         let name = required_non_blank(tenant.name)?;
-        // No platform parent means this entry is a platform itself (the top of
-        // the hierarchy); CourseBoard tenants always live under one.
+        // Core's `switchable` is the canonical route-eligibility bit. A
+        // missing bit is treated like false rather than guessing from the
+        // tenant hierarchy or platform ID.
+        if tenant.switchable != Some(true) {
+            continue;
+        }
         let Some(platform_id) = tenant
             .platform_id
             .filter(|platform_id| is_valid_tenant_id(platform_id))
@@ -1412,7 +1462,8 @@ mod tests {
                         async move {
                             assert!(headers.get("x-operator-id").is_none());
                             assert!(headers.get("x-platform-id").is_none());
-                            assert_eq!(body["action"].as_str(), Some(REPRESENTATIVE_ACTION));
+                            assert!(TENANT_DISCOVERY_ACTIONS
+                                .contains(&body["action"].as_str().unwrap()));
                             let platform_id = body["platformId"].as_str().unwrap().to_string();
                             recorded.lock().unwrap().push(body);
                             match table.iter().find(|(id, _)| *id == platform_id) {
@@ -1442,9 +1493,95 @@ mod tests {
                 "id": id,
                 "name": format!("Tenant {id}"),
                 "platformId": platform_id,
+                "switchable": true,
             }),
-            None => json!({"id": id, "name": format!("Tenant {id}")}),
+            None => json!({
+                "id": id,
+                "name": format!("Tenant {id}"),
+                "switchable": false,
+            }),
         }
+    }
+
+    #[test]
+    fn decodes_core_bootstrap_snake_case_and_requires_switchable() {
+        let root = tenant_id('r');
+        let platform = tenant_id('p');
+        let child = tenant_id('c');
+        let non_switchable = tenant_id('n');
+        let body = json!({
+            "user": {
+                "id": "us_fixture",
+                "sub": "subject-fixture",
+                "email": "operator@example.test",
+                "username": "courseboard-user",
+                "onboarding_completed": true
+            },
+            "default_tenant_id": child,
+            "tenants": [
+                {
+                    "id": root,
+                    "name": "Root",
+                    "parent_tenant_id": null,
+                    "depth": 0,
+                    "ancestor_path": [],
+                    "relative_role": "host",
+                    "host_id": root,
+                    "platform_id": null,
+                    "switchable": false
+                },
+                {
+                    "id": platform,
+                    "name": "Platform",
+                    "parent_tenant_id": root,
+                    "depth": 1,
+                    "ancestor_path": [{"id": root, "name": "Root"}],
+                    "relative_role": "platform",
+                    "host_id": root,
+                    "platform_id": platform,
+                    "switchable": true
+                },
+                {
+                    "id": child,
+                    "name": "Child",
+                    "parent_tenant_id": platform,
+                    "depth": 2,
+                    "ancestor_path": [
+                        {"id": root, "name": "Root"},
+                        {"id": platform, "name": "Platform"}
+                    ],
+                    "relative_role": "member",
+                    "host_id": root,
+                    "platform_id": platform,
+                    "switchable": true
+                },
+                {
+                    "id": non_switchable,
+                    "name": "Hidden",
+                    "parent_tenant_id": platform,
+                    "depth": 2,
+                    "ancestor_path": [],
+                    "relative_role": "member",
+                    "host_id": root,
+                    "platform_id": platform,
+                    "switchable": false
+                }
+            ]
+        });
+
+        let (user, tenants) = decode_platform_profile(body.to_string().as_bytes()).unwrap();
+
+        assert_eq!(user.onboarding_completed, Some(true));
+        assert_eq!(
+            tenants
+                .iter()
+                .map(|tenant| (tenant.id.as_str(), tenant.platform_id.as_str()))
+                .collect::<Vec<_>>(),
+            vec![
+                (platform.as_str(), platform.as_str()),
+                (child.as_str(), platform.as_str())
+            ]
+        );
     }
 
     #[tokio::test]
@@ -1494,12 +1631,120 @@ mod tests {
         assert_eq!(profile.default_tenant_id, None);
         assert_eq!(profile.partial, None);
         let bodies = check_bodies.lock().unwrap();
-        assert_eq!(bodies.len(), 2);
+        assert_eq!(bodies.len(), TENANT_DISCOVERY_ACTIONS.len() * 2);
         let for_a = bodies
             .iter()
             .find(|body| body["platformId"] == json!(platform_a))
             .unwrap();
         assert_eq!(for_a["tenantIds"], json!([tenant_1, tenant_3]));
+        let actions_for_a: HashSet<&str> = bodies
+            .iter()
+            .filter(|body| body["platformId"] == json!(platform_a))
+            .map(|body| body["action"].as_str().unwrap())
+            .collect();
+        assert_eq!(
+            actions_for_a,
+            TENANT_DISCOVERY_ACTIONS.iter().copied().collect()
+        );
+    }
+
+    #[tokio::test]
+    async fn policy_source_discovers_fee_only_tenants_without_the_golf_action() {
+        let platform = tenant_id('p');
+        let fee_list_tenant = tenant_id('f');
+        let fee_manage_tenant = tenant_id('m');
+        let me_body = json!({
+            "user": {"id": "us_fixture", "username": "fee-only-user"},
+            "tenants": [
+                platform_me_tenant(&fee_list_tenant, Some(&platform)),
+                platform_me_tenant(&fee_manage_tenant, Some(&platform))
+            ],
+        });
+        let actions = Arc::new(std::sync::Mutex::new(Vec::<String>::new()));
+        let recorded = actions.clone();
+        let fee_list_tenant_for_handler = fee_list_tenant.clone();
+        let fee_manage_tenant_for_handler = fee_manage_tenant.clone();
+        let app = Router::new()
+            .route(
+                PLATFORM_PROFILE_PATH,
+                get(move |headers: HeaderMap| {
+                    let me_body = me_body.clone();
+                    async move {
+                        assert_eq!(
+                            headers
+                                .get(header::AUTHORIZATION)
+                                .and_then(|value| value.to_str().ok()),
+                            Some("Bearer accepted-fixture")
+                        );
+                        assert!(headers.get("x-operator-id").is_none());
+                        assert!(headers.get("x-platform-id").is_none());
+                        axum::Json(me_body)
+                    }
+                }),
+            )
+            .route(
+                CHECK_TENANTS_PATH,
+                axum::routing::post(
+                    move |headers: HeaderMap, axum::Json(body): axum::Json<Value>| {
+                        let recorded = recorded.clone();
+                        let fee_list_tenant = fee_list_tenant_for_handler.clone();
+                        let fee_manage_tenant = fee_manage_tenant_for_handler.clone();
+                        async move {
+                            assert_eq!(
+                                headers
+                                    .get(header::AUTHORIZATION)
+                                    .and_then(|value| value.to_str().ok()),
+                                Some("Bearer accepted-fixture")
+                            );
+                            let action = body["action"].as_str().unwrap();
+                            recorded.lock().unwrap().push(action.to_string());
+                            let allowed = match action {
+                                CANCELLATION_FEE_LIST_ACTION => vec![fee_list_tenant],
+                                CANCELLATION_FEE_MANAGE_ACTION => {
+                                    vec![fee_manage_tenant]
+                                }
+                                REPRESENTATIVE_ACTION => Vec::new(),
+                                _ => panic!("unexpected discovery action {action}"),
+                            };
+                            axum::Json(json!({"allowedTenantIds": allowed}))
+                        }
+                    },
+                ),
+            );
+        let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let address = listener.local_addr().unwrap();
+        tokio::spawn(async move {
+            axum::serve(listener, app).await.unwrap();
+        });
+
+        let client = ProfileClient::with_timeout("http://field.invalid", Duration::from_secs(1))
+            .unwrap()
+            .with_operators_base(&format!("http://{address}"))
+            .unwrap()
+            .with_tenant_source(TenantSource::Policy);
+        let profile = client.get_profile("Bearer accepted-fixture").await.unwrap();
+
+        assert_eq!(
+            profile
+                .tenants
+                .iter()
+                .map(|tenant| tenant.id.as_str())
+                .collect::<Vec<_>>(),
+            vec![fee_list_tenant.as_str(), fee_manage_tenant.as_str()]
+        );
+        assert!(profile
+            .tenants
+            .iter()
+            .all(|tenant| tenant.platform_id.as_deref() == Some(platform.as_str())));
+        assert_eq!(profile.default_tenant_id, None);
+        let observed: HashSet<String> = actions.lock().unwrap().iter().cloned().collect();
+        assert_eq!(
+            observed,
+            TENANT_DISCOVERY_ACTIONS
+                .iter()
+                .map(|action| (*action).to_string())
+                .collect()
+        );
     }
 
     /// An answer whose shape we do not recognise must not read as "this user
@@ -1508,7 +1753,7 @@ mod tests {
     /// second would hide every tenant from every operator if the contract
     /// ever changed under us.
     #[tokio::test]
-    async fn an_unrecognised_check_tenants_answer_degrades_instead_of_hiding_everything() {
+    async fn an_unrecognised_check_tenants_answer_fails_closed_for_retry() {
         use axum::Json;
         let platform = tenant_id('p');
         let tenant = tenant_id('a');
@@ -1542,21 +1787,14 @@ mod tests {
             .unwrap()
             .with_tenant_source(TenantSource::Policy);
 
-        let profile = client.get_profile("Bearer accepted-fixture").await.unwrap();
-
-        assert_eq!(
-            profile
-                .tenants
-                .iter()
-                .map(|tenant| tenant.id.as_str())
-                .collect::<Vec<_>>(),
-            vec![tenant.as_str()]
-        );
-        assert_eq!(profile.partial, Some(true));
+        assert!(matches!(
+            client.get_profile("Bearer accepted-fixture").await,
+            Err(ProfileProxyError::UpstreamRequest)
+        ));
     }
 
     #[tokio::test]
-    async fn policy_source_keeps_a_platform_unfiltered_when_its_check_fails() {
+    async fn policy_source_fails_closed_when_a_platform_check_fails() {
         let platform_a = tenant_id('p');
         let platform_b = tenant_id('q');
         let tenant_1 = tenant_id('a');
@@ -1578,21 +1816,10 @@ mod tests {
             .unwrap()
             .with_tenant_source(TenantSource::Policy);
 
-        let profile = client.get_profile("Bearer accepted-fixture").await.unwrap();
-
-        // Platform B could not be checked: its tenant stays listed and the
-        // response says the list is partial. Platform A answered "none".
-        assert_eq!(
-            profile
-                .tenants
-                .iter()
-                .map(|tenant| tenant.id.as_str())
-                .collect::<Vec<_>>(),
-            vec![tenant_2.as_str()]
-        );
-        assert_eq!(profile.partial, Some(true));
-        // Exactly one surviving tenant still becomes the default.
-        assert_eq!(profile.default_tenant_id, Some(tenant_2));
+        assert!(matches!(
+            client.get_profile("Bearer accepted-fixture").await,
+            Err(ProfileProxyError::UpstreamRequest)
+        ));
     }
 
     #[tokio::test]
