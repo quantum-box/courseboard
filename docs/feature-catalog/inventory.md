@@ -179,6 +179,10 @@ tachyon iac apply --file .tachyon/manifests/courseboard-product-features.yml
 ### ガード（既定 off）
 
 - env `COURSEBOARD_FEATURE_DELIVERY_ENFORCEMENT` = `off`（既定）/ `shadow` / `enforce`。未知の値は `enforce`。
+- env `COURSEBOARD_FEATURE_DELIVERY_ENFORCE_PLATFORMS` = platform テナント ID のカンマ区切り（既定は空）。リクエストの `x-platform-id` がここにあれば、デプロイ全体のモードに関係なく `enforce` で判定する。1 つのデプロイが本番と sandbox の platform を両方受け持つので、本番を `shadow` のまま sandbox だけプランを効かせるためのもの。
+  - テナント ID の形でない値は警告を出して無視する（打ち間違いで別の platform を絞らないため）。
+  - 載っていない platform の判定がデプロイのモードより厳しくなることはない。ヘッダーで決めるので、境界ではなく段階的に有効にするためのスイッチとして使う。
+  - 画面（`/v1/course/feature-deliveries/evaluate`）も同じ platform の判定を返すので、その platform では未提供の画面が隠れる。
 - API: `course_authz` の内側（IAM を通った後、handler の直前）で、ルートの key と、その `requiredFeatureKeys` 全部を Core の `featureDeliveryValues` に 1 回の batch で問い合わせる。`enabled && resolved` 以外は 403（`FEATURE_NOT_PROVIDED` / `FEATURE_DELIVERY_UNRESOLVED` / `FEATURE_DELIVERY_UNAVAILABLE` / `FEATURE_ROUTE_UNCLASSIFIED`）。`off` は Core を呼ばない。
 - `shadow` はリクエストを一切変えない（本文も読まない）。Core の判定 1 回ごとに Field の lease が書かれるので、判定するのは一部だけにする。
   - 判定する割合は `COURSEBOARD_FEATURE_DELIVERY_SHADOW_SAMPLE_RATE`（0〜1、既定 `0.01`）。
