@@ -1775,7 +1775,8 @@ async fn build_app_with_pool(config: RuntimeConfig, pool: MySqlPool) -> anyhow::
                     )),
                     feature_delivery::DeliveryEnforcement::from_env(),
                 )
-                .with_enforce_platforms(feature_delivery::enforce_platforms_from_env()),
+                .with_enforce_platforms(feature_delivery::enforce_platforms_from_env())
+                .with_enforce_tenants(feature_delivery::enforce_tenants_from_env()),
             )
             .with_profile_client(profile_client)
             .with_course_authorization(Arc::new(authorization.course_authorization))

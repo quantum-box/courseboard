@@ -19,13 +19,14 @@
 //! sampled share of decisions alongside the handler and only logs them (see
 //! [`DeliverySampler`]). The same switch tells the SPA whether to hide screens.
 //!
-//! [`DELIVERY_ENFORCE_PLATFORMS_ENV`] lists platform tenants whose requests
-//! are enforced whatever the deployment mode is. One deployment serves both
-//! the production and the sandbox platform, so a sandbox tenant can run with
-//! its plan applied while production tenants stay in `shadow`. The platform
-//! comes from the request's `x-platform-id`; this is a rollout switch, not a
-//! boundary, and a request outside the listed platforms is never decided
-//! more strictly than the deployment mode.
+//! [`DELIVERY_ENFORCE_PLATFORMS_ENV`] and [`DELIVERY_ENFORCE_TENANTS_ENV`]
+//! list platform and operator tenants whose requests are enforced whatever
+//! the deployment mode is. One deployment serves both the production and the
+//! sandbox platform, so a sandbox tenant can run with its plan applied while
+//! production tenants stay in `shadow`. The tenants come from the request's
+//! `x-platform-id` and `x-operator-id`; this is a rollout switch, not a
+//! boundary, and a request outside the lists is never decided more strictly
+//! than the deployment mode.
 
 pub mod catalog;
 pub mod routes;
@@ -76,6 +77,8 @@ pub const SHADOW_EVALUATION_BUDGET: Duration = Duration::from_secs(1);
 pub const DELIVERY_ENFORCEMENT_ENV: &str = "COURSEBOARD_FEATURE_DELIVERY_ENFORCEMENT";
 /// Comma-separated platform tenant IDs whose requests are always enforced.
 pub const DELIVERY_ENFORCE_PLATFORMS_ENV: &str = "COURSEBOARD_FEATURE_DELIVERY_ENFORCE_PLATFORMS";
+/// Comma-separated operator tenant IDs whose requests are always enforced.
+pub const DELIVERY_ENFORCE_TENANTS_ENV: &str = "COURSEBOARD_FEATURE_DELIVERY_ENFORCE_TENANTS";
 const MAX_EVALUATE_KEYS: usize = 64;
 
 /// How the guard treats a denial.
@@ -120,10 +123,10 @@ impl DeliveryEnforcement {
     }
 }
 
-/// The platforms named by [`DELIVERY_ENFORCE_PLATFORMS_ENV`]. An entry that
-/// is not a tenant ID is dropped with a warning: a typo must not enforce an
-/// unintended platform, and it cannot loosen the deployment mode either.
-pub fn parse_enforce_platforms(value: Option<&str>) -> HashSet<String> {
+/// The tenant IDs named by an enforce list. An entry that is not a tenant ID
+/// is dropped with a warning: a typo must not enforce an unintended tenant,
+/// and it cannot loosen the deployment mode either.
+pub fn parse_enforce_tenant_ids(setting: &str, value: Option<&str>) -> HashSet<String> {
     value
         .unwrap_or_default()
         .split(',')
@@ -134,15 +137,22 @@ pub fn parse_enforce_platforms(value: Option<&str>) -> HashSet<String> {
                 && entry.starts_with("tn_")
                 && entry[3..].chars().all(|ch| ch.is_ascii_alphanumeric());
             if !valid {
-                tracing::warn!(
-                    value = *entry,
-                    "ignoring a non-tenant entry in {DELIVERY_ENFORCE_PLATFORMS_ENV}"
-                );
+                tracing::warn!(value = *entry, setting, "ignoring a non-tenant entry");
             }
             valid
         })
         .map(ToOwned::to_owned)
         .collect()
+}
+
+/// The platforms named by [`DELIVERY_ENFORCE_PLATFORMS_ENV`].
+pub fn parse_enforce_platforms(value: Option<&str>) -> HashSet<String> {
+    parse_enforce_tenant_ids(DELIVERY_ENFORCE_PLATFORMS_ENV, value)
+}
+
+/// The operators named by [`DELIVERY_ENFORCE_TENANTS_ENV`].
+pub fn parse_enforce_tenants(value: Option<&str>) -> HashSet<String> {
+    parse_enforce_tenant_ids(DELIVERY_ENFORCE_TENANTS_ENV, value)
 }
 
 pub fn enforce_platforms_from_env() -> HashSet<String> {
@@ -151,6 +161,10 @@ pub fn enforce_platforms_from_env() -> HashSet<String> {
             .ok()
             .as_deref(),
     )
+}
+
+pub fn enforce_tenants_from_env() -> HashSet<String> {
+    parse_enforce_tenants(std::env::var(DELIVERY_ENFORCE_TENANTS_ENV).ok().as_deref())
 }
 
 /// One canonical decision from Core.
@@ -402,6 +416,7 @@ pub struct FeatureDeliveryGuard {
     evaluator: Arc<dyn FeatureDeliveryEvaluator>,
     enforcement: DeliveryEnforcement,
     enforce_platforms: Arc<HashSet<String>>,
+    enforce_tenants: Arc<HashSet<String>>,
     sampler: Arc<DeliverySampler>,
     shadow_budget: Duration,
 }
@@ -416,6 +431,7 @@ impl FeatureDeliveryGuard {
             evaluator,
             enforcement,
             enforce_platforms: Arc::new(HashSet::new()),
+            enforce_tenants: Arc::new(HashSet::new()),
             sampler: Arc::new(DeliverySampler::from_env()),
             shadow_budget: SHADOW_EVALUATION_BUDGET,
         }
@@ -424,6 +440,12 @@ impl FeatureDeliveryGuard {
     /// Enforce every request from these platforms (see the module docs).
     pub fn with_enforce_platforms(mut self, platforms: HashSet<String>) -> Self {
         self.enforce_platforms = Arc::new(platforms);
+        self
+    }
+
+    /// Enforce every request from these operators (see the module docs).
+    pub fn with_enforce_tenants(mut self, tenants: HashSet<String>) -> Self {
+        self.enforce_tenants = Arc::new(tenants);
         self
     }
 
@@ -464,18 +486,23 @@ impl FeatureDeliveryGuard {
         self.enforcement
     }
 
-    /// The mode for one request: `enforce` for a listed platform, otherwise
-    /// the deployment mode.
+    /// The mode for one request: `enforce` for a listed platform or
+    /// operator, otherwise the deployment mode.
     pub fn enforcement_for(&self, headers: &HeaderMap) -> DeliveryEnforcement {
-        let platform = headers
-            .get("x-platform-id")
-            .and_then(|value| value.to_str().ok())
-            .map(str::trim);
-        match platform {
-            Some(platform) if self.enforce_platforms.contains(platform) => {
-                DeliveryEnforcement::Enforce
-            }
-            _ => self.enforcement,
+        let header = |name: &str| {
+            headers
+                .get(name)
+                .and_then(|value| value.to_str().ok())
+                .map(str::trim)
+        };
+        let listed_platform =
+            header("x-platform-id").is_some_and(|id| self.enforce_platforms.contains(id));
+        let listed_tenant =
+            header("x-operator-id").is_some_and(|id| self.enforce_tenants.contains(id));
+        if listed_platform || listed_tenant {
+            DeliveryEnforcement::Enforce
+        } else {
+            self.enforcement
         }
     }
 

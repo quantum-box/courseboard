@@ -205,6 +205,13 @@ spec:
               value: shadow
             - name: COURSEBOARD_FEATURE_DELIVERY_SHADOW_SAMPLE_RATE
               value: "0.01"
+            # Enforce only these operators whatever the mode above is
+            # (src/feature_delivery/mod.rs). The CourseBoard cancellation-fee
+            # sandbox tenant on the Tachyon dev platform runs with its plan
+            # applied; every other tenant stays in `shadow`. Roll back by
+            # removing the entry.
+            - name: COURSEBOARD_FEATURE_DELIVERY_ENFORCE_TENANTS
+              value: tn_01m5kn5rn6vsms2xs7tj5kksqp
         preview:
           # Tachyon provisions an isolated database and scoped user for each PR.
           # DATABASE_URL is injected from the matching PR-scoped secret.

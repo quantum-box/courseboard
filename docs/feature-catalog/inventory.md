@@ -179,6 +179,7 @@ tachyon iac apply --file .tachyon/manifests/courseboard-product-features.yml
 ### ガード（既定 off）
 
 - env `COURSEBOARD_FEATURE_DELIVERY_ENFORCEMENT` = `off`（既定）/ `shadow` / `enforce`。未知の値は `enforce`。
+- env `COURSEBOARD_FEATURE_DELIVERY_ENFORCE_TENANTS` = 利用者（operator）テナント ID のカンマ区切り（既定は空）。リクエストの `x-operator-id` がここにあれば `enforce` で判定する。同じ platform のほかのテナントは変わらない。本番では CourseBoard キャンセル料 Sandbox（`tn_01m5kn5rn6vsms2xs7tj5kksqp`）だけを入れている。
 - env `COURSEBOARD_FEATURE_DELIVERY_ENFORCE_PLATFORMS` = platform テナント ID のカンマ区切り（既定は空）。リクエストの `x-platform-id` がここにあれば、デプロイ全体のモードに関係なく `enforce` で判定する。1 つのデプロイが本番と sandbox の platform を両方受け持つので、本番を `shadow` のまま sandbox だけプランを効かせるためのもの。
   - テナント ID の形でない値は警告を出して無視する（打ち間違いで別の platform を絞らないため）。
   - 載っていない platform の判定がデプロイのモードより厳しくなることはない。ヘッダーで決めるので、境界ではなく段階的に有効にするためのスイッチとして使う。

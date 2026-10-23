@@ -1639,3 +1639,51 @@ async fn the_spa_sees_enforce_only_on_a_listed_platform() {
         serde_json::json!({ "enforcement": "shadow", "values": [] })
     );
 }
+
+const SANDBOX_TENANT: &str = "tn_01m5kn5rn6vsms2xs7tj5kksqp";
+const OTHER_SANDBOX_TENANT: &str = "tn_01ktc0vhb73v95zf3bmsnq85j7";
+
+fn on_tenant(mut request: Request<Body>, tenant: &str) -> Request<Body> {
+    request
+        .headers_mut()
+        .insert("x-operator-id", tenant.parse().unwrap());
+    request
+}
+
+#[tokio::test]
+async fn a_listed_tenant_is_enforced_while_its_platform_neighbours_stay_in_shadow() {
+    let evaluator = Arc::new(ScriptedEvaluator::with(&[
+        ("courseboard.tee_sheet", true, true),
+        ("courseboard.courses", false, true),
+    ]));
+    let pool = sqlx::MySqlPool::connect_lazy("mysql://root@127.0.0.1:4000/courseboard_test")
+        .expect("lazy pool");
+    let state = AppState::new(pool, Arc::new(StaticBearerVerifier::new(TOKEN.to_string())))
+        .with_feature_delivery(
+            guard_of(evaluator, DeliveryEnforcement::Shadow)
+                .with_enforce_tenants(parse_enforce_tenants(Some(SANDBOX_TENANT))),
+        );
+    let app = guarded_app(state);
+    let listed = app
+        .clone()
+        .oneshot(on_platform(
+            on_tenant(request(Method::GET, "/v1/course/tee-sheet"), SANDBOX_TENANT),
+            SANDBOX_PLATFORM,
+        ))
+        .await
+        .unwrap();
+    assert_eq!(listed.status(), StatusCode::FORBIDDEN);
+    assert_eq!(body_json(listed).await["code"], "FEATURE_NOT_PROVIDED");
+
+    let neighbour = app
+        .oneshot(on_platform(
+            on_tenant(
+                request(Method::GET, "/v1/course/tee-sheet"),
+                OTHER_SANDBOX_TENANT,
+            ),
+            SANDBOX_PLATFORM,
+        ))
+        .await
+        .unwrap();
+    assert_eq!(neighbour.status(), StatusCode::OK);
+}
