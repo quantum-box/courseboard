@@ -15,13 +15,13 @@ COPY src ./src
 
 RUN cargo build --release --locked
 
-FROM node:22-bookworm AS ui_builder
+FROM node:24.22.1-bookworm AS ui_builder
 
 WORKDIR /app/desktop
 
-COPY desktop/package.json desktop/package-lock.json ./
+COPY desktop/package.json desktop/package-lock.json desktop/.npmrc ./
 # native-ui itself is resolved from the pinned Git revision in package.json.
-RUN npm install --no-audit --no-fund
+RUN node --version && npm ci --no-audit --no-fund
 
 COPY desktop/index.html desktop/tsconfig.json desktop/tsconfig.node.json desktop/vite.config.ts ./
 COPY desktop/postcss.config.cjs desktop/tailwind.config.ts ./
