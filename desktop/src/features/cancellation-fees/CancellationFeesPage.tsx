@@ -1909,7 +1909,10 @@ function NewCancellationFeeContent({
                   value={customerName}
                   required
                   disabled={createRecovery !== null}
-                  onChange={event => setCustomerName(event.target.value)}
+                  onChange={event => {
+                    setCustomerName(event.target.value)
+                    setCustomer(null)
+                  }}
                 />
               )}
             </Field>

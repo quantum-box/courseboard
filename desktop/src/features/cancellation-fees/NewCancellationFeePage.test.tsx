@@ -263,6 +263,41 @@ describe('the recipient name without the customer ledger', () => {
     expect(screen.queryByRole('button', { name: /台帳に登録/ })).toBeNull()
   })
 
+  it('bills the typed name after the customer ledger is withdrawn from the plan', async () => {
+    configureTestUser('user_test')
+    vi.stubGlobal('crypto', { randomUUID: () => '123e4567-e89b-42d3-a456-426614174000' })
+    actions[FIELD_ACTIONS.listCustomers] = true
+    api.courseboard.mockResolvedValue({ items: [{ id: 'cus_1', name: '山田 太郎' }], total: 1 })
+    api.field.mockResolvedValue(invoice({ status: 'Draft', smsDeliveryStatus: null }))
+    const page = (provided: readonly string[]) => (
+      <I18nextProvider i18n={i18next}>
+        <TooltipProvider>
+          <MockFeatureDeliveryProvider provided={provided}>
+            <NewCancellationFeePage />
+          </MockFeatureDeliveryProvider>
+        </TooltipProvider>
+      </I18nextProvider>
+    )
+    const view = render(page(['courseboard.cancellation_fee', 'courseboard.customers']))
+    fireEvent.change(screen.getByLabelText('請求先の名前', { exact: false }), {
+      target: { value: '山田' },
+    })
+    fireEvent.click(await screen.findByRole('button', { name: /山田 太郎/ }))
+
+    view.rerender(page(['courseboard.cancellation_fee']))
+    fireEvent.click(checkbox(/請求書と支払いリンク/))
+    fireEvent.change(screen.getByLabelText('請求先の名前', { exact: false }), {
+      target: { value: '佐藤 花子' },
+    })
+    fireEvent.click(screen.getByRole('button', { name: '送る内容を確認する' }))
+    await screen.findByText('この内容で送ります')
+    fireEvent.click(screen.getByRole('button', { name: '請求を作って送る' }))
+
+    await waitFor(() => expect(api.field.mock.calls.some(call => call[0] === '/v1/cancellation-fees')).toBe(true))
+    const create = api.field.mock.calls.find(call => call[0] === '/v1/cancellation-fees')!
+    expect(bodyOf(create).billTo.name).toBe('佐藤 花子')
+  })
+
   it('does not start a customer, reservation, or order read from URL parameters', async () => {
     window.history.replaceState(
       null,
