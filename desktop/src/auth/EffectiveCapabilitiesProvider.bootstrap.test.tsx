@@ -372,6 +372,22 @@ describe('EffectiveCapabilitiesProvider revocation', () => {
     expect(screen.queryByTestId('fee-screen')).toBeNull()
   })
 
+  it('lets a first load slower than the period finish', async () => {
+    const slow = deferred<typeof feeListCapabilities>()
+    harness.api.mockReturnValueOnce(slow.promise).mockResolvedValue(feeListCapabilities)
+    renderFeeScreen()
+
+    await act(async () => {
+      vi.advanceTimersByTime(150_000)
+    })
+    fireEvent.focus(window)
+    expect(harness.api).toHaveBeenCalledTimes(1)
+    expect(screen.getByTestId('capability-loading')).toBeTruthy()
+
+    await act(async () => slow.resolve(feeListCapabilities))
+    expect(screen.getByTestId('fee-screen')).toBeTruthy()
+  })
+
   it('closes the open screen when a refresh hangs past two minutes, and lets retry replace it', async () => {
     const hung = deferred<typeof feeListCapabilities>()
     harness.api.mockResolvedValueOnce(feeListCapabilities)

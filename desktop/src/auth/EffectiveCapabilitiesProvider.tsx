@@ -244,30 +244,28 @@ export function EffectiveCapabilitiesProvider({ children }: { children: ReactNod
         })
     }
 
-    const load = () => {
-      if (pending) {
-        // A slow refresh finishes instead of being restarted every period,
-        // but only while the decision on screen is within its age.
-        if (fresh()) return
-        pending.abort()
-        pending = null
-        if (showing) {
-          close(INCOMPLETE_CAPABILITY_SNAPSHOT)
-          return
-        }
+    // Background refreshes never restart a slow request, so an answer that
+    // takes longer than a period still lands. Only an explicit retry replaces
+    // it; a decision on screen still closes once it outlives its age.
+    const load = (replace: boolean) => {
+      if (pending && !replace) {
+        if (showing && !fresh()) close(INCOMPLETE_CAPABILITY_SNAPSHOT)
+        return
       }
+      pending?.abort()
       start()
     }
+    const background = () => load(false)
 
     setState({ tenantId, userId, data: null, error: null, loading: true })
-    loadRef.current = load
+    loadRef.current = () => load(true)
     start()
-    const interval = window.setInterval(load, REFRESH_INTERVAL_MS)
-    window.addEventListener('focus', load)
+    const interval = window.setInterval(background, REFRESH_INTERVAL_MS)
+    window.addEventListener('focus', background)
     return () => {
       pending?.abort()
       window.clearInterval(interval)
-      window.removeEventListener('focus', load)
+      window.removeEventListener('focus', background)
       loadRef.current = () => {}
     }
   }, [tenantId, userId])
