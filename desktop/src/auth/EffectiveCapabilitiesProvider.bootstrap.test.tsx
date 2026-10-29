@@ -207,14 +207,18 @@ const feeListRevoked = {
   cancellationFees: { list: false, manage: false },
 }
 
-function renderFeeScreen() {
-  return render(
+function feeScreen() {
+  return (
     <EffectiveCapabilitiesProvider>
       <CapabilityGate route="cancellation-fees">
         <div data-testid="fee-screen">fees</div>
       </CapabilityGate>
-    </EffectiveCapabilitiesProvider>,
+    </EffectiveCapabilitiesProvider>
   )
+}
+
+function renderFeeScreen() {
+  return render(feeScreen())
 }
 
 async function flush() {
@@ -295,30 +299,161 @@ describe('EffectiveCapabilitiesProvider revocation', () => {
     expect(screen.getByRole('alert')).toBeTruthy()
   })
 
-  it('drops a late refresh answer from the previous tenant', async () => {
+  it('keeps the open screen through failed refreshes within two minutes of the last answer', async () => {
+    harness.api.mockResolvedValueOnce(feeListCapabilities)
+      .mockRejectedValueOnce(new Error('Request failed with 503'))
+      .mockRejectedValueOnce(new Error('Request failed with 503'))
+    renderFeeScreen()
+    await flush()
+
+    await act(async () => {
+      vi.advanceTimersByTime(60_000)
+    })
+    await flush()
+    await act(async () => {
+      vi.advanceTimersByTime(59_999)
+    })
+    fireEvent.focus(window)
+    await flush()
+
+    expect(harness.api).toHaveBeenCalledTimes(3)
+    expect(screen.getByTestId('fee-screen')).toBeTruthy()
+    expect(screen.queryByTestId('capability-error')).toBeNull()
+  })
+
+  it('closes the open screen once refreshes keep failing past two minutes, and reopens on the next answer', async () => {
+    harness.api.mockResolvedValueOnce(feeListCapabilities)
+      .mockRejectedValueOnce(new Error('Request failed with 503'))
+      .mockRejectedValueOnce(new Error('Request failed with 503'))
+      .mockRejectedValueOnce(new Error('Request failed with 503'))
+      .mockResolvedValueOnce(feeListCapabilities)
+    renderFeeScreen()
+    await flush()
+
+    await act(async () => {
+      vi.advanceTimersByTime(60_000)
+    })
+    await flush()
+    expect(screen.getByTestId('fee-screen')).toBeTruthy()
+
+    await act(async () => {
+      vi.advanceTimersByTime(60_001)
+    })
+    fireEvent.focus(window)
+    await flush()
+
+    expect(harness.api).toHaveBeenCalledTimes(4)
+    expect(screen.queryByTestId('fee-screen')).toBeNull()
+    expect(screen.getByTestId('capability-error')).toBeTruthy()
+
+    fireEvent.focus(window)
+    await flush()
+    expect(screen.getByTestId('fee-screen')).toBeTruthy()
+  })
+
+  it('lets a refresh slower than the period finish instead of restarting it', async () => {
+    const slow = deferred<typeof feeListCapabilities>()
+    harness.api.mockResolvedValueOnce(feeListCapabilities)
+      .mockReturnValueOnce(slow.promise)
+      .mockResolvedValue(feeListCapabilities)
+    renderFeeScreen()
+    await flush()
+
+    await act(async () => {
+      vi.advanceTimersByTime(60_000)
+    })
+    await act(async () => {
+      vi.advanceTimersByTime(60_000)
+    })
+    expect(harness.api).toHaveBeenCalledTimes(2)
+    expect(screen.getByTestId('fee-screen')).toBeTruthy()
+
+    await act(async () => slow.resolve(feeListRevoked))
+    expect(screen.queryByTestId('fee-screen')).toBeNull()
+  })
+
+  it('closes the open screen when a refresh hangs past two minutes of the last answer', async () => {
+    const hung = deferred<typeof feeListCapabilities>()
+    harness.api.mockResolvedValueOnce(feeListCapabilities).mockReturnValueOnce(hung.promise)
+    renderFeeScreen()
+    await flush()
+
+    await act(async () => {
+      vi.advanceTimersByTime(120_000)
+    })
+    expect(screen.getByTestId('fee-screen')).toBeTruthy()
+
+    await act(async () => {
+      vi.advanceTimersByTime(60_000)
+    })
+    expect(harness.api).toHaveBeenCalledTimes(2)
+    expect(screen.queryByTestId('fee-screen')).toBeNull()
+    expect(screen.getByTestId('capability-error')).toBeTruthy()
+
+    await act(async () => hung.resolve(feeListCapabilities))
+    expect(screen.getByTestId('fee-screen')).toBeTruthy()
+  })
+
+  it('drops a late answer from an earlier visit when switching tenants away and back', async () => {
     const lateRefresh = deferred<typeof feeListCapabilities>()
-    const nextTenant = deferred<typeof feeListCapabilities>()
-    harness.api.mockResolvedValueOnce(feeListRevoked)
+    const tenantB = deferred<typeof feeListCapabilities>()
+    const tenantAAgain = deferred<typeof feeListCapabilities>()
+    harness.api.mockResolvedValueOnce(feeListCapabilities)
       .mockReturnValueOnce(lateRefresh.promise)
-      .mockReturnValueOnce(nextTenant.promise)
+      .mockReturnValueOnce(tenantB.promise)
+      .mockReturnValueOnce(tenantAAgain.promise)
     const view = renderFeeScreen()
     await flush()
     fireEvent.focus(window)
     await flush()
 
     harness.tenantId = 'tenant-b'
-    view.rerender(
-      <EffectiveCapabilitiesProvider>
-        <CapabilityGate route="cancellation-fees">
-          <div data-testid="fee-screen">fees</div>
-        </CapabilityGate>
-      </EffectiveCapabilitiesProvider>,
-    )
-    await act(async () => lateRefresh.resolve(feeListCapabilities))
+    view.rerender(feeScreen())
+    harness.tenantId = 'tenant-a'
+    view.rerender(feeScreen())
+    await act(async () => tenantAAgain.resolve(feeListRevoked))
     expect(screen.queryByTestId('fee-screen')).toBeNull()
 
-    await act(async () => nextTenant.resolve(feeListRevoked))
+    await act(async () => lateRefresh.resolve(feeListCapabilities))
     expect(screen.queryByTestId('fee-screen')).toBeNull()
-    expect(harness.api).toHaveBeenCalledTimes(3)
+    expect(harness.api).toHaveBeenCalledTimes(4)
+  })
+
+  it('keeps tenant B\'s late answer out of tenant A after switching back', async () => {
+    const tenantB = deferred<typeof feeListCapabilities>()
+    const tenantAAgain = deferred<typeof feeListCapabilities>()
+    harness.api.mockResolvedValueOnce(feeListCapabilities)
+      .mockReturnValueOnce(tenantB.promise)
+      .mockReturnValueOnce(tenantAAgain.promise)
+    const view = renderFeeScreen()
+    await flush()
+
+    harness.tenantId = 'tenant-b'
+    view.rerender(feeScreen())
+    harness.tenantId = 'tenant-a'
+    view.rerender(feeScreen())
+    await act(async () => tenantAAgain.resolve(feeListCapabilities))
+    expect(screen.getByTestId('fee-screen')).toBeTruthy()
+
+    await act(async () => tenantB.resolve(feeListRevoked))
+    expect(screen.getByTestId('fee-screen')).toBeTruthy()
+    expect(screen.queryByTestId('capability-loading')).toBeNull()
+  })
+
+  it('stops refreshing after unmount', async () => {
+    harness.api.mockResolvedValue(feeListCapabilities)
+    const view = renderFeeScreen()
+    await flush()
+    expect(harness.api).toHaveBeenCalledTimes(1)
+
+    view.unmount()
+    expect(vi.getTimerCount()).toBe(0)
+    await act(async () => {
+      vi.advanceTimersByTime(300_000)
+    })
+    fireEvent.focus(window)
+    await flush()
+
+    expect(harness.api).toHaveBeenCalledTimes(1)
   })
 })

@@ -4,6 +4,7 @@ import {
   useContext,
   useEffect,
   useMemo,
+  useRef,
   useState,
   type ReactNode,
 } from 'react'
@@ -173,6 +174,8 @@ const INCOMPLETE_CAPABILITY_SNAPSHOT = new Error('Capability snapshot is unavail
 
 /** The same cadence as the plan's feature delivery, so a revoked action and a revoked feature close a screen alike. */
 const REFRESH_INTERVAL_MS = 60_000
+/** Two refresh periods: one dropped refresh leaves an open form alone, but a decision Field has not reconfirmed for longer closes its screen. */
+const MAX_SNAPSHOT_AGE_MS = 2 * REFRESH_INTERVAL_MS
 
 /**
  * Resolves Field's effective actions for the selected tenant and user, and
@@ -193,58 +196,70 @@ export function EffectiveCapabilitiesProvider({ children }: { children: ReactNod
     error: null,
     loading: true,
   })
-  const [attempt, setAttempt] = useState(0)
-  const refresh = useCallback(() => setAttempt(value => value + 1), [])
+  const loadRef = useRef(() => {})
+  const refresh = useCallback(() => loadRef.current(), [])
 
   useEffect(() => {
-    const interval = window.setInterval(refresh, REFRESH_INTERVAL_MS)
-    window.addEventListener('focus', refresh)
-    return () => {
-      window.clearInterval(interval)
-      window.removeEventListener('focus', refresh)
-    }
-  }, [refresh])
-
-  useEffect(() => {
-    const controller = new AbortController()
     if (!tenantId || !userId) {
       setState({ tenantId: '', userId: '', data: null, error: null, loading: false })
-      return () => controller.abort()
+      return
     }
 
-    const sameScope = (current: CapabilitiesState) => (
-      current.tenantId === tenantId && current.userId === userId && Boolean(current.data)
-    )
-    // A background refresh keeps the snapshot it is replacing, so an open
-    // form is not unmounted; a tenant or user switch drops it at once.
-    setState(current => sameScope(current)
-      ? current
-      : { tenantId, userId, data: null, error: null, loading: true })
-    void courseboardApiJson<unknown>('/v1/field/client-capabilities', {
-      signal: controller.signal,
-    })
-      .then(raw => {
-        if (!controller.signal.aborted) {
+    // Everything below belongs to this tenant and user. Switching either
+    // aborts it, so a late answer for the previous principal is dropped.
+    const controller = new AbortController()
+    let inFlight = false
+    let confirmedAt: number | null = null
+    const expired = () => confirmedAt !== null && Date.now() - confirmedAt > MAX_SNAPSHOT_AGE_MS
+    const close = (error: Error) => {
+      setState({ tenantId, userId, data: null, error, loading: false })
+    }
+
+    const load = () => {
+      if (inFlight) {
+        // A slow answer is left to finish instead of being restarted every
+        // period, but it cannot extend the last decision past its age.
+        if (expired()) close(INCOMPLETE_CAPABILITY_SNAPSHOT)
+        return
+      }
+      inFlight = true
+      const startedAt = Date.now()
+      setState(current => current.data
+        ? current
+        : { tenantId, userId, data: null, error: null, loading: true })
+      void courseboardApiJson<unknown>('/v1/field/client-capabilities', {
+        signal: controller.signal,
+      })
+        .then(raw => {
+          if (controller.signal.aborted) return
+          confirmedAt = startedAt
           setState({ tenantId, userId, data: normalizeCapabilities(raw), error: null, loading: false })
-        }
-      })
-      .catch(error => {
-        if (!controller.signal.aborted) {
-          // A failed refresh keeps the last snapshot Field answered for this
-          // principal. It never widens access, and the next refresh retries.
-          setState(current => sameScope(current)
-            ? current
-            : {
-                tenantId,
-                userId,
-                data: null,
-                error: error instanceof Error ? error : new Error(String(error)),
-                loading: false,
-              })
-        }
-      })
-    return () => controller.abort()
-  }, [attempt, tenantId, userId])
+        })
+        .catch(error => {
+          if (controller.signal.aborted) return
+          // A decision within its age survives a failed refresh. Past it, or
+          // with none yet, the screen closes behind a retry; it never widens.
+          if (confirmedAt === null || expired()) {
+            close(error instanceof Error ? error : new Error(String(error)))
+          }
+        })
+        .finally(() => {
+          inFlight = false
+        })
+    }
+
+    setState({ tenantId, userId, data: null, error: null, loading: true })
+    loadRef.current = load
+    load()
+    const interval = window.setInterval(load, REFRESH_INTERVAL_MS)
+    window.addEventListener('focus', load)
+    return () => {
+      controller.abort()
+      window.clearInterval(interval)
+      window.removeEventListener('focus', load)
+      loadRef.current = () => {}
+    }
+  }, [tenantId, userId])
 
   const snapshotReady = state.tenantId === tenantId
     && state.userId === userId
