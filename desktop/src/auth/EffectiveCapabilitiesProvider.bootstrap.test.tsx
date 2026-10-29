@@ -227,9 +227,36 @@ async function flush() {
   })
 }
 
+async function advance(ms: number) {
+  await act(async () => {
+    vi.advanceTimersByTime(ms)
+  })
+}
+
+function setVisibility(state: DocumentVisibilityState) {
+  Object.defineProperty(document, 'visibilityState', { configurable: true, get: () => state })
+  fireEvent(document, new Event('visibilitychange'))
+}
+
+function hangs() {
+  return deferred<typeof feeListCapabilities>().promise
+}
+
 describe('EffectiveCapabilitiesProvider revocation', () => {
   beforeEach(() => {
-    vi.useFakeTimers()
+    // The age limit runs on the monotonic clock, so it has to move with the timers.
+    vi.useFakeTimers({
+      toFake: [
+        'setTimeout',
+        'clearTimeout',
+        'setInterval',
+        'clearInterval',
+        'setImmediate',
+        'clearImmediate',
+        'Date',
+        'performance',
+      ],
+    })
     harness.api.mockReset()
     harness.navigate.mockReset()
     harness.route = 'cancellation-fees'
@@ -239,6 +266,7 @@ describe('EffectiveCapabilitiesProvider revocation', () => {
 
   afterEach(() => {
     cleanup()
+    Reflect.deleteProperty(document, 'visibilityState')
     vi.useRealTimers()
   })
 
@@ -248,9 +276,7 @@ describe('EffectiveCapabilitiesProvider revocation', () => {
     await flush()
     expect(screen.getByTestId('fee-screen')).toBeTruthy()
 
-    await act(async () => {
-      vi.advanceTimersByTime(60_000)
-    })
+    await advance(60_000)
     await flush()
 
     expect(harness.api).toHaveBeenCalledTimes(2)
@@ -271,9 +297,24 @@ describe('EffectiveCapabilitiesProvider revocation', () => {
     expect(screen.queryByTestId('fee-screen')).toBeNull()
   })
 
+  it('closes an open protected screen when the window becomes visible again and the refresh revokes its action', async () => {
+    harness.api.mockResolvedValueOnce(feeListCapabilities).mockResolvedValueOnce(feeListRevoked)
+    renderFeeScreen()
+    await flush()
+
+    setVisibility('hidden')
+    await flush()
+    expect(harness.api).toHaveBeenCalledTimes(1)
+    expect(screen.getByTestId('fee-screen')).toBeTruthy()
+
+    setVisibility('visible')
+    await flush()
+    expect(harness.api).toHaveBeenCalledTimes(2)
+    expect(screen.queryByTestId('fee-screen')).toBeNull()
+  })
+
   it('keeps the open screen mounted while a background refresh is in flight', async () => {
-    const refresh = deferred<typeof feeListCapabilities>()
-    harness.api.mockResolvedValueOnce(feeListCapabilities).mockReturnValueOnce(refresh.promise)
+    harness.api.mockResolvedValueOnce(feeListCapabilities).mockReturnValueOnce(hangs())
     renderFeeScreen()
     await flush()
 
@@ -306,13 +347,9 @@ describe('EffectiveCapabilitiesProvider revocation', () => {
     renderFeeScreen()
     await flush()
 
-    await act(async () => {
-      vi.advanceTimersByTime(60_000)
-    })
+    await advance(60_000)
     await flush()
-    await act(async () => {
-      vi.advanceTimersByTime(59_999)
-    })
+    await advance(59_999)
     fireEvent.focus(window)
     await flush()
 
@@ -330,15 +367,11 @@ describe('EffectiveCapabilitiesProvider revocation', () => {
     renderFeeScreen()
     await flush()
 
-    await act(async () => {
-      vi.advanceTimersByTime(60_000)
-    })
+    await advance(60_000)
     await flush()
     expect(screen.getByTestId('fee-screen')).toBeTruthy()
 
-    await act(async () => {
-      vi.advanceTimersByTime(60_001)
-    })
+    await advance(60_001)
     fireEvent.focus(window)
     await flush()
 
@@ -359,12 +392,9 @@ describe('EffectiveCapabilitiesProvider revocation', () => {
     renderFeeScreen()
     await flush()
 
-    await act(async () => {
-      vi.advanceTimersByTime(60_000)
-    })
-    await act(async () => {
-      vi.advanceTimersByTime(60_000)
-    })
+    await advance(90_000)
+    fireEvent.focus(window)
+    await advance(29_999)
     expect(harness.api).toHaveBeenCalledTimes(2)
     expect(screen.getByTestId('fee-screen')).toBeTruthy()
 
@@ -377,9 +407,7 @@ describe('EffectiveCapabilitiesProvider revocation', () => {
     harness.api.mockReturnValueOnce(slow.promise).mockResolvedValue(feeListCapabilities)
     renderFeeScreen()
 
-    await act(async () => {
-      vi.advanceTimersByTime(150_000)
-    })
+    await advance(90_000)
     fireEvent.focus(window)
     expect(harness.api).toHaveBeenCalledTimes(1)
     expect(screen.getByTestId('capability-loading')).toBeTruthy()
@@ -388,7 +416,28 @@ describe('EffectiveCapabilitiesProvider revocation', () => {
     expect(screen.getByTestId('fee-screen')).toBeTruthy()
   })
 
-  it('closes the open screen when a refresh hangs past two minutes, and lets retry replace it', async () => {
+  it('offers retry once a first load outlives two minutes, and opens on the next timely answer', async () => {
+    const hung = deferred<typeof feeListCapabilities>()
+    const next = deferred<typeof feeListCapabilities>()
+    harness.api.mockReturnValueOnce(hung.promise).mockReturnValueOnce(next.promise)
+    renderFeeScreen()
+
+    await advance(119_999)
+    expect(screen.getByTestId('capability-loading')).toBeTruthy()
+
+    await advance(1)
+    expect(harness.api).toHaveBeenCalledTimes(2)
+    expect(screen.queryByTestId('capability-loading')).toBeNull()
+    expect(screen.getByTestId('capability-error')).toBeTruthy()
+
+    await act(async () => hung.resolve(feeListCapabilities))
+    expect(screen.queryByTestId('fee-screen')).toBeNull()
+
+    await act(async () => next.resolve(feeListCapabilities))
+    expect(screen.getByTestId('fee-screen')).toBeTruthy()
+  })
+
+  it('closes the open screen the moment a hung refresh lets its decision turn two minutes old, and lets retry replace it', async () => {
     const hung = deferred<typeof feeListCapabilities>()
     harness.api.mockResolvedValueOnce(feeListCapabilities)
       .mockReturnValueOnce(hung.promise)
@@ -396,14 +445,10 @@ describe('EffectiveCapabilitiesProvider revocation', () => {
     renderFeeScreen()
     await flush()
 
-    await act(async () => {
-      vi.advanceTimersByTime(120_000)
-    })
+    await advance(119_999)
     expect(screen.getByTestId('fee-screen')).toBeTruthy()
 
-    await act(async () => {
-      vi.advanceTimersByTime(60_000)
-    })
+    await advance(1)
     expect(harness.api).toHaveBeenCalledTimes(2)
     expect(screen.queryByTestId('fee-screen')).toBeNull()
     expect(screen.getByTestId('capability-error')).toBeTruthy()
@@ -415,6 +460,99 @@ describe('EffectiveCapabilitiesProvider revocation', () => {
 
     await act(async () => hung.resolve(feeListRevoked))
     expect(screen.getByTestId('fee-screen')).toBeTruthy()
+  })
+
+  it('closes the open screen when its decision turns two minutes old between refreshes', async () => {
+    harness.api.mockResolvedValueOnce(feeListCapabilities)
+      .mockResolvedValueOnce(feeListCapabilities)
+      .mockReturnValueOnce(hangs())
+    renderFeeScreen()
+    await flush()
+
+    await advance(30_000)
+    fireEvent.focus(window)
+    await flush()
+    await advance(119_999)
+    expect(harness.api).toHaveBeenCalledTimes(3)
+    expect(screen.getByTestId('fee-screen')).toBeTruthy()
+
+    await advance(1)
+    expect(screen.queryByTestId('fee-screen')).toBeNull()
+    expect(screen.getByTestId('capability-error')).toBeTruthy()
+  })
+
+  it('keeps the screen closed when a hung refresh answers only after its decision would be two minutes old', async () => {
+    const hung = deferred<typeof feeListCapabilities>()
+    harness.api.mockResolvedValueOnce(feeListCapabilities)
+      .mockReturnValueOnce(hung.promise)
+      .mockReturnValueOnce(hangs())
+    renderFeeScreen()
+    await flush()
+
+    await advance(180_000)
+    await act(async () => hung.resolve(feeListCapabilities))
+
+    expect(screen.queryByTestId('fee-screen')).toBeNull()
+    expect(screen.getByTestId('capability-error')).toBeTruthy()
+  })
+
+  it('reopens on a refresh that answers after the screen closed but within two minutes of being sent', async () => {
+    const slow = deferred<typeof feeListCapabilities>()
+    harness.api.mockResolvedValueOnce(feeListCapabilities)
+      .mockReturnValueOnce(slow.promise)
+      .mockReturnValueOnce(hangs())
+    renderFeeScreen()
+    await flush()
+
+    await advance(150_000)
+    expect(screen.queryByTestId('fee-screen')).toBeNull()
+
+    await act(async () => slow.resolve(feeListCapabilities))
+    expect(screen.getByTestId('fee-screen')).toBeTruthy()
+
+    await advance(30_000)
+    expect(screen.queryByTestId('fee-screen')).toBeNull()
+    expect(screen.getByTestId('capability-error')).toBeTruthy()
+  })
+
+  it('keeps retry on screen while background refreshes run after closing, and reopens on their answer', async () => {
+    const failing = deferred<typeof feeListCapabilities>()
+    const recovering = deferred<typeof feeListCapabilities>()
+    harness.api.mockResolvedValueOnce(feeListCapabilities)
+      .mockReturnValueOnce(failing.promise)
+      .mockReturnValueOnce(hangs())
+      .mockReturnValueOnce(recovering.promise)
+    renderFeeScreen()
+    await flush()
+
+    await advance(121_000)
+    await act(async () => failing.reject(new Error('Request failed with 503')))
+    expect(screen.getByTestId('capability-error')).toBeTruthy()
+
+    await advance(59_000)
+    expect(harness.api).toHaveBeenCalledTimes(3)
+    expect(screen.getByTestId('capability-error')).toBeTruthy()
+    expect(screen.queryByTestId('capability-loading')).toBeNull()
+
+    await advance(180_000)
+    expect(harness.api).toHaveBeenCalledTimes(4)
+    expect(screen.getByTestId('capability-error')).toBeTruthy()
+    expect(screen.queryByTestId('capability-loading')).toBeNull()
+
+    await act(async () => recovering.resolve(feeListCapabilities))
+    expect(screen.getByTestId('fee-screen')).toBeTruthy()
+  })
+
+  it('still closes when the wall clock is set back', async () => {
+    harness.api.mockResolvedValueOnce(feeListCapabilities).mockReturnValue(hangs())
+    renderFeeScreen()
+    await flush()
+
+    vi.setSystemTime(Date.now() - 60 * 60_000)
+    await advance(180_000)
+
+    expect(screen.queryByTestId('fee-screen')).toBeNull()
+    expect(screen.getByTestId('capability-error')).toBeTruthy()
   })
 
   it('drops a late answer from an earlier visit when switching tenants away and back', async () => {
@@ -471,10 +609,9 @@ describe('EffectiveCapabilitiesProvider revocation', () => {
 
     view.unmount()
     expect(vi.getTimerCount()).toBe(0)
-    await act(async () => {
-      vi.advanceTimersByTime(300_000)
-    })
+    await advance(300_000)
     fireEvent.focus(window)
+    setVisibility('visible')
     await flush()
 
     expect(harness.api).toHaveBeenCalledTimes(1)
