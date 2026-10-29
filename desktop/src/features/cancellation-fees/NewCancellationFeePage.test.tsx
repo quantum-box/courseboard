@@ -6,20 +6,23 @@ import { I18nextProvider } from 'react-i18next'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 
 import { ApiError, configureApiAuth } from '../../api'
+import { FIELD_ACTIONS } from '../../auth/capabilityRoutes'
+import { MockFeatureDeliveryProvider } from '../../feature-delivery/FeatureDelivery'
 import { i18next } from '../../i18n'
 import { PageReloadProvider } from '../../lib/pageReload'
 import { CancellationFeeDetailPage, CancellationFeesPage, NewCancellationFeePage } from './CancellationFeesPage'
 
-const api = vi.hoisted(() => ({ field: vi.fn() }))
+const api = vi.hoisted(() => ({ field: vi.fn(), courseboard: vi.fn() }))
 const router = vi.hoisted(() => ({ navigate: vi.fn() }))
 const access = vi.hoisted(() => ({ list: true, manage: true }))
+const actions = vi.hoisted(() => ({}) as Record<string, boolean | null>)
 
 vi.mock('../../auth/EffectiveCapabilitiesProvider', async importOriginal => {
   const actual = await importOriginal<typeof import('../../auth/EffectiveCapabilitiesProvider')>()
   return {
     ...actual,
     useEffectiveCapabilities: () => ({ capabilities: {
-      actions: {},
+      actions,
       navigation: { otherBusinessAccess: false },
       cancellationFees: access,
       agentDocuments: {
@@ -33,11 +36,12 @@ vi.mock('../../auth/EffectiveCapabilitiesProvider', async importOriginal => {
 beforeEach(() => {
   access.list = true
   access.manage = true
+  for (const action of Object.keys(actions)) delete actions[action]
 })
 
 vi.mock('../../api', async importOriginal => {
   const actual = await importOriginal<typeof import('../../api')>()
-  return { ...actual, fieldApiJson: api.field }
+  return { ...actual, fieldApiJson: api.field, courseboardApiJson: api.courseboard }
 })
 
 vi.mock('../../lib/router', async importOriginal => {
@@ -50,6 +54,7 @@ afterEach(() => {
   configureApiAuth(null)
   sessionStorage.clear()
   api.field.mockReset()
+  api.courseboard.mockReset()
   router.navigate.mockReset()
   vi.unstubAllGlobals()
 })
@@ -187,6 +192,90 @@ function configureTestUser(userId: string) {
     onForbidden: vi.fn(),
   })
 }
+
+const CUSTOMER_SEARCH_SETTLE_MS = 400
+
+function customerRequests() {
+  return api.courseboard.mock.calls.filter(call => String(call[0]).startsWith('/v1/course/customers'))
+}
+
+function renderPageWithDelivery(provided: readonly string[]) {
+  return render(
+    <I18nextProvider i18n={i18next}>
+      <TooltipProvider>
+        <MockFeatureDeliveryProvider provided={provided}>
+          <NewCancellationFeePage />
+        </MockFeatureDeliveryProvider>
+      </TooltipProvider>
+    </I18nextProvider>,
+  )
+}
+
+async function typeRecipientName(name: string) {
+  fireEvent.change(screen.getByLabelText('請求先の名前', { exact: false }), {
+    target: { value: name },
+  })
+  await new Promise(resolve => setTimeout(resolve, CUSTOMER_SEARCH_SETTLE_MS))
+}
+
+describe('the recipient name without the customer ledger', () => {
+  afterEach(() => {
+    window.history.replaceState(null, '', '/')
+  })
+
+  it('does not search customers for a fee-only operator who types a name', async () => {
+    renderPageWithDelivery(['courseboard.cancellation_fee'])
+    await typeRecipientName('山田')
+
+    expect(customerRequests()).toHaveLength(0)
+    expect(api.courseboard).not.toHaveBeenCalled()
+    expect((screen.getByLabelText('請求先の名前', { exact: false }) as HTMLInputElement).value).toBe('山田')
+  })
+
+  it('does not search customers when the plan leaves out the customer ledger', async () => {
+    actions[FIELD_ACTIONS.listCustomers] = true
+    renderPageWithDelivery(['courseboard.cancellation_fee'])
+    await typeRecipientName('山田')
+
+    expect(customerRequests()).toHaveLength(0)
+  })
+
+  it('does not search customers when the customer action is denied', async () => {
+    actions[FIELD_ACTIONS.listCustomers] = false
+    renderPageWithDelivery(['courseboard.cancellation_fee', 'courseboard.customers'])
+    await typeRecipientName('山田')
+
+    expect(customerRequests()).toHaveLength(0)
+  })
+
+  it('offers ledger candidates when the customer action and the customer ledger are both present', async () => {
+    actions[FIELD_ACTIONS.listCustomers] = true
+    api.courseboard.mockResolvedValue({ items: [{ id: 'cus_1', name: '山田 太郎' }], total: 1 })
+    renderPageWithDelivery(['courseboard.cancellation_fee', 'courseboard.customers'])
+    fireEvent.change(screen.getByLabelText('請求先の名前', { exact: false }), {
+      target: { value: '山田' },
+    })
+
+    expect(await screen.findByRole('button', { name: /山田 太郎/ })).toBeTruthy()
+    expect(customerRequests().map(call => String(call[0]))).toEqual([
+      expect.stringContaining('/v1/course/customers?'),
+    ])
+    expect(screen.queryByRole('button', { name: /台帳に登録/ })).toBeNull()
+  })
+
+  it('does not start a customer, reservation, or order read from URL parameters', async () => {
+    window.history.replaceState(
+      null,
+      '',
+      '/#/cancellation-fees/new?customerId=cus_1&reservationId=rsv_1&orderId=ord_1&name=%E5%B1%B1%E7%94%B0',
+    )
+    renderPageWithDelivery(['courseboard.cancellation_fee'])
+    await new Promise(resolve => setTimeout(resolve, CUSTOMER_SEARCH_SETTLE_MS))
+
+    expect(api.courseboard).not.toHaveBeenCalled()
+    expect(api.field).not.toHaveBeenCalled()
+  })
+})
 
 describe('the dedicated cancellation fee form', () => {
   beforeEach(() => {
@@ -765,9 +854,9 @@ describe('the dedicated cancellation fee form', () => {
     expect(api.field.mock.calls.filter(call => String(call[0]).endsWith('/send'))).toHaveLength(1)
   })
 
-  it('disables Detail resend and edits for a void invoice', async () => {
+  it.each(['Paid', 'Void'] as const)('disables Detail resend and edits for a %s invoice', async status => {
     api.field.mockResolvedValue(invoice({
-      status: 'Void',
+      status,
       clientEmail: 'customer@example.com',
       emailDeliveryStatus: 'Failed',
       emailDeliveryFailureCode: 'BillingNotReady',
