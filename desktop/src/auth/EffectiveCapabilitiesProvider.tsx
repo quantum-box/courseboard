@@ -206,55 +206,66 @@ export function EffectiveCapabilitiesProvider({ children }: { children: ReactNod
     }
 
     // Everything below belongs to this tenant and user. Switching either
-    // aborts it, so a late answer for the previous principal is dropped.
-    const controller = new AbortController()
-    let inFlight = false
+    // aborts the pending request, so a late answer for the previous principal
+    // is dropped.
+    let pending: AbortController | null = null
+    let showing = false
     let confirmedAt: number | null = null
-    const expired = () => confirmedAt !== null && Date.now() - confirmedAt > MAX_SNAPSHOT_AGE_MS
+    const fresh = () => confirmedAt !== null && Date.now() - confirmedAt <= MAX_SNAPSHOT_AGE_MS
     const close = (error: Error) => {
+      showing = false
       setState({ tenantId, userId, data: null, error, loading: false })
     }
 
-    const load = () => {
-      if (inFlight) {
-        // A slow answer is left to finish instead of being restarted every
-        // period, but it cannot extend the last decision past its age.
-        if (expired()) close(INCOMPLETE_CAPABILITY_SNAPSHOT)
-        return
-      }
-      inFlight = true
+    const start = () => {
+      const request = new AbortController()
+      pending = request
       const startedAt = Date.now()
       setState(current => current.data
         ? current
         : { tenantId, userId, data: null, error: null, loading: true })
       void courseboardApiJson<unknown>('/v1/field/client-capabilities', {
-        signal: controller.signal,
+        signal: request.signal,
       })
         .then(raw => {
-          if (controller.signal.aborted) return
+          if (request.signal.aborted) return
           confirmedAt = startedAt
+          showing = true
           setState({ tenantId, userId, data: normalizeCapabilities(raw), error: null, loading: false })
         })
         .catch(error => {
-          if (controller.signal.aborted) return
+          if (request.signal.aborted) return
           // A decision within its age survives a failed refresh. Past it, or
           // with none yet, the screen closes behind a retry; it never widens.
-          if (confirmedAt === null || expired()) {
-            close(error instanceof Error ? error : new Error(String(error)))
-          }
+          if (!fresh()) close(error instanceof Error ? error : new Error(String(error)))
         })
         .finally(() => {
-          inFlight = false
+          if (pending === request) pending = null
         })
+    }
+
+    const load = () => {
+      if (pending) {
+        // A slow refresh finishes instead of being restarted every period,
+        // but only while the decision on screen is within its age.
+        if (fresh()) return
+        pending.abort()
+        pending = null
+        if (showing) {
+          close(INCOMPLETE_CAPABILITY_SNAPSHOT)
+          return
+        }
+      }
+      start()
     }
 
     setState({ tenantId, userId, data: null, error: null, loading: true })
     loadRef.current = load
-    load()
+    start()
     const interval = window.setInterval(load, REFRESH_INTERVAL_MS)
     window.addEventListener('focus', load)
     return () => {
-      controller.abort()
+      pending?.abort()
       window.clearInterval(interval)
       window.removeEventListener('focus', load)
       loadRef.current = () => {}

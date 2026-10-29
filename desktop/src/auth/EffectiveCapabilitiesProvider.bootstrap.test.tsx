@@ -372,9 +372,11 @@ describe('EffectiveCapabilitiesProvider revocation', () => {
     expect(screen.queryByTestId('fee-screen')).toBeNull()
   })
 
-  it('closes the open screen when a refresh hangs past two minutes of the last answer', async () => {
+  it('closes the open screen when a refresh hangs past two minutes, and lets retry replace it', async () => {
     const hung = deferred<typeof feeListCapabilities>()
-    harness.api.mockResolvedValueOnce(feeListCapabilities).mockReturnValueOnce(hung.promise)
+    harness.api.mockResolvedValueOnce(feeListCapabilities)
+      .mockReturnValueOnce(hung.promise)
+      .mockResolvedValueOnce(feeListCapabilities)
     renderFeeScreen()
     await flush()
 
@@ -390,7 +392,12 @@ describe('EffectiveCapabilitiesProvider revocation', () => {
     expect(screen.queryByTestId('fee-screen')).toBeNull()
     expect(screen.getByTestId('capability-error')).toBeTruthy()
 
-    await act(async () => hung.resolve(feeListCapabilities))
+    fireEvent.click(screen.getByRole('button', { name: 'Retry' }))
+    await flush()
+    expect(harness.api).toHaveBeenCalledTimes(3)
+    expect(screen.getByTestId('fee-screen')).toBeTruthy()
+
+    await act(async () => hung.resolve(feeListRevoked))
     expect(screen.getByTestId('fee-screen')).toBeTruthy()
   })
 
