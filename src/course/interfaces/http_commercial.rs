@@ -907,41 +907,37 @@ mod tests {
         }
     }
 
+    const FIELD_TIMEZONE_PATH: &str = "/v1/erp/extensions/golf_course/timezone";
+
     #[derive(Clone)]
     struct FakeField {
         paths: Arc<Mutex<Vec<String>>>,
         refuse: bool,
     }
 
-    async fn extension_status(State(field): State<FakeField>) -> Response {
+    async fn golf_course_timezone(State(field): State<FakeField>) -> Response {
         field
             .paths
             .lock()
             .unwrap()
-            .push("/v1/erp/extensions/status".to_string());
+            .push(FIELD_TIMEZONE_PATH.to_string());
         if field.refuse {
             return (
                 StatusCode::FORBIDDEN,
                 Json(serde_json::json!({
                     "code": "PermissionDenied",
-                    "message": "field:ListReservations is required"
+                    "message": "no reservation or cancellation-fee action"
                 })),
             )
                 .into_response();
         }
-        Json(serde_json::json!({
-            "items": [{
-                "extensionKey": "golf_course",
-                "configJson": { "timezone": "Europe/Berlin", "reservationProducts": [] }
-            }]
-        }))
-        .into_response()
+        Json(serde_json::json!({ "timezone": "Europe/Berlin" })).into_response()
     }
 
     async fn spawn_field(refuse: bool) -> (String, Arc<Mutex<Vec<String>>>) {
         let paths = Arc::new(Mutex::new(Vec::new()));
         let app = Router::new()
-            .route("/v1/erp/extensions/status", get(extension_status))
+            .route(FIELD_TIMEZONE_PATH, get(golf_course_timezone))
             .with_state(FakeField {
                 paths: paths.clone(),
                 refuse,
@@ -998,10 +994,7 @@ mod tests {
         let body = response.into_body().collect().await.unwrap().to_bytes();
         let body: serde_json::Value = serde_json::from_slice(&body).unwrap();
         assert_eq!(body, serde_json::json!({ "timezone": "Europe/Berlin" }));
-        assert_eq!(
-            paths.lock().unwrap().as_slice(),
-            ["/v1/erp/extensions/status"]
-        );
+        assert_eq!(paths.lock().unwrap().as_slice(), [FIELD_TIMEZONE_PATH]);
     }
 
     #[tokio::test]
