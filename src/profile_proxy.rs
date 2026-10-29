@@ -33,6 +33,10 @@ const TENANT_DISCOVERY_ACTIONS: &[&str] = &[
     CANCELLATION_FEE_LIST_ACTION,
     CANCELLATION_FEE_MANAGE_ACTION,
 ];
+/// The actions that add a tenant to the default extension list. ListTeeSheet
+/// is left out: the Golf extension filter already covers that surface.
+const CANCELLATION_FEE_ACTIONS: &[&str] =
+    &[CANCELLATION_FEE_LIST_ACTION, CANCELLATION_FEE_MANAGE_ACTION];
 const MAX_PROFILE_RESPONSE_BYTES: usize = 1024 * 1024;
 const MAX_PROFILE_TENANTS: usize = 500;
 const PROFILE_REQUEST_TIMEOUT: Duration = Duration::from_secs(7);
@@ -41,6 +45,10 @@ const PROFILE_REQUEST_TIMEOUT: Duration = Duration::from_secs(7);
 /// without it Field's tenant policy check denies platform-mismatched tenants.
 const OPERATOR_LOOKUP_TIMEOUT: Duration = Duration::from_secs(3);
 const MAX_OPERATOR_LOOKUPS: usize = 20;
+/// The cancellation-fee additions run beside the extension lookup on every
+/// default `/v1/me`. A slow Core drops the additions instead of slowing the
+/// existing list down.
+const FEE_TENANT_DISCOVERY_TIMEOUT: Duration = Duration::from_secs(3);
 
 #[derive(Clone, Debug)]
 pub struct ProfileClient {
@@ -125,9 +133,11 @@ impl ProfileClient {
 
     async fn get_profile(&self, authorization: &str) -> Result<ProfileResponse, ProfileProxyError> {
         match self.tenant_source {
-            TenantSource::Extension => self.extension_profile(authorization).await,
+            TenantSource::Extension => self.extension_profile_with_fee_tenants(authorization).await,
             TenantSource::Compare => {
-                let profile = self.extension_profile(authorization).await?;
+                let profile = self
+                    .extension_profile_with_fee_tenants(authorization)
+                    .await?;
                 self.spawn_policy_comparison(&profile, authorization);
                 Ok(profile)
             }
@@ -156,6 +166,59 @@ impl ProfileClient {
         let mut profile = decode_and_filter_profile(&body)?;
         self.attach_platform_ids(&mut profile, authorization).await;
         Ok(profile)
+    }
+
+    /// The extension list, plus every switchable tenant that grants a
+    /// cancellation-fee action. Tenants the extension lists are never
+    /// removed. When the fee discovery cannot be verified, only the additions
+    /// are dropped, so the existing list keeps its current behavior.
+    async fn extension_profile_with_fee_tenants(
+        &self,
+        authorization: &str,
+    ) -> Result<ProfileResponse, ProfileProxyError> {
+        let Some(operators_base) = &self.operators_base else {
+            return self.extension_profile(authorization).await;
+        };
+        let (profile, fee_tenants) = futures::join!(
+            self.extension_profile(authorization),
+            tokio::time::timeout(
+                FEE_TENANT_DISCOVERY_TIMEOUT,
+                self.cancellation_fee_tenants(operators_base, authorization)
+            )
+        );
+        let fee_tenants = fee_tenants.unwrap_or_else(|_| Err("timed out".to_string()));
+        let mut profile = profile?;
+        match fee_tenants {
+            Ok(fee_tenants) => add_tenants(&mut profile, fee_tenants),
+            Err(reason) => tracing::warn!(
+                reason,
+                "cancellation-fee tenant discovery failed; serving the extension list only"
+            ),
+        }
+        Ok(profile)
+    }
+
+    async fn cancellation_fee_tenants(
+        &self,
+        operators_base: &Url,
+        authorization: &str,
+    ) -> Result<Vec<ProfileTenant>, String> {
+        let (_, tenants) = self
+            .fetch_platform_profile(operators_base, authorization)
+            .await
+            .map_err(|error| format!("platform profile {}", error.reason()))?;
+        let allowed_ids = self
+            .allowed_tenant_ids(
+                operators_base,
+                &tenants,
+                CANCELLATION_FEE_ACTIONS,
+                authorization,
+            )
+            .await
+            .map_err(|(platform_id, action, reason)| {
+                format!("check-tenants {action} on {platform_id}: {reason}")
+            })?;
+        Ok(keep_allowed(tenants, &allowed_ids))
     }
 
     /// Best-effort per-tenant platform lookup: a failed lookup leaves the
@@ -268,70 +331,24 @@ impl ProfileClient {
         tenants: Vec<PlatformTenant>,
         authorization: &str,
     ) -> Result<ProfileResponse, ProfileProxyError> {
-        let mut platform_order: Vec<String> = Vec::new();
-        for tenant in &tenants {
-            if !platform_order.contains(&tenant.platform_id) {
-                platform_order.push(tenant.platform_id.clone());
-            }
-        }
-        let answers = futures::future::join_all(platform_order.iter().map(|platform_id| {
-            let tenant_ids: Vec<String> = tenants
-                .iter()
-                .filter(|tenant| &tenant.platform_id == platform_id)
-                .map(|tenant| tenant.id.clone())
-                .collect();
-            async move {
-                let mut allowed_ids = HashSet::new();
-                for action in TENANT_DISCOVERY_ACTIONS {
-                    let allowed = self
-                        .check_tenants(
-                            operators_base,
-                            platform_id,
-                            action,
-                            &tenant_ids,
-                            authorization,
-                        )
-                        .await
-                        .map_err(|reason| (platform_id.clone(), *action, reason))?;
-                    // The final tenant filter below is the trust boundary, but
-                    // keeping only requested IDs here makes the union invariant
-                    // explicit and avoids carrying provider extras further.
-                    allowed_ids.extend(
-                        allowed
-                            .into_iter()
-                            .filter(|tenant_id| tenant_ids.iter().any(|id| id == tenant_id)),
-                    );
-                }
-                Ok::<_, (String, &'static str, String)>((platform_id.clone(), allowed_ids))
-            }
-        }))
-        .await;
-
-        let mut allowed_ids: HashSet<String> = HashSet::new();
-        for answer in answers {
-            match answer {
-                Ok((_, platform_allowed_ids)) => allowed_ids.extend(platform_allowed_ids),
-                Err((platform_id, action, reason)) => {
-                    tracing::warn!(
-                        platform_id,
-                        action,
-                        reason,
-                        "check-tenants failed; refusing to discover tenants until it can be retried"
-                    );
-                    return Err(ProfileProxyError::UpstreamRequest);
-                }
-            }
-        }
-
-        let filtered: Vec<ProfileTenant> = tenants
-            .into_iter()
-            .filter(|tenant| allowed_ids.contains(&tenant.id))
-            .map(|tenant| ProfileTenant {
-                id: tenant.id,
-                name: tenant.name,
-                platform_id: Some(tenant.platform_id),
-            })
-            .collect();
+        let allowed_ids = self
+            .allowed_tenant_ids(
+                operators_base,
+                &tenants,
+                TENANT_DISCOVERY_ACTIONS,
+                authorization,
+            )
+            .await
+            .map_err(|(platform_id, action, reason)| {
+                tracing::warn!(
+                    platform_id,
+                    action,
+                    reason,
+                    "check-tenants failed; refusing to discover tenants until it can be retried"
+                );
+                ProfileProxyError::UpstreamRequest
+            })?;
+        let filtered = keep_allowed(tenants, &allowed_ids);
         let default_tenant_id = match filtered.as_slice() {
             [tenant] => Some(tenant.id.clone()),
             _ => None,
@@ -342,6 +359,58 @@ impl ProfileClient {
             default_tenant_id,
             partial: None,
         })
+    }
+
+    /// Group the tenants by platform and ask `check-tenants` for each action.
+    /// A tenant is allowed when any one action allows it. Only requested IDs
+    /// are kept, and the first failed check fails the whole answer.
+    async fn allowed_tenant_ids(
+        &self,
+        operators_base: &Url,
+        tenants: &[PlatformTenant],
+        actions: &'static [&'static str],
+        authorization: &str,
+    ) -> Result<HashSet<String>, (String, &'static str, String)> {
+        let mut platform_order: Vec<&String> = Vec::new();
+        for tenant in tenants {
+            if !platform_order.contains(&&tenant.platform_id) {
+                platform_order.push(&tenant.platform_id);
+            }
+        }
+        let answers = futures::future::join_all(platform_order.into_iter().map(|platform_id| {
+            let tenant_ids: Vec<String> = tenants
+                .iter()
+                .filter(|tenant| &tenant.platform_id == platform_id)
+                .map(|tenant| tenant.id.clone())
+                .collect();
+            async move {
+                let mut allowed_ids = HashSet::new();
+                for action in actions {
+                    let allowed = self
+                        .check_tenants(
+                            operators_base,
+                            platform_id,
+                            action,
+                            &tenant_ids,
+                            authorization,
+                        )
+                        .await
+                        .map_err(|reason| (platform_id.clone(), *action, reason))?;
+                    allowed_ids.extend(
+                        allowed
+                            .into_iter()
+                            .filter(|tenant_id| tenant_ids.contains(tenant_id)),
+                    );
+                }
+                Ok(allowed_ids)
+            }
+        }))
+        .await;
+        let mut allowed_ids = HashSet::new();
+        for answer in answers {
+            allowed_ids.extend(answer?);
+        }
+        Ok(allowed_ids)
     }
 
     /// `POST {tachyon-api}/v1/auth/policies/check-tenants` — which of these
@@ -450,6 +519,36 @@ impl ProfileClient {
                 );
             }
         });
+    }
+}
+
+fn keep_allowed(tenants: Vec<PlatformTenant>, allowed_ids: &HashSet<String>) -> Vec<ProfileTenant> {
+    tenants
+        .into_iter()
+        .filter(|tenant| allowed_ids.contains(&tenant.id))
+        .map(|tenant| ProfileTenant {
+            id: tenant.id,
+            name: tenant.name,
+            platform_id: Some(tenant.platform_id),
+        })
+        .collect()
+}
+
+/// Append the tenants the list does not have yet, after the existing ones.
+/// An existing default stays. A list that was empty gets the single-tenant
+/// default, like the other sources.
+fn add_tenants(profile: &mut ProfileResponse, tenants: Vec<ProfileTenant>) {
+    let was_empty = profile.tenants.is_empty();
+    for tenant in tenants {
+        if !profile.tenants.iter().any(|listed| listed.id == tenant.id) {
+            profile.tenants.push(tenant);
+        }
+    }
+    if was_empty {
+        profile.default_tenant_id = match profile.tenants.as_slice() {
+            [tenant] => Some(tenant.id.clone()),
+            _ => None,
+        };
     }
 }
 
@@ -1933,6 +2032,248 @@ mod tests {
         assert_eq!(profile.tenants.len(), 1);
         assert_eq!(profile.tenants[0].id, enabled);
         assert_eq!(profile.partial, None);
+    }
+
+    async fn extension_profile_against(
+        field_tenants: serde_json::Value,
+        platform_origin: &str,
+    ) -> ProfileResponse {
+        let body = field_profile(field_tenants).to_string().into_bytes();
+        let (field_origin, _) = spawn_fake_field(StatusCode::OK, body, Duration::ZERO).await;
+        ProfileClient::with_timeout(&field_origin, Duration::from_secs(1))
+            .unwrap()
+            .with_operators_base(platform_origin)
+            .unwrap()
+            .with_tenant_source(TenantSource::Extension)
+            .get_profile("Bearer accepted-fixture")
+            .await
+            .unwrap()
+    }
+
+    fn listed_ids(profile: &ProfileResponse) -> Vec<&str> {
+        profile
+            .tenants
+            .iter()
+            .map(|tenant| tenant.id.as_str())
+            .collect()
+    }
+
+    #[tokio::test]
+    async fn extension_source_keeps_a_full_operator_list_and_default() {
+        let platform = tenant_id('p');
+        let golf = tenant_id('a');
+        let without_policy = tenant_id('b');
+        let origin = spawn_platform_granting(
+            json!([
+                platform_me_tenant(&golf, Some(&platform)),
+                platform_me_tenant(&without_policy, Some(&platform)),
+            ]),
+            vec![
+                (REPRESENTATIVE_ACTION, vec![golf.clone()]),
+                (CANCELLATION_FEE_LIST_ACTION, vec![golf.clone()]),
+                (CANCELLATION_FEE_MANAGE_ACTION, vec![golf.clone()]),
+            ],
+        )
+        .await;
+
+        let profile = extension_profile_against(
+            json!([
+                field_tenant(&golf, true),
+                field_tenant(&without_policy, false)
+            ]),
+            &origin,
+        )
+        .await;
+
+        assert_eq!(listed_ids(&profile), vec![golf.as_str()]);
+        assert_eq!(profile.default_tenant_id, Some(golf));
+    }
+
+    #[tokio::test]
+    async fn extension_source_never_drops_a_tenant_the_policy_does_not_grant() {
+        let platform = tenant_id('p');
+        let golf_only = tenant_id('a');
+        let origin = spawn_platform_granting(
+            json!([platform_me_tenant(&golf_only, Some(&platform))]),
+            Vec::new(),
+        )
+        .await;
+
+        let profile =
+            extension_profile_against(json!([field_tenant(&golf_only, true)]), &origin).await;
+
+        assert_eq!(listed_ids(&profile), vec![golf_only.as_str()]);
+        assert_eq!(profile.default_tenant_id, Some(golf_only));
+    }
+
+    #[tokio::test]
+    async fn extension_source_adds_tenants_that_grant_a_cancellation_fee_action() {
+        let platform = tenant_id('p');
+        let fee_list = tenant_id('f');
+        let fee_manage = tenant_id('m');
+        let origin = spawn_platform_granting(
+            json!([
+                platform_me_tenant(&fee_list, Some(&platform)),
+                platform_me_tenant(&fee_manage, Some(&platform)),
+            ]),
+            vec![
+                (CANCELLATION_FEE_LIST_ACTION, vec![fee_list.clone()]),
+                (CANCELLATION_FEE_MANAGE_ACTION, vec![fee_manage.clone()]),
+            ],
+        )
+        .await;
+
+        let profile = extension_profile_against(
+            json!([
+                field_tenant(&fee_list, false),
+                field_tenant(&fee_manage, false)
+            ]),
+            &origin,
+        )
+        .await;
+
+        assert_eq!(
+            listed_ids(&profile),
+            vec![fee_list.as_str(), fee_manage.as_str()]
+        );
+        assert!(profile
+            .tenants
+            .iter()
+            .all(|tenant| tenant.platform_id.as_deref() == Some(platform.as_str())));
+        assert_eq!(profile.default_tenant_id, None);
+    }
+
+    #[tokio::test]
+    async fn a_single_fee_only_tenant_becomes_the_default() {
+        let platform = tenant_id('p');
+        let fee_list = tenant_id('f');
+        let origin = spawn_platform_granting(
+            json!([platform_me_tenant(&fee_list, Some(&platform))]),
+            vec![(CANCELLATION_FEE_LIST_ACTION, vec![fee_list.clone()])],
+        )
+        .await;
+
+        let profile = extension_profile_against(json!([]), &origin).await;
+
+        assert_eq!(listed_ids(&profile), vec![fee_list.as_str()]);
+        assert_eq!(profile.default_tenant_id, Some(fee_list));
+    }
+
+    #[tokio::test]
+    async fn extension_source_adds_no_host_unswitchable_outside_or_tee_sheet_only_tenant() {
+        let root = tenant_id('r');
+        let platform = tenant_id('p');
+        let hidden = tenant_id('n');
+        let tee_sheet_only = tenant_id('t');
+        let outside = tenant_id('o');
+        let golf = tenant_id('a');
+        let mut hidden_member = platform_me_tenant(&hidden, Some(&platform));
+        hidden_member["switchable"] = json!(false);
+        let everything = vec![
+            root.clone(),
+            hidden.clone(),
+            tee_sheet_only.clone(),
+            outside.clone(),
+        ];
+        let origin = spawn_platform_granting(
+            json!([
+                platform_me_tenant(&root, None),
+                hidden_member,
+                platform_me_tenant(&tee_sheet_only, Some(&platform)),
+            ]),
+            vec![
+                (REPRESENTATIVE_ACTION, everything.clone()),
+                (
+                    CANCELLATION_FEE_LIST_ACTION,
+                    vec![root, hidden, outside.clone()],
+                ),
+                (CANCELLATION_FEE_MANAGE_ACTION, vec![outside]),
+            ],
+        )
+        .await;
+
+        let profile = extension_profile_against(json!([field_tenant(&golf, true)]), &origin).await;
+
+        assert_eq!(listed_ids(&profile), vec![golf.as_str()]);
+        assert_eq!(profile.default_tenant_id, Some(golf));
+    }
+
+    #[tokio::test]
+    async fn a_failed_fee_check_serves_the_extension_list_without_additions() {
+        let platform_a = tenant_id('p');
+        let platform_b = tenant_id('q');
+        let golf = tenant_id('a');
+        let fee_on_a = tenant_id('f');
+        let fee_on_b = tenant_id('g');
+        let (origin, check_bodies) = spawn_fake_platform(
+            json!([
+                platform_me_tenant(&fee_on_a, Some(&platform_a)),
+                platform_me_tenant(&fee_on_b, Some(&platform_b)),
+            ]),
+            vec![
+                (platform_a.clone(), Some(vec![fee_on_a.clone()])),
+                (platform_b.clone(), None),
+            ],
+        )
+        .await;
+
+        let profile = extension_profile_against(json!([field_tenant(&golf, true)]), &origin).await;
+
+        assert_eq!(listed_ids(&profile), vec![golf.as_str()]);
+        assert_eq!(profile.default_tenant_id, Some(golf));
+        assert_eq!(profile.partial, None);
+        assert!(check_bodies
+            .lock()
+            .unwrap()
+            .iter()
+            .all(|body| { CANCELLATION_FEE_ACTIONS.contains(&body["action"].as_str().unwrap()) }));
+    }
+
+    #[tokio::test]
+    async fn an_unreachable_platform_profile_serves_the_extension_list() {
+        let golf = tenant_id('a');
+
+        let profile =
+            extension_profile_against(json!([field_tenant(&golf, true)]), "http://127.0.0.1:1")
+                .await;
+
+        assert_eq!(listed_ids(&profile), vec![golf.as_str()]);
+    }
+
+    #[tokio::test]
+    async fn a_slow_platform_profile_does_not_hold_back_the_extension_list() {
+        let golf = tenant_id('a');
+        let app = Router::new().route(
+            PLATFORM_PROFILE_PATH,
+            get(|| async {
+                tokio::time::sleep(Duration::from_secs(30)).await;
+                StatusCode::OK
+            }),
+        );
+        let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let address = listener.local_addr().unwrap();
+        tokio::spawn(async move {
+            axum::serve(listener, app).await.unwrap();
+        });
+        let body = field_profile(json!([field_tenant(&golf, true)]))
+            .to_string()
+            .into_bytes();
+        let (field_origin, _) = spawn_fake_field(StatusCode::OK, body, Duration::ZERO).await;
+        let client = ProfileClient::with_timeout(&field_origin, Duration::from_secs(60))
+            .unwrap()
+            .with_operators_base(&format!("http://{address}"))
+            .unwrap()
+            .with_tenant_source(TenantSource::Extension);
+
+        let started = std::time::Instant::now();
+        let profile = client.get_profile("Bearer accepted-fixture").await.unwrap();
+
+        assert!(
+            started.elapsed() < FEE_TENANT_DISCOVERY_TIMEOUT + Duration::from_secs(2),
+            "{:?}",
+            started.elapsed()
+        );
+        assert_eq!(listed_ids(&profile), vec![golf.as_str()]);
     }
 
     #[test]
