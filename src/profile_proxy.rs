@@ -1747,6 +1747,98 @@ mod tests {
         );
     }
 
+    /// A platform whose `check-tenants` answers per action: each listed action
+    /// allows the given tenants and every other discovery action allows none.
+    async fn spawn_platform_granting(
+        tenants: serde_json::Value,
+        grants: Vec<(&'static str, Vec<String>)>,
+    ) -> String {
+        use axum::Json;
+        let me_body = json!({
+            "user": {"id": "us_fixture", "username": "courseboard-user"},
+            "tenants": tenants,
+        });
+        let grants = Arc::new(grants);
+        let app = Router::new()
+            .route(
+                PLATFORM_PROFILE_PATH,
+                get(move || {
+                    let me_body = me_body.clone();
+                    async move { Json(me_body) }
+                }),
+            )
+            .route(
+                CHECK_TENANTS_PATH,
+                axum::routing::post(move |Json(body): Json<serde_json::Value>| {
+                    let grants = grants.clone();
+                    async move {
+                        let action = body["action"].as_str().unwrap();
+                        assert!(TENANT_DISCOVERY_ACTIONS.contains(&action));
+                        let allowed = grants
+                            .iter()
+                            .find(|(granted, _)| *granted == action)
+                            .map(|(_, tenants)| tenants.clone())
+                            .unwrap_or_default();
+                        Json(json!({"allowedTenantIds": allowed}))
+                    }
+                }),
+            );
+        let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let address = listener.local_addr().unwrap();
+        tokio::spawn(async move {
+            axum::serve(listener, app).await.unwrap();
+        });
+        format!("http://{address}")
+    }
+
+    async fn policy_profile_tenant_ids(
+        tenants: serde_json::Value,
+        grants: Vec<(&'static str, Vec<String>)>,
+    ) -> Vec<String> {
+        let origin = spawn_platform_granting(tenants, grants).await;
+        let client = ProfileClient::with_timeout("http://field.invalid", Duration::from_secs(1))
+            .unwrap()
+            .with_operators_base(&origin)
+            .unwrap()
+            .with_tenant_source(TenantSource::Policy);
+        client
+            .get_profile("Bearer accepted-fixture")
+            .await
+            .unwrap()
+            .tenants
+            .into_iter()
+            .map(|tenant| tenant.id)
+            .collect()
+    }
+
+    #[tokio::test]
+    async fn a_principal_with_only_the_fee_list_action_sees_its_tenant() {
+        let platform = tenant_id('p');
+        let tenant = tenant_id('a');
+
+        let tenants = policy_profile_tenant_ids(
+            json!([platform_me_tenant(&tenant, Some(&platform))]),
+            vec![(CANCELLATION_FEE_LIST_ACTION, vec![tenant.clone()])],
+        )
+        .await;
+
+        assert_eq!(tenants, vec![tenant]);
+    }
+
+    #[tokio::test]
+    async fn a_principal_without_any_discovery_action_sees_no_tenant() {
+        let platform = tenant_id('p');
+        let tenant = tenant_id('a');
+
+        let tenants = policy_profile_tenant_ids(
+            json!([platform_me_tenant(&tenant, Some(&platform))]),
+            Vec::new(),
+        )
+        .await;
+
+        assert!(tenants.is_empty(), "{tenants:?}");
+    }
+
     /// An answer whose shape we do not recognise must not read as "this user
     /// holds nothing anywhere". Empty and unrecognised are identical in the
     /// data and opposite in consequence: the first is a real answer, the

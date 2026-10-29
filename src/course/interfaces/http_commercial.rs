@@ -19,8 +19,9 @@ use super::http::{
     reservation_gateway, ItemsResponse,
 };
 use crate::course::domain::{
-    BudgetAchievement, CourseId, DailyBudget, DailyBudgetQuery, ExtensionStatus, PlayerTagOptions,
-    ReservationPolicy, UpdateExtensionConfig, UpdateReservationPolicy, UpsertDailyBudget,
+    BudgetAchievement, CourseId, DailyBudget, DailyBudgetQuery, ExtensionStatus,
+    GolfCatalogGateway, PlayerTagOptions, ReservationPolicy, UpdateExtensionConfig,
+    UpdateReservationPolicy, UpsertDailyBudget,
 };
 use crate::course::usecase::{
     ExportMonthlySettlementCsvUseCase, GetExtensionStatusUseCase, GetMonthlySettlementUseCase,
@@ -712,15 +713,17 @@ pub async fn get_extension_status(
 /// The tenant's clock, and nothing else of the extension config.
 #[derive(Debug, Serialize, ToSchema)]
 pub struct TenantTimezoneDto {
-    /// IANA zone from the golf extension config, `null` when unset.
-    pub timezone: Option<String>,
+    /// IANA zone from the golf extension config, `Asia/Tokyo` when unset.
+    pub timezone: String,
 }
 
 /// GET /v1/course/tenant-timezone
 ///
 /// What the application shell needs from the extension config. Every feature
-/// reads the tenant's clock, so this stays outside plan delivery, while the
-/// full status and config stay with the reservation-policy feature.
+/// reads the tenant's clock, so this asks for no CourseBoard action of its
+/// own: an operator who holds only the cancellation-fee actions must not need
+/// `ListExtensionStatus` to learn which day it is. Field still authorizes the
+/// underlying config read.
 #[utoipa::path(
     get,
     path = "/v1/course/tenant-timezone",
@@ -728,6 +731,7 @@ pub struct TenantTimezoneDto {
     responses(
         (status = 200, description = "Tenant timezone", body = TenantTimezoneDto),
         (status = 401, description = "Unauthorized", body = ErrorBody),
+        (status = 403, description = "Field refused the config read", body = ErrorBody),
         (status = 424, description = "Upstream provider error", body = ErrorBody),
     ),
     security(("bearer_auth" = []))
@@ -737,18 +741,10 @@ pub async fn get_tenant_timezone(
     headers: HeaderMap,
 ) -> Result<Json<TenantTimezoneDto>, AppError> {
     let credentials = credentials(&state, &headers)?;
-    let status = GetExtensionStatusUseCase::new(commercial_gateway(&state))
-        .execute(credentials)
+    let timezone = catalog_gateway(&state)
+        .get_tenant_timezone(credentials)
         .await
         .map_err(AppError::from)?;
-    let timezone = status
-        .as_ref()
-        .and_then(|status| status.config_json())
-        .and_then(|config| config.get("timezone"))
-        .and_then(Value::as_str)
-        .map(str::trim)
-        .filter(|value| !value.is_empty())
-        .map(ToOwned::to_owned);
     Ok(Json(TenantTimezoneDto { timezone }))
 }
 
@@ -853,4 +849,168 @@ pub async fn replace_player_tag_options(
     Ok(Json(PlayerTagOptionsDto {
         items: stored.options().to_vec(),
     }))
+}
+
+#[cfg(test)]
+mod tests {
+    use std::sync::{Arc, Mutex};
+
+    use async_trait::async_trait;
+    use axum::{
+        body::Body,
+        extract::State,
+        http::{header, Request, StatusCode},
+        response::{IntoResponse, Response},
+        routing::get,
+        Json, Router,
+    };
+    use http_body_util::BodyExt;
+    use sqlx::mysql::{MySqlConnectOptions, MySqlPoolOptions};
+    use tower::ServiceExt;
+
+    use crate::auth::{AuthError, AuthenticatedPrincipal, TokenVerifier};
+    use crate::cancellation_fees::CancellationFeeConfig;
+    use crate::course::domain::{CourseAuthorizer, CourseError, GatewayCredentials};
+    use crate::{build_router, AppState};
+
+    const TOKEN: &str = "fixture-fee-only-token";
+
+    /// A caller who holds no CourseBoard action at all, standing in for an
+    /// operator whose policies grant only the cancellation-fee actions.
+    struct RejectingAuthorizer;
+
+    #[async_trait]
+    impl CourseAuthorizer for RejectingAuthorizer {
+        async fn require(
+            &self,
+            _credentials: GatewayCredentials<'_>,
+            action: &'static str,
+        ) -> Result<(), CourseError> {
+            Err(CourseError::Forbidden(action))
+        }
+    }
+
+    struct FixtureTokenVerifier;
+
+    impl TokenVerifier for FixtureTokenVerifier {
+        fn verify(&self, token: &str) -> Result<AuthenticatedPrincipal, AuthError> {
+            if token == TOKEN {
+                Ok(AuthenticatedPrincipal {
+                    issuer: "fixture".to_string(),
+                    subject: Some("fee-only-user".to_string()),
+                    username: None,
+                    client_id: Some("fixture-client".to_string()),
+                })
+            } else {
+                Err(AuthError::InvalidToken)
+            }
+        }
+    }
+
+    #[derive(Clone)]
+    struct FakeField {
+        paths: Arc<Mutex<Vec<String>>>,
+        refuse: bool,
+    }
+
+    async fn extension_status(State(field): State<FakeField>) -> Response {
+        field
+            .paths
+            .lock()
+            .unwrap()
+            .push("/v1/erp/extensions/status".to_string());
+        if field.refuse {
+            return (
+                StatusCode::FORBIDDEN,
+                Json(serde_json::json!({
+                    "code": "PermissionDenied",
+                    "message": "field:ListReservations is required"
+                })),
+            )
+                .into_response();
+        }
+        Json(serde_json::json!({
+            "items": [{
+                "extensionKey": "golf_course",
+                "configJson": { "timezone": "Europe/Berlin", "reservationProducts": [] }
+            }]
+        }))
+        .into_response()
+    }
+
+    async fn spawn_field(refuse: bool) -> (String, Arc<Mutex<Vec<String>>>) {
+        let paths = Arc::new(Mutex::new(Vec::new()));
+        let app = Router::new()
+            .route("/v1/erp/extensions/status", get(extension_status))
+            .with_state(FakeField {
+                paths: paths.clone(),
+                refuse,
+            });
+        let listener = tokio::net::TcpListener::bind("127.0.0.1:0")
+            .await
+            .expect("bind fake Field API");
+        let address = listener.local_addr().expect("fake Field API address");
+        tokio::spawn(async move {
+            axum::serve(listener, app)
+                .await
+                .expect("serve fake Field API");
+        });
+        (format!("http://{address}"), paths)
+    }
+
+    fn app(field_api_url: String) -> Router {
+        let pool = MySqlPoolOptions::new().connect_lazy_with(
+            MySqlConnectOptions::new()
+                .host("127.0.0.1")
+                .username("root")
+                .database("unused_tenant_timezone_test"),
+        );
+        build_router(
+            AppState::new_with_cancellation_fee_config(
+                pool,
+                Arc::new(FixtureTokenVerifier),
+                CancellationFeeConfig {
+                    field_api_url: Some(field_api_url),
+                    ..CancellationFeeConfig::default()
+                },
+            )
+            .with_course_authorizer(Arc::new(RejectingAuthorizer)),
+        )
+    }
+
+    fn timezone_request() -> Request<Body> {
+        Request::builder()
+            .uri("/v1/course/tenant-timezone")
+            .header(header::AUTHORIZATION, format!("Bearer {TOKEN}"))
+            .header("x-operator-id", format!("tn_01{}", "a".repeat(24)))
+            .header("x-platform-id", format!("tn_01{}", "p".repeat(24)))
+            .body(Body::empty())
+            .unwrap()
+    }
+
+    #[tokio::test]
+    async fn tenant_timezone_needs_no_courseboard_action() {
+        let (origin, paths) = spawn_field(false).await;
+
+        let response = app(origin).oneshot(timezone_request()).await.unwrap();
+
+        assert_eq!(response.status(), StatusCode::OK);
+        let body = response.into_body().collect().await.unwrap().to_bytes();
+        let body: serde_json::Value = serde_json::from_slice(&body).unwrap();
+        assert_eq!(body, serde_json::json!({ "timezone": "Europe/Berlin" }));
+        assert_eq!(
+            paths.lock().unwrap().as_slice(),
+            ["/v1/erp/extensions/status"]
+        );
+    }
+
+    #[tokio::test]
+    async fn tenant_timezone_returns_the_field_refusal_as_403() {
+        let (origin, paths) = spawn_field(true).await;
+
+        let response = app(origin).oneshot(timezone_request()).await.unwrap();
+
+        assert_eq!(response.status(), StatusCode::FORBIDDEN);
+        assert_eq!(paths.lock().unwrap().len(), 1);
+    }
 }
