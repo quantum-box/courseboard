@@ -255,7 +255,7 @@ pub use tee_sheet::{
 };
 pub use tenant_timezone::{
     format_datetime_in_timezone, format_tenant_wall_clock, parse_tenant_tee_time,
-    parse_tenant_timezone, tenant_date_at, tenant_day_bounds, tenant_timezone_from_config,
+    parse_tenant_timezone, tenant_date_at, tenant_day_bounds, tenant_timezone_or_default,
     utc_offset_minutes_at, DEFAULT_TIMEZONE,
 };
 pub use visit_checkin::{NewVisitCheckin, VisitCheckin, VisitCheckinRequest};
