@@ -1,5 +1,6 @@
 import {
   createContext,
+  useCallback,
   useContext,
   useEffect,
   useMemo,
@@ -170,10 +171,15 @@ export function capabilitySnapshotReadyForRoute(
 
 const INCOMPLETE_CAPABILITY_SNAPSHOT = new Error('Capability snapshot is unavailable')
 
+/** The same cadence as the plan's feature delivery, so a revoked action and a revoked feature close a screen alike. */
+const REFRESH_INTERVAL_MS = 60_000
+
 /**
- * Resolves Field's effective actions once per selected tenant. Downstream
- * route guards consume this snapshot; fetching it here keeps the decision
- * independent from reservation and extension startup requests.
+ * Resolves Field's effective actions for the selected tenant and user, and
+ * re-reads them every minute and on window focus so a revoked action closes
+ * its screen without a reload. Downstream route guards consume this snapshot;
+ * fetching it here keeps the decision independent from reservation and
+ * extension startup requests.
  */
 export function EffectiveCapabilitiesProvider({ children }: { children: ReactNode }) {
   const { tenant, user } = useAuth()
@@ -188,6 +194,16 @@ export function EffectiveCapabilitiesProvider({ children }: { children: ReactNod
     loading: true,
   })
   const [attempt, setAttempt] = useState(0)
+  const refresh = useCallback(() => setAttempt(value => value + 1), [])
+
+  useEffect(() => {
+    const interval = window.setInterval(refresh, REFRESH_INTERVAL_MS)
+    window.addEventListener('focus', refresh)
+    return () => {
+      window.clearInterval(interval)
+      window.removeEventListener('focus', refresh)
+    }
+  }, [refresh])
 
   useEffect(() => {
     const controller = new AbortController()
@@ -196,7 +212,14 @@ export function EffectiveCapabilitiesProvider({ children }: { children: ReactNod
       return () => controller.abort()
     }
 
-    setState({ tenantId, userId, data: null, error: null, loading: true })
+    const sameScope = (current: CapabilitiesState) => (
+      current.tenantId === tenantId && current.userId === userId && Boolean(current.data)
+    )
+    // A background refresh keeps the snapshot it is replacing, so an open
+    // form is not unmounted; a tenant or user switch drops it at once.
+    setState(current => sameScope(current)
+      ? current
+      : { tenantId, userId, data: null, error: null, loading: true })
     void courseboardApiJson<unknown>('/v1/field/client-capabilities', {
       signal: controller.signal,
     })
@@ -207,13 +230,17 @@ export function EffectiveCapabilitiesProvider({ children }: { children: ReactNod
       })
       .catch(error => {
         if (!controller.signal.aborted) {
-          setState({
-            tenantId,
-            userId,
-            data: null,
-            error: error instanceof Error ? error : new Error(String(error)),
-            loading: false,
-          })
+          // A failed refresh keeps the last snapshot Field answered for this
+          // principal. It never widens access, and the next refresh retries.
+          setState(current => sameScope(current)
+            ? current
+            : {
+                tenantId,
+                userId,
+                data: null,
+                error: error instanceof Error ? error : new Error(String(error)),
+                loading: false,
+              })
         }
       })
     return () => controller.abort()
@@ -247,16 +274,16 @@ export function EffectiveCapabilitiesProvider({ children }: { children: ReactNod
     || state.loading
     || Boolean(startupTarget)
   const gate = currentError
-    ? <ResourceError error={currentError} onRetry={() => setAttempt(value => value + 1)} />
+    ? <ResourceError error={currentError} onRetry={refresh} />
     : incompleteSnapshot
       ? <ResourceError
         error={INCOMPLETE_CAPABILITY_SNAPSHOT}
-        onRetry={() => setAttempt(value => value + 1)}
+        onRetry={refresh}
       />
     : waitingForSnapshot
       ? <LoadingState />
       : !state.data
-        ? <ResourceError error={INCOMPLETE_CAPABILITY_SNAPSHOT} onRetry={() => setAttempt(value => value + 1)} />
+        ? <ResourceError error={INCOMPLETE_CAPABILITY_SNAPSHOT} onRetry={refresh} />
         : children
   return (
     <EffectiveCapabilitiesContext.Provider value={value}>

@@ -135,6 +135,24 @@ describe('AppShell layout: the new-version banner stays inside the content colum
     expect(options.some(text => text?.includes(i18next.t('nav:items.cancellation-fees.label')))).toBe(true)
   })
 
+  it('drops a saved business pin when its action is revoked during the session', async () => {
+    localStorage.setItem('courseboard.sidebar.pinned', JSON.stringify(['golf/ledger']))
+    const shell = () => (
+      <I18nextProvider i18n={i18next}><AuthProvider><AuthGate>
+        <AppShell route="cancellation-fees"><div>session content</div></AppShell>
+      </AuthGate></AuthProvider></I18nextProvider>
+    )
+    const view = render(shell())
+    await screen.findByText('session content')
+    expect(screen.queryAllByRole('button', { name: i18next.t('nav:items.golf/ledger.label') }).length).toBeGreaterThan(0)
+
+    access.otherBusinessAccess = false
+    view.rerender(shell())
+
+    expect(screen.queryByRole('button', { name: i18next.t('nav:items.golf/ledger.label') })).toBeNull()
+    expect(screen.queryAllByRole('button', { name: i18next.t('nav:items.cancellation-fees.label') }).length).toBeGreaterThan(0)
+  })
+
   it('removes fee navigation for a different-product caller without List', async () => {
     access.list = false
     access.manage = false
