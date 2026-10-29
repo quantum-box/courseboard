@@ -1,8 +1,10 @@
 import {
   createContext,
+  useCallback,
   useContext,
   useEffect,
   useMemo,
+  useRef,
   useState,
   type ReactNode,
 } from 'react'
@@ -11,6 +13,15 @@ import { courseboardApiJson } from '../api'
 import { LoadingState, ResourceError } from '../components/Page'
 import { navigate, useRoute } from '../lib/router'
 import { useAuth } from './AuthProvider'
+import {
+  firstSnapshot,
+  nextExpiry,
+  reduceSnapshot,
+  REFRESH_INTERVAL_MS,
+  UNAVAILABLE_CAPABILITY_SNAPSHOT,
+  type CapabilitySnapshot,
+  type CapabilitySnapshotEvent,
+} from './capabilitySnapshot'
 import {
   nonFeeBusinessAccessDecision,
   routeCapabilityDecision,
@@ -50,6 +61,12 @@ type CapabilitiesState = {
   data: EffectiveCapabilities | null
   error: Error | null
   loading: boolean
+}
+
+type ScopedSnapshot = {
+  tenantId: string
+  userId: string
+  snapshot: CapabilitySnapshot
 }
 
 const EMPTY_CAPABILITIES: EffectiveCapabilities = {
@@ -168,10 +185,10 @@ export function capabilitySnapshotReadyForRoute(
   return isCancellationFeeRoute(route) || routeCapabilitySnapshotKnown(route, capabilities)
 }
 
-const INCOMPLETE_CAPABILITY_SNAPSHOT = new Error('Capability snapshot is unavailable')
-
 /**
- * Resolves Field's effective actions once per selected tenant. Downstream
+ * Resolves Field's effective actions for the selected tenant and user, and
+ * re-reads them every minute, on window focus and when the window becomes
+ * visible, so a revoked action closes its screen without a reload. Downstream
  * route guards consume this snapshot; fetching it here keeps the decision
  * independent from reservation and extension startup requests.
  */
@@ -180,54 +197,109 @@ export function EffectiveCapabilitiesProvider({ children }: { children: ReactNod
   const route = useRoute()
   const tenantId = tenant?.id ?? ''
   const userId = user?.id ?? ''
-  const [state, setState] = useState<CapabilitiesState>({
-    tenantId: '',
-    userId: '',
-    data: null,
-    error: null,
-    loading: true,
-  })
-  const [attempt, setAttempt] = useState(0)
+  const [state, setState] = useState<ScopedSnapshot | null>(null)
+  const retryRef = useRef(() => {})
+  const retry = useCallback(() => retryRef.current(), [])
 
   useEffect(() => {
-    const controller = new AbortController()
     if (!tenantId || !userId) {
-      setState({ tenantId: '', userId: '', data: null, error: null, loading: false })
-      return () => controller.abort()
+      setState(null)
+      return
     }
 
-    setState({ tenantId, userId, data: null, error: null, loading: true })
-    void courseboardApiJson<unknown>('/v1/field/client-capabilities', {
-      signal: controller.signal,
-    })
-      .then(raw => {
-        if (!controller.signal.aborted) {
-          setState({ tenantId, userId, data: normalizeCapabilities(raw), error: null, loading: false })
-        }
-      })
-      .catch(error => {
-        if (!controller.signal.aborted) {
-          setState({
-            tenantId,
-            userId,
-            data: null,
-            error: error instanceof Error ? error : new Error(String(error)),
-            loading: false,
-          })
-        }
-      })
-    return () => controller.abort()
-  }, [attempt, tenantId, userId])
+    // Everything below belongs to this tenant and user. Switching either
+    // aborts the request in flight, so a late answer for the previous
+    // principal is dropped.
+    let lastId = 1
+    let snapshot = firstSnapshot(lastId, performance.now())
+    let inFlight: { id: number; controller: AbortController } | null = null
+    let expiryTimer: number | undefined
 
-  const snapshotReady = state.tenantId === tenantId
-    && state.userId === userId
-    && !state.loading
-    && Boolean(state.data)
-  const routeSnapshotReady = snapshotReady && state.data
-    ? capabilitySnapshotReadyForRoute(route, state.data)
+    const commit = (next: CapabilitySnapshot) => {
+      snapshot = next
+      // A request the snapshot no longer waits for (replaced, or too old to
+      // answer in time) is aborted, so its answer is never applied.
+      if (inFlight && inFlight.id !== next.pending?.id) {
+        inFlight.controller.abort()
+        inFlight = null
+      }
+      window.clearTimeout(expiryTimer)
+      const expiresAt = nextExpiry(next)
+      expiryTimer = expiresAt === null
+        ? undefined
+        : window.setTimeout(
+          () => apply({ type: 'elapsed', at: performance.now() }),
+          expiresAt - performance.now(),
+        )
+      setState({ tenantId, userId, snapshot: next })
+    }
+    const apply = (event: CapabilitySnapshotEvent) => commit(reduceSnapshot(snapshot, event))
+
+    const send = (id: number) => {
+      const controller = new AbortController()
+      inFlight = { id, controller }
+      void courseboardApiJson<unknown>('/v1/field/client-capabilities', {
+        signal: controller.signal,
+      }).then(
+        raw => {
+          if (controller.signal.aborted) return
+          apply({
+            type: 'answered',
+            id,
+            at: performance.now(),
+            capabilities: normalizeCapabilities(raw),
+          })
+        },
+        error => {
+          if (controller.signal.aborted) return
+          apply({
+            type: 'failed',
+            id,
+            at: performance.now(),
+            error: error instanceof Error ? error : new Error(String(error)),
+          })
+        },
+      )
+    }
+    const request = () => {
+      lastId += 1
+      apply({ type: 'requested', id: lastId, at: performance.now() })
+      send(lastId)
+    }
+    // A background refresh never replaces a request that can still answer in
+    // time, so an answer slower than a period still lands. Only Retry
+    // replaces it.
+    const refreshInBackground = () => {
+      apply({ type: 'elapsed', at: performance.now() })
+      if (!snapshot.pending) request()
+    }
+    const refreshWhenVisible = () => {
+      if (document.visibilityState === 'visible') refreshInBackground()
+    }
+
+    commit(snapshot)
+    send(lastId)
+    retryRef.current = request
+    const interval = window.setInterval(refreshInBackground, REFRESH_INTERVAL_MS)
+    window.addEventListener('focus', refreshInBackground)
+    document.addEventListener('visibilitychange', refreshWhenVisible)
+    return () => {
+      inFlight?.controller.abort()
+      window.clearTimeout(expiryTimer)
+      window.clearInterval(interval)
+      window.removeEventListener('focus', refreshInBackground)
+      document.removeEventListener('visibilitychange', refreshWhenVisible)
+      retryRef.current = () => {}
+    }
+  }, [tenantId, userId])
+
+  const current = state?.tenantId === tenantId && state.userId === userId ? state.snapshot : null
+  const capabilities = current?.phase === 'open' ? current.capabilities : null
+  const routeSnapshotReady = capabilities
+    ? capabilitySnapshotReadyForRoute(route, capabilities)
     : false
-  const startupTarget = routeSnapshotReady && state.data
-    ? startupRouteForCapabilities(route, state.data)
+  const startupTarget = capabilities && routeSnapshotReady
+    ? startupRouteForCapabilities(route, capabilities)
     : null
   useEffect(() => {
     // PLT-5225 owns the first screen for an operator who has only the
@@ -237,26 +309,19 @@ export function EffectiveCapabilitiesProvider({ children }: { children: ReactNod
     if (startupTarget) navigate(startupTarget)
   }, [startupTarget])
 
-  const value = useMemo<CapabilitiesState>(() => state, [state])
-  const currentError = state.tenantId === tenantId && state.userId === userId ? state.error : null
-  const incompleteSnapshot = snapshotReady && state.data && !routeSnapshotReady
-  const waitingForSnapshot = !tenantId
-    || !userId
-    || state.tenantId !== tenantId
-    || state.userId !== userId
-    || state.loading
-    || Boolean(startupTarget)
-  const gate = currentError
-    ? <ResourceError error={currentError} onRetry={() => setAttempt(value => value + 1)} />
-    : incompleteSnapshot
-      ? <ResourceError
-        error={INCOMPLETE_CAPABILITY_SNAPSHOT}
-        onRetry={() => setAttempt(value => value + 1)}
-      />
-    : waitingForSnapshot
+  const value = useMemo<CapabilitiesState>(() => ({
+    tenantId,
+    userId,
+    data: capabilities,
+    error: current?.phase === 'closed' ? current.error : null,
+    loading: !current || current.phase === 'loading',
+  }), [tenantId, userId, current, capabilities])
+  const gate = current?.phase === 'closed'
+    ? <ResourceError error={current.error} onRetry={retry} />
+    : !capabilities || startupTarget
       ? <LoadingState />
-      : !state.data
-        ? <ResourceError error={INCOMPLETE_CAPABILITY_SNAPSHOT} onRetry={() => setAttempt(value => value + 1)} />
+      : !routeSnapshotReady
+        ? <ResourceError error={UNAVAILABLE_CAPABILITY_SNAPSHOT} onRetry={retry} />
         : children
   return (
     <EffectiveCapabilitiesContext.Provider value={value}>
