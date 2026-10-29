@@ -14,6 +14,7 @@ import { useCallback, useEffect, useMemo, useRef, useState, type FormEvent } fro
 import { useTranslation } from 'react-i18next'
 import { ApiError, downloadBlob, fieldTenant, fieldUserId, yen } from '../../api'
 import { CapabilityGate } from '../../auth/CapabilityGate'
+import { capabilityActionAllowed, FIELD_ACTIONS } from '../../auth/capabilityRoutes'
 import { useEffectiveCapabilities } from '../../auth/EffectiveCapabilitiesProvider'
 import { useTenantTimezone } from '../../context/TenantTimezoneProvider'
 import { i18next } from '../../i18n'
@@ -32,6 +33,7 @@ import {
   Panel,
   ResourceError,
 } from '../../components/Page'
+import { useFeatureProvided } from '../../feature-delivery/FeatureDelivery'
 import { useResource } from '../../hooks/useResource'
 import { useRegisterPageReload } from '../../lib/pageReload'
 import { showToast } from '../../lib/toast'
@@ -835,6 +837,12 @@ function NewCancellationFeeContent({
   const { capabilities } = useEffectiveCapabilities()
   const canManage = capabilities.cancellationFees.manage
   const canList = capabilities.cancellationFees.list
+  // A fee-only operator types the recipient by hand. The ledger lookup needs
+  // both the customer action and the customer product, or the search would
+  // only produce a 403 or reach a ledger the plan does not include.
+  const customersProvided = useFeatureProvided('courseboard.customers')
+  const canLookUpCustomers = customersProvided
+    && capabilityActionAllowed(FIELD_ACTIONS.listCustomers, capabilities)
   const { t } = useTranslation(['cancellationFees', 'common'])
   const timezone = useTenantTimezone()
   const storageScope = createStorageScope()
@@ -1880,21 +1888,33 @@ function NewCancellationFeeContent({
               hint={t('cancellationFees:new.client.nameHint')}
               required
             >
-              <CustomerPicker
-                name={customerName}
-                customerId={customer?.id ?? null}
-                required
-                disabled={createRecovery !== null}
-                allowRegister={false}
-                onNameChange={name => {
-                  setCustomerName(name)
-                  if (customer && name !== customer.name) setCustomer(null)
-                }}
-                onSelect={picked => {
-                  setCustomer(picked)
-                  if (picked) setCustomerName(picked.name)
-                }}
-              />
+              {canLookUpCustomers ? (
+                <CustomerPicker
+                  name={customerName}
+                  customerId={customer?.id ?? null}
+                  required
+                  disabled={createRecovery !== null}
+                  allowRegister={false}
+                  onNameChange={name => {
+                    setCustomerName(name)
+                    if (customer && name !== customer.name) setCustomer(null)
+                  }}
+                  onSelect={picked => {
+                    setCustomer(picked)
+                    if (picked) setCustomerName(picked.name)
+                  }}
+                />
+              ) : (
+                <Input
+                  value={customerName}
+                  required
+                  disabled={createRecovery !== null}
+                  onChange={event => {
+                    setCustomerName(event.target.value)
+                    setCustomer(null)
+                  }}
+                />
+              )}
             </Field>
             <Field label={t('cancellationFees:new.client.due')} required>
               <Input
