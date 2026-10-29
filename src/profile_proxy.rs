@@ -19,10 +19,24 @@ const FIELD_PROFILE_PATH: &str = "/v1/erp/me";
 const PLATFORM_PROFILE_PATH: &str = "/v1/me";
 const CHECK_TENANTS_PATH: &str = "/v1/auth/policies/check-tenants";
 /// The action whose policy grant means "this tenant is a CourseBoard tenant"
-/// (ADR-0011). Every member policy in the golf auth manifest allows it and the
-/// machine-to-machine calculator policy does not — a test on the manifest copy
-/// below pins that property.
+/// for the existing Golf surface (ADR-0011). Every member policy in the golf
+/// auth manifest allows it and the machine-to-machine calculator policy does
+/// not — a test on the manifest copy below pins that property.
 const REPRESENTATIVE_ACTION: &str = "field_extension_golf:ListTeeSheet";
+/// Canonical Field actions used by the standalone cancellation-fee surface.
+/// These are fixed server-owned discovery actions: the client cannot choose an
+/// action or ask this endpoint for an unfiltered tenant list.
+const CANCELLATION_FEE_LIST_ACTION: &str = "field:ListCancellationFees";
+const CANCELLATION_FEE_MANAGE_ACTION: &str = "field:ManageCancellationFees";
+const TENANT_DISCOVERY_ACTIONS: &[&str] = &[
+    REPRESENTATIVE_ACTION,
+    CANCELLATION_FEE_LIST_ACTION,
+    CANCELLATION_FEE_MANAGE_ACTION,
+];
+/// The actions that add a tenant to the default extension list. ListTeeSheet
+/// is left out: the Golf extension filter already covers that surface.
+const CANCELLATION_FEE_ACTIONS: &[&str] =
+    &[CANCELLATION_FEE_LIST_ACTION, CANCELLATION_FEE_MANAGE_ACTION];
 const MAX_PROFILE_RESPONSE_BYTES: usize = 1024 * 1024;
 const MAX_PROFILE_TENANTS: usize = 500;
 const PROFILE_REQUEST_TIMEOUT: Duration = Duration::from_secs(7);
@@ -31,6 +45,10 @@ const PROFILE_REQUEST_TIMEOUT: Duration = Duration::from_secs(7);
 /// without it Field's tenant policy check denies platform-mismatched tenants.
 const OPERATOR_LOOKUP_TIMEOUT: Duration = Duration::from_secs(3);
 const MAX_OPERATOR_LOOKUPS: usize = 20;
+/// The cancellation-fee additions run beside the extension lookup on every
+/// default `/v1/me`. A slow Core drops the additions instead of slowing the
+/// existing list down.
+const FEE_TENANT_DISCOVERY_TIMEOUT: Duration = Duration::from_secs(3);
 
 #[derive(Clone, Debug)]
 pub struct ProfileClient {
@@ -115,9 +133,11 @@ impl ProfileClient {
 
     async fn get_profile(&self, authorization: &str) -> Result<ProfileResponse, ProfileProxyError> {
         match self.tenant_source {
-            TenantSource::Extension => self.extension_profile(authorization).await,
+            TenantSource::Extension => self.extension_profile_with_fee_tenants(authorization).await,
             TenantSource::Compare => {
-                let profile = self.extension_profile(authorization).await?;
+                let profile = self
+                    .extension_profile_with_fee_tenants(authorization)
+                    .await?;
                 self.spawn_policy_comparison(&profile, authorization);
                 Ok(profile)
             }
@@ -146,6 +166,59 @@ impl ProfileClient {
         let mut profile = decode_and_filter_profile(&body)?;
         self.attach_platform_ids(&mut profile, authorization).await;
         Ok(profile)
+    }
+
+    /// The extension list, plus every switchable tenant that grants a
+    /// cancellation-fee action. Tenants the extension lists are never
+    /// removed. When the fee discovery cannot be verified, only the additions
+    /// are dropped, so the existing list keeps its current behavior.
+    async fn extension_profile_with_fee_tenants(
+        &self,
+        authorization: &str,
+    ) -> Result<ProfileResponse, ProfileProxyError> {
+        let Some(operators_base) = &self.operators_base else {
+            return self.extension_profile(authorization).await;
+        };
+        let (profile, fee_tenants) = futures::join!(
+            self.extension_profile(authorization),
+            tokio::time::timeout(
+                FEE_TENANT_DISCOVERY_TIMEOUT,
+                self.cancellation_fee_tenants(operators_base, authorization)
+            )
+        );
+        let fee_tenants = fee_tenants.unwrap_or_else(|_| Err("timed out".to_string()));
+        let mut profile = profile?;
+        match fee_tenants {
+            Ok(fee_tenants) => add_tenants(&mut profile, fee_tenants),
+            Err(reason) => tracing::warn!(
+                reason,
+                "cancellation-fee tenant discovery failed; serving the extension list only"
+            ),
+        }
+        Ok(profile)
+    }
+
+    async fn cancellation_fee_tenants(
+        &self,
+        operators_base: &Url,
+        authorization: &str,
+    ) -> Result<Vec<ProfileTenant>, String> {
+        let (_, tenants) = self
+            .fetch_platform_profile(operators_base, authorization)
+            .await
+            .map_err(|error| format!("platform profile {}", error.reason()))?;
+        let allowed_ids = self
+            .allowed_tenant_ids(
+                operators_base,
+                &tenants,
+                CANCELLATION_FEE_ACTIONS,
+                authorization,
+            )
+            .await
+            .map_err(|(platform_id, action, reason)| {
+                format!("check-tenants {action} on {platform_id}: {reason}")
+            })?;
+        Ok(keep_allowed(tenants, &allowed_ids))
     }
 
     /// Best-effort per-tenant platform lookup: a failed lookup leaves the
@@ -199,8 +272,8 @@ impl ProfileClient {
     }
 
     /// The policy-based tenant list (ADR-0011): the platform's own `/v1/me`,
-    /// filtered by who actually holds the representative CourseBoard action.
-    /// Field is not on this path at all.
+    /// filtered by the fixed union of CourseBoard Golf and cancellation-fee
+    /// actions. Field is not on this path at all.
     async fn policy_profile(
         &self,
         authorization: &str,
@@ -246,12 +319,11 @@ impl ProfileClient {
         decode_platform_profile(&body)
     }
 
-    /// Group the tenants by platform, ask `check-tenants` once per platform,
-    /// and keep the `/v1/me` order. A platform whose check fails is kept
-    /// unfiltered with `partial` set: the tenant list is a discovery
-    /// affordance, not an authorization boundary — every later API authorizes
-    /// independently — and the alternative sends every operator to a dead-end
-    /// screen during an auth outage.
+    /// Group the tenants by platform, ask `check-tenants` for every fixed
+    /// discovery action, and keep the `/v1/me` order. A tenant is included when
+    /// any one action allows it. An unknown or failed action check fails the
+    /// whole policy response closed so an auth outage cannot turn into an
+    /// unfiltered tenant list; the caller can retry the profile request.
     async fn filter_by_policy(
         &self,
         operators_base: &Url,
@@ -259,53 +331,24 @@ impl ProfileClient {
         tenants: Vec<PlatformTenant>,
         authorization: &str,
     ) -> Result<ProfileResponse, ProfileProxyError> {
-        let mut platform_order: Vec<String> = Vec::new();
-        for tenant in &tenants {
-            if !platform_order.contains(&tenant.platform_id) {
-                platform_order.push(tenant.platform_id.clone());
-            }
-        }
-        let answers = futures::future::join_all(platform_order.iter().map(|platform_id| {
-            let tenant_ids: Vec<String> = tenants
-                .iter()
-                .filter(|tenant| &tenant.platform_id == platform_id)
-                .map(|tenant| tenant.id.clone())
-                .collect();
-            async move {
-                let allowed = self
-                    .check_tenants(operators_base, platform_id, &tenant_ids, authorization)
-                    .await;
-                (platform_id.clone(), tenant_ids, allowed)
-            }
-        }))
-        .await;
-
-        let mut partial = false;
-        let mut allowed_ids: HashSet<String> = HashSet::new();
-        for (platform_id, tenant_ids, allowed) in answers {
-            match allowed {
-                Ok(allowed) => allowed_ids.extend(allowed),
-                Err(reason) => {
-                    tracing::warn!(
-                        platform_id,
-                        reason,
-                        "check-tenants failed; keeping this platform's tenants unfiltered"
-                    );
-                    partial = true;
-                    allowed_ids.extend(tenant_ids);
-                }
-            }
-        }
-
-        let filtered: Vec<ProfileTenant> = tenants
-            .into_iter()
-            .filter(|tenant| allowed_ids.contains(&tenant.id))
-            .map(|tenant| ProfileTenant {
-                id: tenant.id,
-                name: tenant.name,
-                platform_id: Some(tenant.platform_id),
-            })
-            .collect();
+        let allowed_ids = self
+            .allowed_tenant_ids(
+                operators_base,
+                &tenants,
+                TENANT_DISCOVERY_ACTIONS,
+                authorization,
+            )
+            .await
+            .map_err(|(platform_id, action, reason)| {
+                tracing::warn!(
+                    platform_id,
+                    action,
+                    reason,
+                    "check-tenants failed; refusing to discover tenants until it can be retried"
+                );
+                ProfileProxyError::UpstreamRequest
+            })?;
+        let filtered = keep_allowed(tenants, &allowed_ids);
         let default_tenant_id = match filtered.as_slice() {
             [tenant] => Some(tenant.id.clone()),
             _ => None,
@@ -314,17 +357,70 @@ impl ProfileClient {
             user,
             tenants: filtered,
             default_tenant_id,
-            partial: partial.then_some(true),
+            partial: None,
         })
     }
 
+    /// Group the tenants by platform and ask `check-tenants` for each action.
+    /// A tenant is allowed when any one action allows it. Only requested IDs
+    /// are kept, and the first failed check fails the whole answer.
+    async fn allowed_tenant_ids(
+        &self,
+        operators_base: &Url,
+        tenants: &[PlatformTenant],
+        actions: &'static [&'static str],
+        authorization: &str,
+    ) -> Result<HashSet<String>, (String, &'static str, String)> {
+        let mut platform_order: Vec<&String> = Vec::new();
+        for tenant in tenants {
+            if !platform_order.contains(&&tenant.platform_id) {
+                platform_order.push(&tenant.platform_id);
+            }
+        }
+        let answers = futures::future::join_all(platform_order.into_iter().map(|platform_id| {
+            let tenant_ids: Vec<String> = tenants
+                .iter()
+                .filter(|tenant| &tenant.platform_id == platform_id)
+                .map(|tenant| tenant.id.clone())
+                .collect();
+            async move {
+                let mut allowed_ids = HashSet::new();
+                for action in actions {
+                    let allowed = self
+                        .check_tenants(
+                            operators_base,
+                            platform_id,
+                            action,
+                            &tenant_ids,
+                            authorization,
+                        )
+                        .await
+                        .map_err(|reason| (platform_id.clone(), *action, reason))?;
+                    allowed_ids.extend(
+                        allowed
+                            .into_iter()
+                            .filter(|tenant_id| tenant_ids.contains(tenant_id)),
+                    );
+                }
+                Ok(allowed_ids)
+            }
+        }))
+        .await;
+        let mut allowed_ids = HashSet::new();
+        for answer in answers {
+            allowed_ids.extend(answer?);
+        }
+        Ok(allowed_ids)
+    }
+
     /// `POST {tachyon-api}/v1/auth/policies/check-tenants` — which of these
-    /// tenants grant the caller the representative action. Unscoped, like the
-    /// platform profile call.
+    /// tenants grant the fixed discovery action. Unscoped, like the platform
+    /// profile call, and always forwarded with the caller's bearer.
     async fn check_tenants(
         &self,
         operators_base: &Url,
         platform_id: &str,
+        action: &str,
         tenant_ids: &[String],
         authorization: &str,
     ) -> Result<Vec<String>, String> {
@@ -340,7 +436,7 @@ impl ProfileClient {
             .header(header::AUTHORIZATION.as_str(), authorization)
             .header(header::ACCEPT.as_str(), "application/json")
             .json(&CheckTenantsRequest {
-                action: REPRESENTATIVE_ACTION,
+                action,
                 platform_id,
                 tenant_ids,
             })
@@ -423,6 +519,36 @@ impl ProfileClient {
                 );
             }
         });
+    }
+}
+
+fn keep_allowed(tenants: Vec<PlatformTenant>, allowed_ids: &HashSet<String>) -> Vec<ProfileTenant> {
+    tenants
+        .into_iter()
+        .filter(|tenant| allowed_ids.contains(&tenant.id))
+        .map(|tenant| ProfileTenant {
+            id: tenant.id,
+            name: tenant.name,
+            platform_id: Some(tenant.platform_id),
+        })
+        .collect()
+}
+
+/// Append the tenants the list does not have yet, after the existing ones.
+/// An existing default stays. A list that was empty gets the single-tenant
+/// default, like the other sources.
+fn add_tenants(profile: &mut ProfileResponse, tenants: Vec<ProfileTenant>) {
+    let was_empty = profile.tenants.is_empty();
+    for tenant in tenants {
+        if !profile.tenants.iter().any(|listed| listed.id == tenant.id) {
+            profile.tenants.push(tenant);
+        }
+    }
+    if was_empty {
+        profile.default_tenant_id = match profile.tenants.as_slice() {
+            [tenant] => Some(tenant.id.clone()),
+            _ => None,
+        };
     }
 }
 
@@ -514,8 +640,9 @@ pub struct ProfileResponse {
     pub user: ProfileUser,
     pub tenants: Vec<ProfileTenant>,
     pub default_tenant_id: Option<String>,
-    /// Set when the policy filter could not run for some platform and its
-    /// tenants are listed unfiltered. The UI already reads this flag.
+    /// Retained for clients that understand the former partial-discovery
+    /// response. The policy source now fails closed on an unknown check rather
+    /// than returning an unfiltered list, so it does not set this flag.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub partial: Option<bool>,
 }
@@ -594,19 +721,37 @@ struct PlatformTenant {
 }
 
 #[derive(Debug, Deserialize)]
-#[serde(rename_all = "camelCase")]
 struct PlatformProfileWire {
-    user: Option<FieldProfileUserWire>,
+    user: Option<PlatformProfileUserWire>,
     tenants: Option<Vec<PlatformTenantWire>>,
 }
 
+/// The platform `/v1/me` contract is canonical snake_case. Keep the one
+/// camelCase alias seen in older fixtures during the transition, but do not
+/// make the live decoder depend on the fixture spelling.
 #[derive(Debug, Deserialize)]
-#[serde(rename_all = "camelCase")]
+struct PlatformProfileUserWire {
+    id: Option<String>,
+    #[serde(default)]
+    sub: Option<String>,
+    #[serde(default)]
+    email: Option<String>,
+    username: Option<String>,
+    #[serde(default, alias = "onboardingCompleted")]
+    onboarding_completed: Option<bool>,
+}
+
+#[derive(Debug, Deserialize)]
 struct PlatformTenantWire {
     id: Option<String>,
     name: Option<String>,
-    #[serde(default)]
+    #[serde(default, alias = "platformId")]
     platform_id: Option<String>,
+    /// Core includes host/root and other non-landing memberships in `/v1/me`.
+    /// Only an explicit `true` is eligible for tenant selection; missing or
+    /// false is fail-closed so an incomplete response cannot expose a parent.
+    #[serde(default)]
+    switchable: Option<bool>,
 }
 
 #[derive(Serialize)]
@@ -694,8 +839,12 @@ fn decode_platform_profile(
             return Err(ProfileProxyError::InvalidContract);
         }
         let name = required_non_blank(tenant.name)?;
-        // No platform parent means this entry is a platform itself (the top of
-        // the hierarchy); CourseBoard tenants always live under one.
+        // Core's `switchable` is the canonical route-eligibility bit. A
+        // missing bit is treated like false rather than guessing from the
+        // tenant hierarchy or platform ID.
+        if tenant.switchable != Some(true) {
+            continue;
+        }
         let Some(platform_id) = tenant
             .platform_id
             .filter(|platform_id| is_valid_tenant_id(platform_id))
@@ -1412,7 +1561,8 @@ mod tests {
                         async move {
                             assert!(headers.get("x-operator-id").is_none());
                             assert!(headers.get("x-platform-id").is_none());
-                            assert_eq!(body["action"].as_str(), Some(REPRESENTATIVE_ACTION));
+                            assert!(TENANT_DISCOVERY_ACTIONS
+                                .contains(&body["action"].as_str().unwrap()));
                             let platform_id = body["platformId"].as_str().unwrap().to_string();
                             recorded.lock().unwrap().push(body);
                             match table.iter().find(|(id, _)| *id == platform_id) {
@@ -1442,9 +1592,95 @@ mod tests {
                 "id": id,
                 "name": format!("Tenant {id}"),
                 "platformId": platform_id,
+                "switchable": true,
             }),
-            None => json!({"id": id, "name": format!("Tenant {id}")}),
+            None => json!({
+                "id": id,
+                "name": format!("Tenant {id}"),
+                "switchable": false,
+            }),
         }
+    }
+
+    #[test]
+    fn decodes_core_bootstrap_snake_case_and_requires_switchable() {
+        let root = tenant_id('r');
+        let platform = tenant_id('p');
+        let child = tenant_id('c');
+        let non_switchable = tenant_id('n');
+        let body = json!({
+            "user": {
+                "id": "us_fixture",
+                "sub": "subject-fixture",
+                "email": "operator@example.test",
+                "username": "courseboard-user",
+                "onboarding_completed": true
+            },
+            "default_tenant_id": child,
+            "tenants": [
+                {
+                    "id": root,
+                    "name": "Root",
+                    "parent_tenant_id": null,
+                    "depth": 0,
+                    "ancestor_path": [],
+                    "relative_role": "host",
+                    "host_id": root,
+                    "platform_id": null,
+                    "switchable": false
+                },
+                {
+                    "id": platform,
+                    "name": "Platform",
+                    "parent_tenant_id": root,
+                    "depth": 1,
+                    "ancestor_path": [{"id": root, "name": "Root"}],
+                    "relative_role": "platform",
+                    "host_id": root,
+                    "platform_id": platform,
+                    "switchable": true
+                },
+                {
+                    "id": child,
+                    "name": "Child",
+                    "parent_tenant_id": platform,
+                    "depth": 2,
+                    "ancestor_path": [
+                        {"id": root, "name": "Root"},
+                        {"id": platform, "name": "Platform"}
+                    ],
+                    "relative_role": "member",
+                    "host_id": root,
+                    "platform_id": platform,
+                    "switchable": true
+                },
+                {
+                    "id": non_switchable,
+                    "name": "Hidden",
+                    "parent_tenant_id": platform,
+                    "depth": 2,
+                    "ancestor_path": [],
+                    "relative_role": "member",
+                    "host_id": root,
+                    "platform_id": platform,
+                    "switchable": false
+                }
+            ]
+        });
+
+        let (user, tenants) = decode_platform_profile(body.to_string().as_bytes()).unwrap();
+
+        assert_eq!(user.onboarding_completed, Some(true));
+        assert_eq!(
+            tenants
+                .iter()
+                .map(|tenant| (tenant.id.as_str(), tenant.platform_id.as_str()))
+                .collect::<Vec<_>>(),
+            vec![
+                (platform.as_str(), platform.as_str()),
+                (child.as_str(), platform.as_str())
+            ]
+        );
     }
 
     #[tokio::test]
@@ -1494,12 +1730,212 @@ mod tests {
         assert_eq!(profile.default_tenant_id, None);
         assert_eq!(profile.partial, None);
         let bodies = check_bodies.lock().unwrap();
-        assert_eq!(bodies.len(), 2);
+        assert_eq!(bodies.len(), TENANT_DISCOVERY_ACTIONS.len() * 2);
         let for_a = bodies
             .iter()
             .find(|body| body["platformId"] == json!(platform_a))
             .unwrap();
         assert_eq!(for_a["tenantIds"], json!([tenant_1, tenant_3]));
+        let actions_for_a: HashSet<&str> = bodies
+            .iter()
+            .filter(|body| body["platformId"] == json!(platform_a))
+            .map(|body| body["action"].as_str().unwrap())
+            .collect();
+        assert_eq!(
+            actions_for_a,
+            TENANT_DISCOVERY_ACTIONS.iter().copied().collect()
+        );
+    }
+
+    #[tokio::test]
+    async fn policy_source_discovers_fee_only_tenants_without_the_golf_action() {
+        let platform = tenant_id('p');
+        let fee_list_tenant = tenant_id('f');
+        let fee_manage_tenant = tenant_id('m');
+        let me_body = json!({
+            "user": {"id": "us_fixture", "username": "fee-only-user"},
+            "tenants": [
+                platform_me_tenant(&fee_list_tenant, Some(&platform)),
+                platform_me_tenant(&fee_manage_tenant, Some(&platform))
+            ],
+        });
+        let actions = Arc::new(std::sync::Mutex::new(Vec::<String>::new()));
+        let recorded = actions.clone();
+        let fee_list_tenant_for_handler = fee_list_tenant.clone();
+        let fee_manage_tenant_for_handler = fee_manage_tenant.clone();
+        let app = Router::new()
+            .route(
+                PLATFORM_PROFILE_PATH,
+                get(move |headers: HeaderMap| {
+                    let me_body = me_body.clone();
+                    async move {
+                        assert_eq!(
+                            headers
+                                .get(header::AUTHORIZATION)
+                                .and_then(|value| value.to_str().ok()),
+                            Some("Bearer accepted-fixture")
+                        );
+                        assert!(headers.get("x-operator-id").is_none());
+                        assert!(headers.get("x-platform-id").is_none());
+                        axum::Json(me_body)
+                    }
+                }),
+            )
+            .route(
+                CHECK_TENANTS_PATH,
+                axum::routing::post(
+                    move |headers: HeaderMap, axum::Json(body): axum::Json<Value>| {
+                        let recorded = recorded.clone();
+                        let fee_list_tenant = fee_list_tenant_for_handler.clone();
+                        let fee_manage_tenant = fee_manage_tenant_for_handler.clone();
+                        async move {
+                            assert_eq!(
+                                headers
+                                    .get(header::AUTHORIZATION)
+                                    .and_then(|value| value.to_str().ok()),
+                                Some("Bearer accepted-fixture")
+                            );
+                            let action = body["action"].as_str().unwrap();
+                            recorded.lock().unwrap().push(action.to_string());
+                            let allowed = match action {
+                                CANCELLATION_FEE_LIST_ACTION => vec![fee_list_tenant],
+                                CANCELLATION_FEE_MANAGE_ACTION => {
+                                    vec![fee_manage_tenant]
+                                }
+                                REPRESENTATIVE_ACTION => Vec::new(),
+                                _ => panic!("unexpected discovery action {action}"),
+                            };
+                            axum::Json(json!({"allowedTenantIds": allowed}))
+                        }
+                    },
+                ),
+            );
+        let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let address = listener.local_addr().unwrap();
+        tokio::spawn(async move {
+            axum::serve(listener, app).await.unwrap();
+        });
+
+        let client = ProfileClient::with_timeout("http://field.invalid", Duration::from_secs(1))
+            .unwrap()
+            .with_operators_base(&format!("http://{address}"))
+            .unwrap()
+            .with_tenant_source(TenantSource::Policy);
+        let profile = client.get_profile("Bearer accepted-fixture").await.unwrap();
+
+        assert_eq!(
+            profile
+                .tenants
+                .iter()
+                .map(|tenant| tenant.id.as_str())
+                .collect::<Vec<_>>(),
+            vec![fee_list_tenant.as_str(), fee_manage_tenant.as_str()]
+        );
+        assert!(profile
+            .tenants
+            .iter()
+            .all(|tenant| tenant.platform_id.as_deref() == Some(platform.as_str())));
+        assert_eq!(profile.default_tenant_id, None);
+        let observed: HashSet<String> = actions.lock().unwrap().iter().cloned().collect();
+        assert_eq!(
+            observed,
+            TENANT_DISCOVERY_ACTIONS
+                .iter()
+                .map(|action| (*action).to_string())
+                .collect()
+        );
+    }
+
+    /// A platform whose `check-tenants` answers per action: each listed action
+    /// allows the given tenants and every other discovery action allows none.
+    async fn spawn_platform_granting(
+        tenants: serde_json::Value,
+        grants: Vec<(&'static str, Vec<String>)>,
+    ) -> String {
+        use axum::Json;
+        let me_body = json!({
+            "user": {"id": "us_fixture", "username": "courseboard-user"},
+            "tenants": tenants,
+        });
+        let grants = Arc::new(grants);
+        let app = Router::new()
+            .route(
+                PLATFORM_PROFILE_PATH,
+                get(move || {
+                    let me_body = me_body.clone();
+                    async move { Json(me_body) }
+                }),
+            )
+            .route(
+                CHECK_TENANTS_PATH,
+                axum::routing::post(move |Json(body): Json<serde_json::Value>| {
+                    let grants = grants.clone();
+                    async move {
+                        let action = body["action"].as_str().unwrap();
+                        assert!(TENANT_DISCOVERY_ACTIONS.contains(&action));
+                        let allowed = grants
+                            .iter()
+                            .find(|(granted, _)| *granted == action)
+                            .map(|(_, tenants)| tenants.clone())
+                            .unwrap_or_default();
+                        Json(json!({"allowedTenantIds": allowed}))
+                    }
+                }),
+            );
+        let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let address = listener.local_addr().unwrap();
+        tokio::spawn(async move {
+            axum::serve(listener, app).await.unwrap();
+        });
+        format!("http://{address}")
+    }
+
+    async fn policy_profile_tenant_ids(
+        tenants: serde_json::Value,
+        grants: Vec<(&'static str, Vec<String>)>,
+    ) -> Vec<String> {
+        let origin = spawn_platform_granting(tenants, grants).await;
+        let client = ProfileClient::with_timeout("http://field.invalid", Duration::from_secs(1))
+            .unwrap()
+            .with_operators_base(&origin)
+            .unwrap()
+            .with_tenant_source(TenantSource::Policy);
+        client
+            .get_profile("Bearer accepted-fixture")
+            .await
+            .unwrap()
+            .tenants
+            .into_iter()
+            .map(|tenant| tenant.id)
+            .collect()
+    }
+
+    #[tokio::test]
+    async fn a_principal_with_only_the_fee_list_action_sees_its_tenant() {
+        let platform = tenant_id('p');
+        let tenant = tenant_id('a');
+
+        let tenants = policy_profile_tenant_ids(
+            json!([platform_me_tenant(&tenant, Some(&platform))]),
+            vec![(CANCELLATION_FEE_LIST_ACTION, vec![tenant.clone()])],
+        )
+        .await;
+
+        assert_eq!(tenants, vec![tenant]);
+    }
+
+    #[tokio::test]
+    async fn a_principal_without_any_discovery_action_sees_no_tenant() {
+        let platform = tenant_id('p');
+        let tenant = tenant_id('a');
+
+        let tenants = policy_profile_tenant_ids(
+            json!([platform_me_tenant(&tenant, Some(&platform))]),
+            Vec::new(),
+        )
+        .await;
+
+        assert!(tenants.is_empty(), "{tenants:?}");
     }
 
     /// An answer whose shape we do not recognise must not read as "this user
@@ -1508,7 +1944,7 @@ mod tests {
     /// second would hide every tenant from every operator if the contract
     /// ever changed under us.
     #[tokio::test]
-    async fn an_unrecognised_check_tenants_answer_degrades_instead_of_hiding_everything() {
+    async fn an_unrecognised_check_tenants_answer_fails_closed_for_retry() {
         use axum::Json;
         let platform = tenant_id('p');
         let tenant = tenant_id('a');
@@ -1542,21 +1978,14 @@ mod tests {
             .unwrap()
             .with_tenant_source(TenantSource::Policy);
 
-        let profile = client.get_profile("Bearer accepted-fixture").await.unwrap();
-
-        assert_eq!(
-            profile
-                .tenants
-                .iter()
-                .map(|tenant| tenant.id.as_str())
-                .collect::<Vec<_>>(),
-            vec![tenant.as_str()]
-        );
-        assert_eq!(profile.partial, Some(true));
+        assert!(matches!(
+            client.get_profile("Bearer accepted-fixture").await,
+            Err(ProfileProxyError::UpstreamRequest)
+        ));
     }
 
     #[tokio::test]
-    async fn policy_source_keeps_a_platform_unfiltered_when_its_check_fails() {
+    async fn policy_source_fails_closed_when_a_platform_check_fails() {
         let platform_a = tenant_id('p');
         let platform_b = tenant_id('q');
         let tenant_1 = tenant_id('a');
@@ -1578,21 +2007,10 @@ mod tests {
             .unwrap()
             .with_tenant_source(TenantSource::Policy);
 
-        let profile = client.get_profile("Bearer accepted-fixture").await.unwrap();
-
-        // Platform B could not be checked: its tenant stays listed and the
-        // response says the list is partial. Platform A answered "none".
-        assert_eq!(
-            profile
-                .tenants
-                .iter()
-                .map(|tenant| tenant.id.as_str())
-                .collect::<Vec<_>>(),
-            vec![tenant_2.as_str()]
-        );
-        assert_eq!(profile.partial, Some(true));
-        // Exactly one surviving tenant still becomes the default.
-        assert_eq!(profile.default_tenant_id, Some(tenant_2));
+        assert!(matches!(
+            client.get_profile("Bearer accepted-fixture").await,
+            Err(ProfileProxyError::UpstreamRequest)
+        ));
     }
 
     #[tokio::test]
@@ -1614,6 +2032,248 @@ mod tests {
         assert_eq!(profile.tenants.len(), 1);
         assert_eq!(profile.tenants[0].id, enabled);
         assert_eq!(profile.partial, None);
+    }
+
+    async fn extension_profile_against(
+        field_tenants: serde_json::Value,
+        platform_origin: &str,
+    ) -> ProfileResponse {
+        let body = field_profile(field_tenants).to_string().into_bytes();
+        let (field_origin, _) = spawn_fake_field(StatusCode::OK, body, Duration::ZERO).await;
+        ProfileClient::with_timeout(&field_origin, Duration::from_secs(1))
+            .unwrap()
+            .with_operators_base(platform_origin)
+            .unwrap()
+            .with_tenant_source(TenantSource::Extension)
+            .get_profile("Bearer accepted-fixture")
+            .await
+            .unwrap()
+    }
+
+    fn listed_ids(profile: &ProfileResponse) -> Vec<&str> {
+        profile
+            .tenants
+            .iter()
+            .map(|tenant| tenant.id.as_str())
+            .collect()
+    }
+
+    #[tokio::test]
+    async fn extension_source_keeps_a_full_operator_list_and_default() {
+        let platform = tenant_id('p');
+        let golf = tenant_id('a');
+        let without_policy = tenant_id('b');
+        let origin = spawn_platform_granting(
+            json!([
+                platform_me_tenant(&golf, Some(&platform)),
+                platform_me_tenant(&without_policy, Some(&platform)),
+            ]),
+            vec![
+                (REPRESENTATIVE_ACTION, vec![golf.clone()]),
+                (CANCELLATION_FEE_LIST_ACTION, vec![golf.clone()]),
+                (CANCELLATION_FEE_MANAGE_ACTION, vec![golf.clone()]),
+            ],
+        )
+        .await;
+
+        let profile = extension_profile_against(
+            json!([
+                field_tenant(&golf, true),
+                field_tenant(&without_policy, false)
+            ]),
+            &origin,
+        )
+        .await;
+
+        assert_eq!(listed_ids(&profile), vec![golf.as_str()]);
+        assert_eq!(profile.default_tenant_id, Some(golf));
+    }
+
+    #[tokio::test]
+    async fn extension_source_never_drops_a_tenant_the_policy_does_not_grant() {
+        let platform = tenant_id('p');
+        let golf_only = tenant_id('a');
+        let origin = spawn_platform_granting(
+            json!([platform_me_tenant(&golf_only, Some(&platform))]),
+            Vec::new(),
+        )
+        .await;
+
+        let profile =
+            extension_profile_against(json!([field_tenant(&golf_only, true)]), &origin).await;
+
+        assert_eq!(listed_ids(&profile), vec![golf_only.as_str()]);
+        assert_eq!(profile.default_tenant_id, Some(golf_only));
+    }
+
+    #[tokio::test]
+    async fn extension_source_adds_tenants_that_grant_a_cancellation_fee_action() {
+        let platform = tenant_id('p');
+        let fee_list = tenant_id('f');
+        let fee_manage = tenant_id('m');
+        let origin = spawn_platform_granting(
+            json!([
+                platform_me_tenant(&fee_list, Some(&platform)),
+                platform_me_tenant(&fee_manage, Some(&platform)),
+            ]),
+            vec![
+                (CANCELLATION_FEE_LIST_ACTION, vec![fee_list.clone()]),
+                (CANCELLATION_FEE_MANAGE_ACTION, vec![fee_manage.clone()]),
+            ],
+        )
+        .await;
+
+        let profile = extension_profile_against(
+            json!([
+                field_tenant(&fee_list, false),
+                field_tenant(&fee_manage, false)
+            ]),
+            &origin,
+        )
+        .await;
+
+        assert_eq!(
+            listed_ids(&profile),
+            vec![fee_list.as_str(), fee_manage.as_str()]
+        );
+        assert!(profile
+            .tenants
+            .iter()
+            .all(|tenant| tenant.platform_id.as_deref() == Some(platform.as_str())));
+        assert_eq!(profile.default_tenant_id, None);
+    }
+
+    #[tokio::test]
+    async fn a_single_fee_only_tenant_becomes_the_default() {
+        let platform = tenant_id('p');
+        let fee_list = tenant_id('f');
+        let origin = spawn_platform_granting(
+            json!([platform_me_tenant(&fee_list, Some(&platform))]),
+            vec![(CANCELLATION_FEE_LIST_ACTION, vec![fee_list.clone()])],
+        )
+        .await;
+
+        let profile = extension_profile_against(json!([]), &origin).await;
+
+        assert_eq!(listed_ids(&profile), vec![fee_list.as_str()]);
+        assert_eq!(profile.default_tenant_id, Some(fee_list));
+    }
+
+    #[tokio::test]
+    async fn extension_source_adds_no_host_unswitchable_outside_or_tee_sheet_only_tenant() {
+        let root = tenant_id('r');
+        let platform = tenant_id('p');
+        let hidden = tenant_id('n');
+        let tee_sheet_only = tenant_id('t');
+        let outside = tenant_id('o');
+        let golf = tenant_id('a');
+        let mut hidden_member = platform_me_tenant(&hidden, Some(&platform));
+        hidden_member["switchable"] = json!(false);
+        let everything = vec![
+            root.clone(),
+            hidden.clone(),
+            tee_sheet_only.clone(),
+            outside.clone(),
+        ];
+        let origin = spawn_platform_granting(
+            json!([
+                platform_me_tenant(&root, None),
+                hidden_member,
+                platform_me_tenant(&tee_sheet_only, Some(&platform)),
+            ]),
+            vec![
+                (REPRESENTATIVE_ACTION, everything.clone()),
+                (
+                    CANCELLATION_FEE_LIST_ACTION,
+                    vec![root, hidden, outside.clone()],
+                ),
+                (CANCELLATION_FEE_MANAGE_ACTION, vec![outside]),
+            ],
+        )
+        .await;
+
+        let profile = extension_profile_against(json!([field_tenant(&golf, true)]), &origin).await;
+
+        assert_eq!(listed_ids(&profile), vec![golf.as_str()]);
+        assert_eq!(profile.default_tenant_id, Some(golf));
+    }
+
+    #[tokio::test]
+    async fn a_failed_fee_check_serves_the_extension_list_without_additions() {
+        let platform_a = tenant_id('p');
+        let platform_b = tenant_id('q');
+        let golf = tenant_id('a');
+        let fee_on_a = tenant_id('f');
+        let fee_on_b = tenant_id('g');
+        let (origin, check_bodies) = spawn_fake_platform(
+            json!([
+                platform_me_tenant(&fee_on_a, Some(&platform_a)),
+                platform_me_tenant(&fee_on_b, Some(&platform_b)),
+            ]),
+            vec![
+                (platform_a.clone(), Some(vec![fee_on_a.clone()])),
+                (platform_b.clone(), None),
+            ],
+        )
+        .await;
+
+        let profile = extension_profile_against(json!([field_tenant(&golf, true)]), &origin).await;
+
+        assert_eq!(listed_ids(&profile), vec![golf.as_str()]);
+        assert_eq!(profile.default_tenant_id, Some(golf));
+        assert_eq!(profile.partial, None);
+        assert!(check_bodies
+            .lock()
+            .unwrap()
+            .iter()
+            .all(|body| { CANCELLATION_FEE_ACTIONS.contains(&body["action"].as_str().unwrap()) }));
+    }
+
+    #[tokio::test]
+    async fn an_unreachable_platform_profile_serves_the_extension_list() {
+        let golf = tenant_id('a');
+
+        let profile =
+            extension_profile_against(json!([field_tenant(&golf, true)]), "http://127.0.0.1:1")
+                .await;
+
+        assert_eq!(listed_ids(&profile), vec![golf.as_str()]);
+    }
+
+    #[tokio::test]
+    async fn a_slow_platform_profile_does_not_hold_back_the_extension_list() {
+        let golf = tenant_id('a');
+        let app = Router::new().route(
+            PLATFORM_PROFILE_PATH,
+            get(|| async {
+                tokio::time::sleep(Duration::from_secs(30)).await;
+                StatusCode::OK
+            }),
+        );
+        let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let address = listener.local_addr().unwrap();
+        tokio::spawn(async move {
+            axum::serve(listener, app).await.unwrap();
+        });
+        let body = field_profile(json!([field_tenant(&golf, true)]))
+            .to_string()
+            .into_bytes();
+        let (field_origin, _) = spawn_fake_field(StatusCode::OK, body, Duration::ZERO).await;
+        let client = ProfileClient::with_timeout(&field_origin, Duration::from_secs(60))
+            .unwrap()
+            .with_operators_base(&format!("http://{address}"))
+            .unwrap()
+            .with_tenant_source(TenantSource::Extension);
+
+        let started = std::time::Instant::now();
+        let profile = client.get_profile("Bearer accepted-fixture").await.unwrap();
+
+        assert!(
+            started.elapsed() < FEE_TENANT_DISCOVERY_TIMEOUT + Duration::from_secs(2),
+            "{:?}",
+            started.elapsed()
+        );
+        assert_eq!(listed_ids(&profile), vec![golf.as_str()]);
     }
 
     #[test]

@@ -159,7 +159,9 @@ pub struct RuntimeConfig {
 
     /// Which source `/v1/me` uses to list the caller's tenants (ADR-0011).
     ///
-    /// `extension` keeps the current Field `/v1/erp/me` extension filter.
+    /// `extension` keeps the current Field `/v1/erp/me` extension filter and
+    /// adds the tenants that grant a cancellation-fee action, so a fee-only
+    /// operator can choose a tenant without changing anyone else's list.
     /// `compare` still serves the extension answer but also runs the
     /// policy-based path in the background and logs the difference — run it
     /// in production for at least one business week before switching.
@@ -349,7 +351,8 @@ pub enum SettlementSource {
 /// Where `/v1/me` gets the caller's tenant list from (ADR-0011).
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub enum TenantSource {
-    /// Field `/v1/erp/me` filtered by the golf extension flag (current).
+    /// Field `/v1/erp/me` filtered by the golf extension flag, plus the
+    /// cancellation-fee tenants (current).
     Extension,
     /// Serve the extension answer, run the policy path too, log the diff.
     Compare,
@@ -419,6 +422,20 @@ fn parse_csv_set(value: Option<&str>) -> HashSet<String> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn tenant_discovery_defaults_to_the_extension_source() {
+        assert_eq!(
+            RuntimeConfig::default().tenant_source(),
+            TenantSource::Extension
+        );
+        let command = <RuntimeConfig as clap::CommandFactory>::command();
+        let argument = command
+            .get_arguments()
+            .find(|argument| argument.get_id() == "tenant_source")
+            .unwrap();
+        assert_eq!(argument.get_default_values(), ["extension"]);
+    }
 
     /// A close that reaches accounting must never move because a value was
     /// mistyped: anything unrecognised leaves Field in charge.

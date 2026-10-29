@@ -131,15 +131,11 @@ describe('fetchTenantTimezone', () => {
     expect(courseboardApiJson).toHaveBeenCalledWith('/v1/course/tenant-timezone')
   })
 
-  it('falls back to the full status only when the endpoint is unknown', async () => {
-    courseboardApiJson.mockRejectedValueOnce(new ApiError('ListExtensionStatus denied', 403))
-    await expect(fetchTenantTimezone()).rejects.toThrow('denied')
+  it.each([403, 404])('never falls back to the full extension status on %s', async status => {
+    courseboardApiJson.mockReset()
+    courseboardApiJson.mockRejectedValueOnce(new ApiError('refused', status))
+    await expect(fetchTenantTimezone()).rejects.toThrow('refused')
     expect(courseboardApiJson).toHaveBeenCalledTimes(1)
-
-    courseboardApiJson
-      .mockRejectedValueOnce(new ApiError('not found', 404))
-      .mockResolvedValueOnce({ configJson: { timezone: 'Asia/Tokyo' } })
-    await expect(fetchTenantTimezone()).resolves.toEqual({ configJson: { timezone: 'Asia/Tokyo' } })
-    expect(courseboardApiJson).toHaveBeenLastCalledWith('/v1/course/extension-status')
+    expect(courseboardApiJson).not.toHaveBeenCalledWith('/v1/course/extension-status')
   })
 })
