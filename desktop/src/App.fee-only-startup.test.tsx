@@ -92,9 +92,13 @@ it('opens the cancellation-fee list for a fee-only operator without touching oth
     expect(requestedPaths(fetchMock).some(path => path.includes('cancellation-fee'))).toBe(true)
   })
 
-  const paths = requestedPaths(fetchMock)
-  expect(paths).toContain('/v1/field/client-capabilities')
-  expect(paths).not.toContain('/v1/course/extension-status')
-  expect(paths.filter(path => path.startsWith('/v1/course/customers'))).toEqual([])
-  expect(paths.filter(path => /reservation|tee-ledger|tee-sheet/.test(path))).toEqual([])
+  await new Promise(resolve => setTimeout(resolve, 200))
+
+  expect([...new Set(requestedPaths(fetchMock))].sort()).toEqual([
+    '/field-api/v1/cancellation-fees',
+    '/v1/course/feature-deliveries/evaluate',
+    '/v1/course/feature-flags/evaluate',
+    '/v1/course/tenant-timezone',
+    '/v1/field/client-capabilities',
+  ])
 })
