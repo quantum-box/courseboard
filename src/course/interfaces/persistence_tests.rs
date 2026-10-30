@@ -73,10 +73,6 @@ struct FieldState {
     caddie_assignments: Mutex<Vec<Value>>,
 }
 
-async fn golf_course_timezone(State(state): State<Arc<FieldState>>) -> Json<Value> {
-    Json(json!({ "timezone": state.config.lock().unwrap().get("timezone").cloned() }))
-}
-
 async fn extension_status(State(state): State<Arc<FieldState>>) -> Json<Value> {
     Json(json!({
         "items": [{
@@ -318,10 +314,6 @@ fn reservation(custom_fields: &Value) -> Value {
 async fn spawn_field(state: Arc<FieldState>) -> String {
     let app = Router::new()
         .route("/v1/erp/extensions/status", get(extension_status))
-        .route(
-            "/v1/erp/extensions/golf_course/timezone",
-            get(golf_course_timezone),
-        )
         .route(
             "/v1/erp/extensions/golf_course/config",
             patch(patch_config).put(patch_config),
@@ -1550,10 +1542,6 @@ async fn group_detail_field_did_not_store_is_reported_instead_of_claimed() {
         .route(
             "/v1/erp/extensions/status",
             get(|| async { Json(json!({ "items": [] })) }),
-        )
-        .route(
-            "/v1/erp/extensions/golf_course/timezone",
-            get(|| async { Json(json!({ "timezone": null })) }),
         );
     let listener = tokio::net::TcpListener::bind("127.0.0.1:0")
         .await
@@ -1698,10 +1686,6 @@ async fn a_tenant_with_no_reservation_type_is_told_what_to_do_rather_than_half_s
     let state = Arc::new(FieldState::default());
     let app = Router::new()
         .route("/v1/erp/extensions/status", get(extension_status))
-        .route(
-            "/v1/erp/extensions/golf_course/timezone",
-            get(golf_course_timezone),
-        )
         .route(
             "/v1/erp/extensions/golf_course/config",
             patch(patch_config).put(patch_config),
