@@ -29,6 +29,9 @@ use crate::course::infrastructure::party_custom_fields;
 use crate::field_api::DEFAULT_FIELD_API_URL;
 
 const GOLF_EXTENSION_KEY: &str = "golf_course";
+/// Field returns only the timezone here, under any reservation or
+/// cancellation-fee action, so a cancellation-fee-only user can read it.
+const TENANT_TIMEZONE_PATH: &str = "/v1/erp/extensions/golf_course/timezone";
 const RESERVATION_LIST_LIMIT: u32 = 2000;
 const FIELD_UPSTREAM_TIMEOUT: Duration = Duration::from_secs(15);
 /// OCR-backed tabular analysis can take longer than ordinary Field JSON calls.
@@ -607,6 +610,11 @@ pub(super) async fn write_extension_config_key(
 }
 
 #[derive(Debug, Deserialize)]
+struct FieldTenantTimezoneDto {
+    timezone: Option<String>,
+}
+
+#[derive(Debug, Deserialize)]
 #[serde(rename_all = "camelCase")]
 struct FieldExtensionConfigDto {
     extension_key: String,
@@ -620,8 +628,20 @@ impl GolfCatalogGateway for FieldGolfCatalogGateway {
         &self,
         credentials: GatewayCredentials<'_>,
     ) -> Result<String, CourseError> {
-        Ok(crate::course::domain::tenant_timezone_from_config(
-            &self.read_config(credentials).await?,
+        if is_empty_course_store(&self.base_url) {
+            return Ok(crate::course::domain::tenant_timezone_or_default(None));
+        }
+        let dto: FieldTenantTimezoneDto = field_send_json(
+            &self.client,
+            &self.base_url,
+            reqwest::Method::GET,
+            TENANT_TIMEZONE_PATH,
+            credentials,
+            None,
+        )
+        .await?;
+        Ok(crate::course::domain::tenant_timezone_or_default(
+            dto.timezone.as_deref(),
         ))
     }
 
