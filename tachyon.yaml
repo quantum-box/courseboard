@@ -211,7 +211,7 @@ spec:
             # applied; every other tenant stays in `shadow`. Roll back by
             # removing the entry.
             - name: COURSEBOARD_FEATURE_DELIVERY_ENFORCE_TENANTS
-              value: tn_01m5kn5rn6vsms2xs7tj5kksqp
+              value: tn_01m5kn5rn6vsms2xs7tj5kksqp,tn_01m65afarh1y4j44bz8vrp80hq
         preview:
           # Tachyon provisions an isolated database and scoped user for each PR.
           # DATABASE_URL is injected from the matching PR-scoped secret.
