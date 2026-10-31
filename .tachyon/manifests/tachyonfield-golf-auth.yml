@@ -124,10 +124,6 @@ actions:
   description: Running fee and golf-course-tax simulations.
   global: true
 - context: field_extension_golf
-  name: ManageCancellationFees
-  description: Collecting a cancellation fee and issuing its invoice.
-  global: true
-- context: field_extension_golf
   name: ListReservationReports
   description: Reading the reservation reports taken off a spreadsheet.
   global: true
@@ -402,7 +398,9 @@ policies:
     effect: allow
   - action: field_extension_golf:CalculateFees
     effect: allow
-  - action: field_extension_golf:ManageCancellationFees
+  - action: field:ListCancellationFees
+    effect: allow
+  - action: field:ManageCancellationFees
     effect: allow
   - action: field_extension_golf:ListReservationReports
     effect: allow
@@ -518,7 +516,9 @@ policies:
     effect: allow
   - action: field_extension_golf:ManageCaddies
     effect: allow
-  - action: field_extension_golf:ManageCancellationFees
+  - action: field:ListCancellationFees
+    effect: allow
+  - action: field:ManageCancellationFees
     effect: allow
   - action: field_extension_golf:ManageCourses
     effect: allow
