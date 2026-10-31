@@ -96,25 +96,10 @@ pub const MANAGE_BUDGETS: &str = "field_extension_golf:ManageBudgets";
 
 /// Running fee and golf-course-tax simulations.
 pub const CALCULATE_FEES: &str = "field_extension_golf:CalculateFees";
-/// Collecting a cancellation fee and issuing its invoice.
-///
-/// The golf extension's name for it, granted today by the accounting and
-/// manager roles. PLT-5223 moved the cancellation-fee product onto
-/// [`FIELD_MANAGE_CANCELLATION_FEES`]; this one is still accepted alongside it
-/// (see [`SETTLE_CANCELLATION_FEES`]) until production policies carry the
-/// Field action, then removed.
-pub const MANAGE_CANCELLATION_FEES: &str = "field_extension_golf:ManageCancellationFees";
-
-/// Field's cancellation-fee action (PLT-5223), granted by
-/// `field:CancellationFeeBilling`. Declared in tachyonfield's manifest, not in
-/// ours, so it is not in [`ALL`].
+/// Collecting a cancellation fee and issuing its invoice. Field's action
+/// (PLT-5223), granted by `field:CancellationFeeBilling`. Declared in
+/// tachyonfield's manifest, not in ours, so it is not in [`ALL`].
 pub const FIELD_MANAGE_CANCELLATION_FEES: &str = "field:ManageCancellationFees";
-
-/// What settling cancellation fees accepts while the action moves to Field:
-/// either one is enough. The Field action is asked first, since it is the one
-/// that stays.
-pub const SETTLE_CANCELLATION_FEES: &[&str] =
-    &[FIELD_MANAGE_CANCELLATION_FEES, MANAGE_CANCELLATION_FEES];
 
 /// Reading the reservation reports taken off a spreadsheet.
 pub const LIST_RESERVATION_REPORTS: &str = "field_extension_golf:ListReservationReports";
@@ -203,7 +188,6 @@ pub const ALL: &[&str] = &[
     LIST_BUDGETS,
     MANAGE_BUDGETS,
     CALCULATE_FEES,
-    MANAGE_CANCELLATION_FEES,
     LIST_RESERVATION_REPORTS,
     IMPORT_RESERVATION_REPORTS,
     LIST_EXTENSION_STATUS,

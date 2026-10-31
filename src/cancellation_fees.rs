@@ -430,7 +430,7 @@ pub async fn create_collection(
         &state,
         &headers,
         tenant_id,
-        crate::course::domain::actions::MANAGE_CANCELLATION_FEES,
+        crate::course::domain::actions::FIELD_MANAGE_CANCELLATION_FEES,
     )
     .await?;
     let customer_name = required_text(&request.customer_name, "customer_name is required")?;
