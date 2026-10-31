@@ -39,7 +39,7 @@ impl SettleCancellationFeesUseCase {
         decisions: &[CancellationFeeDecision],
     ) -> Result<Vec<ReservationCancellation>, CourseError> {
         credentials
-            .require_any(actions::SETTLE_CANCELLATION_FEES)
+            .require(actions::FIELD_MANAGE_CANCELLATION_FEES)
             .await?;
         if decisions.is_empty() {
             return Err(CourseError::BadRequest(
@@ -150,15 +150,7 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn the_golf_action_alone_still_settles() {
-        assert!(matches!(
-            settle_as(&[actions::MANAGE_CANCELLATION_FEES]).await,
-            Err(CourseError::BadRequest(_))
-        ));
-    }
-
-    #[tokio::test]
-    async fn the_field_action_alone_settles() {
+    async fn the_field_action_settles() {
         assert!(matches!(
             settle_as(&[actions::FIELD_MANAGE_CANCELLATION_FEES]).await,
             Err(CourseError::BadRequest(_))
@@ -166,19 +158,15 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn holding_both_actions_settles() {
+    async fn the_retired_golf_action_is_refused() {
         assert!(matches!(
-            settle_as(&[
-                actions::FIELD_MANAGE_CANCELLATION_FEES,
-                actions::MANAGE_CANCELLATION_FEES,
-            ])
-            .await,
-            Err(CourseError::BadRequest(_))
+            settle_as(&["field_extension_golf:ManageCancellationFees"]).await,
+            Err(CourseError::Forbidden("field:ManageCancellationFees"))
         ));
     }
 
     #[tokio::test]
-    async fn neither_action_is_refused_naming_the_field_action() {
+    async fn listing_alone_is_refused() {
         assert!(matches!(
             settle_as(&["field:ListCancellationFees"]).await,
             Err(CourseError::Forbidden("field:ManageCancellationFees"))

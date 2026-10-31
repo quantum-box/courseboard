@@ -40,8 +40,7 @@ const FIELD_PREVIEW_BRIDGE_RUN: &str = "field:PreviewBridgeRun";
 const FIELD_EXECUTE_BRIDGE_DRAFTS: &str = "field:ExecuteBridgeDrafts";
 const FIELD_LIST_BRIDGE_EXPORT_DEFINITIONS: &str = "field:ListBridgeExportDefinitions";
 const FIELD_MANAGE_BRIDGE_EXPORT_DEFINITIONS: &str = "field:ManageBridgeExportDefinitions";
-// PLT-5223 fixed the cancellation-fee product on these Field actions, not on
-// the golf extension's `ManageCancellationFees`.
+// PLT-5223 fixed the cancellation-fee product on these Field actions.
 const FIELD_LIST_CANCELLATION_FEES: &str = "field:ListCancellationFees";
 const FIELD_MANAGE_CANCELLATION_FEES: &str = "field:ManageCancellationFees";
 
