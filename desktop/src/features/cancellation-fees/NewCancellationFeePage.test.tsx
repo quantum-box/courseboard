@@ -263,6 +263,19 @@ describe('the recipient name without the customer ledger', () => {
     expect(screen.queryByRole('button', { name: /台帳に登録/ })).toBeNull()
   })
 
+  it('refuses a total under ¥50 at submit, before anything is created', async () => {
+    const view = renderPageWithDelivery(['courseboard.cancellation_fee'])
+    fillLinkOnlySnapshot()
+    fireEvent.change(view.container.querySelector('input[name="amount"]')!, {
+      target: { value: '1' },
+    })
+    fireEvent.click(screen.getByRole('button', { name: '送る内容を確認する' }))
+
+    expect(await screen.findAllByText(/合計は 50 円以上で入力してください/)).toBeTruthy()
+    expect(screen.queryByText('この内容で送ります')).toBeNull()
+    expect(api.field.mock.calls.some(call => call[0] === '/v1/cancellation-fees')).toBe(false)
+  })
+
   it('bills the typed name after the customer ledger is withdrawn from the plan', async () => {
     configureTestUser('user_test')
     vi.stubGlobal('crypto', { randomUUID: () => '123e4567-e89b-42d3-a456-426614174000' })

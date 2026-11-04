@@ -167,7 +167,7 @@ export const cancellationFees: DeepPartial<typeof source> = {
     validation: {
       channel: 'Choose email, SMS, or both.',
       consent: 'Confirm the recipient’s consent before sending SMS.',
-      amount: 'Enter a cancellation fee of 1 or more.',
+      amount: 'Enter a total of ¥50 or more. Online card payment does not accept less than ¥50.',
       phone: 'Enter the SMS number as a Japanese mobile number or in E.164 form.',
       billTo: 'Enter the recipient’s name. Billing a company also needs a client ID.',
     },

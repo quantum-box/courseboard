@@ -73,6 +73,9 @@ export {
 
 type InvoiceStatus = 'Draft' | 'Sent' | 'SendFailed' | 'Paid' | 'Overdue' | 'Void'
 
+/** Stripe の最低決済額。Field API も同じ値で作成を拒否する。 */
+const ONLINE_PAYMENT_MINIMUM_YEN = 50
+
 const DELIVERY_KEY_PATTERN = /^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/
 const CREATE_KEY_STORAGE_PREFIX = 'courseboard:cancellation-fee:create-keys'
 const CREATE_RECOVERY_STORAGE_PREFIX = 'courseboard:cancellation-fee:create-recovery'
@@ -1006,7 +1009,9 @@ function NewCancellationFeeContent({
     const notes = String(form.get('notes') ?? '').trim()
     const typedPhone = String(form.get('clientPhone') ?? '').trim()
     const customerPhone = normalizePhone(typedPhone)
-    if (!Number.isFinite(amount) || amount <= 0) {
+    // The payer pays through a Stripe link, and Stripe refuses a charge under
+    // ¥50, so a smaller fee would reach the payer as a link that cannot be paid.
+    if (!Number.isFinite(amount) || amount + taxAmount < ONLINE_PAYMENT_MINIMUM_YEN) {
       setError(t('cancellationFees:new.validation.amount'))
       return
     }
