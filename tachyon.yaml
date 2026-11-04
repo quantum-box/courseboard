@@ -168,6 +168,29 @@ spec:
         # paths, so nothing has to change there.
         - name: COURSEBOARD_FIELD_GENERIC_PATHS
           value: "true"
+        # Lambda reads its runtime env only from what Tachyon stores, and Tachyon
+        # stores base envVars but never `environments.production.envVars`
+        # (tachyon-apps PLT-5954). Keep runtime switches here, or production
+        # keeps the old value. The production overlay below repeats them so
+        # the build sees the same values.
+        # Product-plan delivery guard (src/feature_delivery/mod.rs).
+        # `shadow` never blocks or changes a request and does not read the
+        # body: it reads a sampled share of decisions from Core (once per
+        # tenant and feature per minute per instance) and logs them under
+        # the `courseboard::feature_delivery::decision` target. Screens
+        # stay as in `off`. Roll back by setting it to "off".
+        - name: COURSEBOARD_FEATURE_DELIVERY_ENFORCEMENT
+          value: shadow
+        - name: COURSEBOARD_FEATURE_DELIVERY_SHADOW_SAMPLE_RATE
+          value: "0.01"
+        # Enforce only these operators whatever the mode above is
+        # (src/feature_delivery/mod.rs). The CourseBoard cancellation-fee
+        # sandbox and demo tenants on the Tachyon dev platform run with their
+        # plan applied; every other tenant stays in `shadow`. Roll back by
+        # taking the ID out of the value: deleting the key leaves the stored
+        # production value in place.
+        - name: COURSEBOARD_FEATURE_DELIVERY_ENFORCE_TENANTS
+          value: tn_01m5kn5rn6vsms2xs7tj5kksqp,tn_01m65afarh1y4j44bz8vrp80hq
       environments:
         production:
           envVars:
