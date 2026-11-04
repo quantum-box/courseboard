@@ -9,6 +9,7 @@ export const home: DeepPartial<typeof source> = {
     eyebrow: '今日の仕事',
     title: '何をしますか',
     description: '下の四角から、これからする仕事を選んでください。',
+    descriptionGeneric: '下の四角から、これからする仕事を選んでください。',
     featured: 'よく使う仕事',
   },
   features: {

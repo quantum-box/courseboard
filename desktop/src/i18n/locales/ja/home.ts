@@ -5,6 +5,7 @@ export const home = {
     eyebrow: '今日の業務',
     title: 'どこから始めますか',
     description: '予約の確認からキャディ配置、精算まで、行う仕事を選んでください。',
+    descriptionGeneric: '行う仕事を選んでください。',
     featured: 'よく使う業務',
   },
   features: {

@@ -196,6 +196,20 @@ describe('フラグで出し分ける画面', () => {
         expect(screen.queryAllByRole('button', { name: IMPORT_LABEL })).toHaveLength(0)
       })
     })
+
+    // 使えない画面の手順を並べると、契約していない業務を案内してしまう。
+    it('使えない画面の手順は「今日の進めかた」に出さない', async () => {
+      flagsAnswer(true)
+      renderWith(<GolfHomePage />)
+
+      await waitFor(() => {
+        expect(screen.getAllByRole('button', { name: IMPORT_LABEL }).length).toBeGreaterThan(0)
+      })
+      // 使えるのは予約台帳の手順だけなので、手順の欄ごと出さない。
+      expect(screen.queryByText('今日の進めかた')).toBeNull()
+      expect(screen.queryByText('空いている組と重なりを直して担当を決める')).toBeNull()
+      expect(screen.queryByText('予約の確認からキャディ配置、精算まで、行う仕事を選んでください。')).toBeNull()
+    })
   })
 })
 

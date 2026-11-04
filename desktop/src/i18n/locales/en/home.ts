@@ -8,6 +8,7 @@ export const home: DeepPartial<typeof source> = {
     eyebrow: "Today's operations",
     title: 'Where do you want to start?',
     description: 'Choose the task you need, from bookings and caddie assignments to settlement.',
+    descriptionGeneric: 'Choose the task you need.',
     featured: 'Frequently used tasks',
   },
   features: {
