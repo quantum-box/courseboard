@@ -1119,6 +1119,9 @@ function NewCancellationFeeContent({
           description: frozenSubmission.description,
           quantity: 1,
           unitPrice: frozenSubmission.amount,
+          // A line without a category is taxable_10 in Field, and an
+          // out_of_scope invoice over a taxable line cannot be posted.
+          taxCategory: 'out_of_scope',
         }],
         dueDate: frozenSubmission.dueDate,
         currency: 'JPY',
@@ -1126,6 +1129,9 @@ function NewCancellationFeeContent({
         taxAmount: frozenSubmission.taxAmount,
         notes: frozenSubmission.notes,
         createPaymentLink: true,
+        // Without a provider Field builds the link with Square, which no
+        // CourseBoard tenant configures; the server paths ask for Stripe too.
+        paymentLinkProvider: 'stripe',
         sendEmail: frozenSubmission.sendEmail,
         sendSms: frozenSubmission.sendSms,
       })

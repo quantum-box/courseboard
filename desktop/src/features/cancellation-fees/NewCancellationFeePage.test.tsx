@@ -349,6 +349,11 @@ describe('the dedicated cancellation fee form', () => {
     })
     expect(body.idempotencyKey).toMatch(/^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/)
     expect(body.lineItems).toHaveLength(1)
+    // 明細と請求の税区分が違うと、Field は売上を税区分ごとに分けられず 400 を返す。
+    expect(body.taxCategory).toBe('out_of_scope')
+    expect(body.lineItems[0].taxCategory).toBe('out_of_scope')
+    // 指定しないと Field は Square で支払いリンクを作ろうとする。
+    expect(body.paymentLinkProvider).toBe('stripe')
     expect(body).not.toHaveProperty('status')
     expect(body).not.toHaveProperty('clientId')
     expect(body).not.toHaveProperty('sources')
