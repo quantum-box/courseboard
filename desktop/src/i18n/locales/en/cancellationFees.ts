@@ -238,6 +238,14 @@ export const cancellationFees: DeepPartial<typeof source> = {
       unitPrice: 'Unit price',
       amount: 'Amount',
     },
+    void: {
+      action: 'Void',
+      working: 'Voiding…',
+      confirm: 'Void this fee? A voided fee cannot be restored, and its payment link stops working.',
+      reason: 'Voided from the CourseBoard cancellation-fee screen',
+      done: 'The fee was voided.',
+      failed: 'Could not void it',
+    },
     notice: {
       resent: 'Refreshed the payment link and delivery status.',
       resendFailed: 'Could not resend it',

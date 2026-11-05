@@ -233,6 +233,14 @@ export const cancellationFees = {
       unitPrice: '単価',
       amount: '金額',
     },
+    void: {
+      action: '取り消す',
+      working: '取り消しています…',
+      confirm: 'この請求を取り消します。取り消した請求は、元に戻せません。支払いリンクも使えなくなります。よろしいですか？',
+      reason: 'CourseBoard のキャンセル料の画面から取り消し',
+      done: '請求を取り消しました。',
+      failed: '取り消せませんでした',
+    },
     notice: {
       resent: '支払いリンクと知らせの状態を新しくしました。',
       resendFailed: '送り直せませんでした',

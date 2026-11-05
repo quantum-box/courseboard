@@ -222,6 +222,14 @@ export const cancellationFees: DeepPartial<typeof source> = {
       unitPrice: '1つあたりの金額',
       amount: '金額',
     },
+    void: {
+      action: '取り消す',
+      working: '取り消しています…',
+      confirm: 'この請求を取り消します。取り消すと、元にはもどせません。支払いのリンクも使えなくなります。取り消しますか？',
+      reason: 'CourseBoard のキャンセル料の画面から取り消し',
+      done: '請求を取り消しました。',
+      failed: '取り消すことができませんでした',
+    },
     notice: {
       resent: '支払い用のリンクと、お知らせの状態を新しくしました。',
       resendFailed: 'もう一度送ることができませんでした',
