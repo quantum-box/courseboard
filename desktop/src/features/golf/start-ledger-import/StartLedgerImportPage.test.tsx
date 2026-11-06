@@ -1,5 +1,5 @@
 /* @vitest-environment jsdom */
-import { cleanup, fireEvent, render, screen, within } from '@testing-library/react'
+import { cleanup, fireEvent, render, screen, waitFor, within } from '@testing-library/react'
 import { I18nextProvider } from 'react-i18next'
 import { afterEach, beforeEach, expect, it, vi } from 'vitest'
 import { i18next } from '../../../i18n'
@@ -83,4 +83,23 @@ it('resumes the read this desk left behind', async () => {
   await screen.findByRole('region', { name: '空沼OUT 08:45' })
   expect(mock.get).toHaveBeenCalledWith('goj_1', expect.any(AbortSignal))
   expect(screen.getByText(/原本を見ながら確認するには/u)).toBeTruthy()
+})
+
+it('keeps the date editable when every group failed, and forgets those failures on a new date', async () => {
+  localStorage.setItem('courseboard.start-ledger-operation:tenant-a:platform-a:actor-a', JSON.stringify({ idempotencyKey: 'k', jobId: 'goj_1' }))
+  mock.get.mockResolvedValue(completed)
+  mock.context.mockResolvedValue(context)
+  mock.importParties.mockResolvedValue([{ outcome: 'failed', message: '枠がありません' }])
+  const { container } = mount()
+  const first = await screen.findByRole('region', { name: '空沼OUT 08:45' })
+  fireEvent.click(within(first).getByRole('checkbox', { name: '原本と照合した' }))
+  fireEvent.click(screen.getByRole('button', { name: /予約台帳に登録/u }))
+  await screen.findByText('登録 0 組・とばした組 0 組・失敗 1 組')
+
+  const dateInput = container.querySelector('input[type=date]') as HTMLInputElement
+  expect(dateInput.disabled).toBe(false)
+  fireEvent.change(dateInput, { target: { value: '2026-11-08' } })
+  await waitFor(() => expect(mock.context).toHaveBeenCalledWith('2026-11-08', expect.any(AbortSignal)))
+  await waitFor(() => expect(within(first).queryByText(/枠がありません/u)).toBeNull())
+  expect(within(first).getByRole('checkbox', { name: '原本と照合した' })).toBeTruthy()
 })

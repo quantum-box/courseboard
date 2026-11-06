@@ -124,7 +124,9 @@ export function StartLedgerImportPage() {
     const loaded = await getStartLedgerContext(value, signal)
     signal.throwIfAborted()
     setContext(loaded)
-    setParties(previous => previous.length ? rematch(previous, loaded) : read ? buildReview(read, loaded) : previous)
+    // A failure belongs to the old date; the date is only locked once something is booked.
+    const cleared = (list: ReviewParty[]) => list.map(party => party.result?.outcome === 'failed' ? { ...party, result: undefined } : party)
+    setParties(previous => previous.length ? rematch(cleared(previous), loaded) : read ? buildReview(read, loaded) : previous)
   }
 
   function edit(key: string, change: (party: ReviewParty) => ReviewParty) {
@@ -189,7 +191,7 @@ export function StartLedgerImportPage() {
       {read.warnings.length > 0 && <Notice tone="warning">{t('readWarnings', { count: read.warnings.length })}</Notice>}
       <Panel title={t('date')}>
         {!read.date && <Notice tone="warning">{t('dateMissing')}</Notice>}
-        <Field label={t('date')}><Input type="date" value={date} disabled={busy || results.length > 0} onChange={event => { const value = event.target.value; void run(signal => changeDate(value, signal)) }} /></Field>
+        <Field label={t('date')}><Input type="date" value={date} disabled={busy || parties.some(isDone)} onChange={event => { const value = event.target.value; void run(signal => changeDate(value, signal)) }} /></Field>
         <p role="status">{t('summary', { count: parties.length })} · {pending.length ? t('pending', { count: pending.length }) : t('allChecked')}</p>
       </Panel>
 
