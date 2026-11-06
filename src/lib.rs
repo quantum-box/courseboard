@@ -3,6 +3,7 @@ use std::sync::Arc;
 use anyhow::Context;
 
 mod admin_ui;
+pub mod agent;
 pub mod auth;
 pub mod cancellation_fees;
 mod common_import_owner;
@@ -96,6 +97,7 @@ pub struct AppState {
     reservation_report_gateway: Arc<MigratingReservationReportGateway>,
     cancellation_fee_config: CancellationFeeConfig,
     http_client: reqwest::Client,
+    agent_api_base_url: String,
     token_verifier: Arc<dyn TokenVerifier>,
     field_api: Option<DynFieldApi>,
     field_api_config_error: Option<String>,
@@ -182,6 +184,7 @@ impl AppState {
             )),
             cancellation_fee_config,
             http_client: reqwest::Client::new(),
+            agent_api_base_url: config::DEFAULT_TACHYON_API_URL.to_string(),
             token_verifier,
             field_api: None,
             field_api_config_error: Some(
@@ -271,6 +274,7 @@ impl AppState {
             )),
             cancellation_fee_config,
             http_client: reqwest::Client::new(),
+            agent_api_base_url: config::DEFAULT_TACHYON_API_URL.to_string(),
             token_verifier,
             field_api: Some(field_api),
             field_api_config_error: None,
@@ -350,6 +354,7 @@ impl AppState {
                 )),
                 cancellation_fee_config,
                 http_client: reqwest::Client::new(),
+                agent_api_base_url: config::DEFAULT_TACHYON_API_URL.to_string(),
                 token_verifier,
                 field_api: Some(Arc::new(client)),
                 field_api_config_error: None,
@@ -420,6 +425,7 @@ impl AppState {
                 )),
                 cancellation_fee_config,
                 http_client: reqwest::Client::new(),
+                agent_api_base_url: config::DEFAULT_TACHYON_API_URL.to_string(),
                 token_verifier,
                 field_api: None,
                 field_api_config_error: Some(error.to_string()),
@@ -1571,6 +1577,41 @@ pub fn build_router(state: AppState) -> Router {
             ),
         )
         .route(
+            "/v1/course/agent/sessions",
+            post(agent::create_session).route_layer(middleware::from_fn_with_state(
+                state.clone(),
+                require_valid_token,
+            )),
+        )
+        .route(
+            "/v1/course/agent/sessions/:session/execute-request",
+            post(agent::execute_request).route_layer(middleware::from_fn_with_state(
+                state.clone(),
+                require_valid_token,
+            )),
+        )
+        .route(
+            "/v1/course/agent/sessions/:session/execute",
+            post(agent::execute).route_layer(middleware::from_fn_with_state(
+                state.clone(),
+                require_valid_token,
+            )),
+        )
+        .route(
+            "/v1/course/agent/sessions/:session/:operation",
+            post(agent::relay).route_layer(middleware::from_fn_with_state(
+                state.clone(),
+                require_valid_token,
+            )),
+        )
+        .route(
+            "/v1/course/agent/operations",
+            get(agent::operations).route_layer(middleware::from_fn_with_state(
+                state.clone(),
+                require_valid_token,
+            )),
+        )
+        .route(
             "/field-api/*path",
             get(field_proxy::proxy_field_api)
                 .post(field_proxy::proxy_field_api)
@@ -1804,7 +1845,7 @@ async fn build_app_with_pool(config: RuntimeConfig, pool: MySqlPool) -> anyhow::
             navigation_policy_checker: Some(fresh_checker),
         }
     };
-    let state =
+    let mut state =
         AppState::with_optional_field_api(pool, token_verifier, field_api, cancellation_fee_config)
             .with_feature_flag_evaluator(Arc::new(feature_flags::TachyonFeatureFlagEvaluator::new(
                 &tachyon_api_url,
@@ -1825,6 +1866,7 @@ async fn build_app_with_pool(config: RuntimeConfig, pool: MySqlPool) -> anyhow::
             .with_policy_cache(authorization.policy_cache)
             .with_navigation_policy_checker(authorization.navigation_policy_checker);
 
+    state.agent_api_base_url = tachyon_api_url;
     Ok(build_router(state))
 }
 

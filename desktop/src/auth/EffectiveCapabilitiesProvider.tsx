@@ -153,6 +153,8 @@ export function startupRouteForCapabilities(
   // operator route; otherwise a saved/default URL would hide a 404 behind the
   // cancellation-fee home.
   if (routeCapabilityDecision(route, capabilities) === undefined) return null
+  // The assistant is shared by fee-only and full-course operators.
+  if (route === 'agent') return null
   // Only a complete, explicit denial for every non-fee route can establish
   // that this is a fee-only operator. The legacy navigation aggregate is not
   // authoritative for route access and cannot grant or suppress Golf UI.

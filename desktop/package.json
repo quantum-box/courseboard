@@ -33,6 +33,7 @@
     "@pdf-lib/fontkit": "^1.1.1",
     "@stripe/react-stripe-js": "^6.6.0",
     "@stripe/stripe-js": "^9.8.0",
+    "@tachyon-sdk/agent": "0.4.1",
     "@tachyon-sdk/native-ui": "git+https://github.com/quantum-box/native-ui.git#f2c2d704e61c321c8b73d5e2e35d5de104bfd3be",
     "@tauri-apps/api": "^2.10.1",
     "fflate": "^0.8.2",
@@ -44,6 +45,8 @@
     "react": "^19.2.4",
     "react-dom": "^19.2.4",
     "react-i18next": "^15.7.4",
+    "react-markdown": "10.1.0",
+    "remark-gfm": "4.0.1",
     "tesseract.js": "^6.0.1",
     "three": "^0.169.0"
   },

@@ -1,0 +1,60 @@
+import type { DeepPartial } from '../../types'
+import type { agent as source } from '../ja/agent'
+
+export const agent: DeepPartial<typeof source> = {
+  chat: {
+  "title": "Courseboard エージェント",
+  "description": "予約やお客様の情報、売上について、普段の言葉で頼めます。",
+  "new": "新しい会話",
+  "conversation": "会話",
+  "welcome": "調べたいことや、変更したい内容を入力してください。",
+  "examples": {
+    "reservations": "今日の予約状況を確認して",
+    "customers": "顧客を名前で探したい",
+    "summary": "今月の売上と来場者数を集計して"
+  },
+  "you": "あなた",
+  "assistant": "エージェント",
+  "working": "処理しています…",
+  "searching": "使える業務操作を探しています",
+  "describing": "操作内容を確認しています",
+  "confirmTitle": "この変更を実行しますか？",
+  "change": "業務データを変更します。",
+  "confirmDescription": "この内容でデータを変更します。変更した後は、この画面では元に戻せません。",
+  "approve": "この内容で実行",
+  "reject": "実行しない",
+  "declined": "変更を実行しませんでした",
+  "prompt": "依頼内容",
+  "placeholder": "例：今日の予約状況を教えて",
+  "send": "送信",
+  "stop": "中断",
+  "awaiting": "変更の確認を待っています",
+  "hint": "データの更新前に、内容を確認できます。",
+  "tooLong": "依頼文が長すぎます。短くして送信してください。",
+  "interrupted": "処理を中断しました。実行済みの変更は取り消されません。必要に応じて対象の画面で確認し、新しい会話から再開してください。",
+  "forbidden": "エージェントを利用する権限またはAIの利用設定を確認できませんでした。管理者に確認してください。",
+  "failed": "応答を完了できませんでした。変更が実行済みの可能性があるため、対象の画面で確認してから新しい会話を始めてください。",
+  "demo": "デモ表示です。AIへの接続や業務データの変更は行いません。",
+  "demoReply": "ここでは会話画面のデモを表示しています。実際の環境では、ログイン中の権限を使って予約・顧客・集計を確認できます。",
+  "fields": {
+    "name": "名前",
+    "customerName": "顧客名",
+    "customerId": "顧客",
+    "reservationId": "予約",
+    "date": "日付",
+    "startTime": "開始時刻",
+    "endTime": "終了時刻",
+    "amount": "金額",
+    "status": "状態",
+    "reason": "理由",
+    "phone": "電話番号",
+    "email": "メールアドレス",
+    "courseId": "コース",
+    "partySize": "人数",
+    "notes": "備考",
+    "target": "対象",
+    "body": "内容",
+    "query": "条件"
+  }
+},
+}

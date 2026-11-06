@@ -31,6 +31,7 @@ import {
   TooltipTrigger,
 } from '@tachyon-sdk/native-ui'
 import {
+  Bot,
   BarChart3,
   BookUser,
   Building2,
@@ -97,6 +98,7 @@ import { WorkspaceHelpPanel } from './WorkspaceHelp'
 
 /** Routes that carry a translated label under the `nav:items` namespace. */
 export type NavigationRoute =
+  | 'agent'
   | 'golf'
   | 'golf/ledger'
   | 'golf/customers'
@@ -135,7 +137,7 @@ export const navigationSections: NavigationSection[] = [
   {
     id: 'home',
     showLabel: false,
-    items: [{ route: 'golf', icon: Gauge }],
+    items: [{ route: 'golf', icon: Gauge }, { route: 'agent', icon: Bot }],
   },
   {
     id: 'courseBooking',

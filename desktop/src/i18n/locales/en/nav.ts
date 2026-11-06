@@ -14,6 +14,7 @@ export const nav: DeepPartial<typeof source> = {
     tenantMaster: 'Initial setup',
   },
   items: {
+    agent: { label: 'Agent', description: 'Ask AI about reservations, customers and reports' },
     golf: {
       label: 'Home',
       description: 'Where the day starts',

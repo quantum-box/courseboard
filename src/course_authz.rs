@@ -298,6 +298,31 @@ const ROUTES: &[(&str, &str, RouteAuthorization)] = &[
     ("*", "/admin/dispatch", RouteAuthorization::UpstreamEnforced),
     ("*", "/field-api/*", RouteAuthorization::UpstreamEnforced),
     (
+        "POST",
+        "/v1/course/agent/sessions",
+        RouteAuthorization::UpstreamEnforced,
+    ),
+    (
+        "POST",
+        "/v1/course/agent/sessions/:session/execute-request",
+        RouteAuthorization::UpstreamEnforced,
+    ),
+    (
+        "POST",
+        "/v1/course/agent/sessions/:session/execute",
+        RouteAuthorization::UpstreamEnforced,
+    ),
+    (
+        "POST",
+        "/v1/course/agent/sessions/:session/:operation",
+        RouteAuthorization::UpstreamEnforced,
+    ),
+    (
+        "GET",
+        "/v1/course/agent/operations",
+        RouteAuthorization::UpstreamEnforced,
+    ),
+    (
         "*",
         "/v1/field/client-capabilities",
         RouteAuthorization::UpstreamEnforced,
