@@ -40,12 +40,11 @@ function result(statuses: Array<'unconfirmed' | 'unplaced' | 'on_course' | undef
   }
 }
 
-function renderPanel() {
+function renderPanel(date = '2026-08-08') {
   return render(
     <I18nextProvider i18n={i18next}>
       <AutoAssignPanel
-        date="2026-08-08"
-        attendance={new Map()}
+        date={date}
         onChanged={vi.fn()}
         setFlash={vi.fn()}
       />
@@ -95,6 +94,32 @@ describe('AutoAssignPanel shift placement warning', () => {
     expect(screen.queryByText('コース未割付')).toBeNull()
     expect(screen.queryByText(/供給異常として表示されます/)).toBeNull()
   })
+
+  it.each(['2026-08-08', '2026-08-15'])(
+    'allows planning for %s without an attendance warning or confirmation',
+    async date => {
+      const confirm = vi.spyOn(window, 'confirm').mockReturnValue(false)
+      api.json.mockImplementation(async (path: string, init?: RequestInit) => {
+        calls.push({ path, init })
+        const plan = result(['on_course'], false)
+        plan.assigned[0]!.rationale = ['not_clocked_in']
+        plan.assigned[0]!.scheduledAt = `${date}T07:00:00+09:00`
+        return plan
+      })
+      renderPanel(date)
+      fireEvent.click(screen.getByRole('button', { name: '配置を試す' }))
+
+      await waitFor(() => expect(screen.getByText('佐藤 彩')).toBeTruthy())
+      expect(screen.getByText('未出勤')).toBeTruthy()
+      expect(screen.queryByText(/出勤していない候補/)).toBeNull()
+      expect(screen.queryByText(/当日中に出勤の打刻/)).toBeNull()
+
+      fireEvent.click(screen.getByRole('button', { name: 'この配置で決める' }))
+      await waitFor(() => expect(calls).toHaveLength(2))
+      expect(confirm).not.toHaveBeenCalled()
+      expect(JSON.parse(String(calls[1]?.init?.body))).toEqual({ date, dryRun: false })
+    },
+  )
 
   it('combines placement and deadline warnings in one non-blocking execute confirmation', async () => {
     const confirm = vi.spyOn(window, 'confirm').mockReturnValue(false)

@@ -157,10 +157,6 @@ export const caddies = {
       title: '配置する予約がありません',
       description: 'まだ決まっていないキャディ付きの予約がないか、出られるキャディがいません。',
     },
-    offDuty: {
-      title: '出勤していない候補が{{n}}人います',
-      description: 'このまま決めることもできます。朝の計画では通常のことですが、当日中に出勤の打刻がされているか確かめてください。',
-    },
     candidate: '候補',
     skipped: '{{n}}件を飛ばしました',
     deadlineWarning: {
