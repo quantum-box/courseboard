@@ -6,6 +6,7 @@ import { courseboardApiJson } from '../../../api'
 import { Notice } from '../../../components/Page'
 import { showToast } from '../../../lib/toast'
 import { customersPath, type Customer } from '../customers/models'
+import type { PartyDetails } from './models'
 import type { DraftReservationPlayer } from './newReservationPlayers'
 import type { UnregisteredName } from './unregisteredNames'
 
@@ -27,12 +28,19 @@ export function RegisterNamesDialog({
   reservationId,
   names,
   players,
+  party,
   onDone,
 }: {
   reservationId: string
   names: readonly UnregisteredName[]
   /** The roster as saved, so a linked player can be written back in place. */
   players: readonly DraftReservationPlayer[]
+  /**
+   * Everything else on the group as saved. The write below replaces the whole
+   * party, so leaving these out would erase the compe name and remarks the
+   * desk just typed.
+   */
+  party: Omit<PartyDetails, 'players'>
   onDone: () => void
 }) {
   const { t } = useTranslation(['ledger', 'common'])
@@ -90,6 +98,7 @@ export function RegisterNamesDialog({
             method: 'PATCH',
             headers: { 'content-type': 'application/json' },
             body: JSON.stringify({
+              ...party,
               players: linkedPlayers
                 .filter(row => row.name.trim())
                 .map(row => ({

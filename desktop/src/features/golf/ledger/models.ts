@@ -65,9 +65,23 @@ export type PartyPlayer = {
   customerId?: string | null
 }
 
+export type PartySettlement = 'individual' | 'together'
+
+/** The `【食】/【集計】/【精算】` lines of a start ledger. */
+export type PartyRemarks = {
+  /** What the group does about lunch (`各自注文`, …). */
+  meal?: string | null
+  /** Whether the course tallies the competition's scores. */
+  scoreTally?: boolean | null
+  /** Each player pays, or one person pays for the group. */
+  settlement?: PartySettlement | string | null
+}
+
 export type PartyDetails = {
   competitionName?: string | null
   organizer?: string | null
   groupNumber?: number | null
   players: PartyPlayer[]
+  /** Absent on groups nobody has written remarks for. */
+  remarks?: PartyRemarks | null
 }

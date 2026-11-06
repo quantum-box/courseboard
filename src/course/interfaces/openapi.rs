@@ -206,6 +206,7 @@ impl Modify for SecurityAddon {
             http::CheckinPlayerDto,
             http::RecordCheckinRequest,
             http::PartyPlayerDto,
+            http::PartyRemarksDto,
             http::UpdateReservationBookingRequest,
             http::UpdateReservationPartyRequest,
             http::ChangeReservationPlanRequest,

@@ -865,6 +865,7 @@ export function LedgerPage() {
           reservationId={ledgerPrompt.reservationId}
           names={ledgerPrompt.names}
           players={ledgerPrompt.players}
+          party={ledgerPrompt.party}
           onDone={() => setLedgerPrompt(null)}
         />
       ) : null}

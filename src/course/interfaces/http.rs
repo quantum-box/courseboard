@@ -30,7 +30,7 @@ use crate::course::infrastructure::{
     FieldReservationGateway, FieldStaffShiftGateway, MySqlCaddieDutyRepository,
     MySqlCaddieRankFeeRepository, MySqlCourseOrderRepository, MySqlGeneratedThroughRepository,
     MySqlPlayerTagOptionsRepository, MySqlPricingSettingsRepository, MySqlSlotOverrideRepository,
-    PartyPlayerInput,
+    PartyPlayerInput, PartyRemarksInput,
 };
 use crate::course::usecase::{
     BookingHorizonStatus, CancelReservationUseCase, ChangeReservationPlanUseCase,
@@ -351,6 +351,39 @@ pub struct PartyDto {
     pub group_number: Option<i32>,
     #[serde(default)]
     pub players: Vec<PartyPlayerDto>,
+    #[serde(default, skip_serializing_if = "PartyRemarksDto::is_empty")]
+    pub remarks: PartyRemarksDto,
+}
+
+/// The `【食】/【集計】/【精算】` lines of a start ledger, one field each.
+#[derive(Debug, Clone, Default, Serialize, Deserialize, PartialEq, Eq, ToSchema)]
+#[serde(rename_all = "camelCase")]
+pub struct PartyRemarksDto {
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub meal: Option<String>,
+    /// Whether the course tallies the competition's scores.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub score_tally: Option<bool>,
+    /// `individual` (each player pays) or `together` (one person pays for the group).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[schema(example = "individual")]
+    pub settlement: Option<String>,
+}
+
+impl PartyRemarksDto {
+    fn is_empty(&self) -> bool {
+        self.meal.is_none() && self.score_tally.is_none() && self.settlement.is_none()
+    }
+}
+
+impl From<PartyRemarksDto> for PartyRemarksInput {
+    fn from(value: PartyRemarksDto) -> Self {
+        Self {
+            meal: value.meal,
+            score_tally: value.score_tally,
+            settlement: value.settlement,
+        }
+    }
 }
 
 impl From<&PartyDetails> for PartyDto {
@@ -369,6 +402,14 @@ impl From<&PartyDetails> for PartyDto {
                     customer_id: player.customer_id().map(ToString::to_string),
                 })
                 .collect(),
+            remarks: PartyRemarksDto {
+                meal: value.remarks().meal().map(str::to_string),
+                score_tally: value.remarks().score_tally(),
+                settlement: value
+                    .remarks()
+                    .settlement()
+                    .map(|settlement| settlement.as_str().to_string()),
+            },
         }
     }
 }
@@ -888,6 +929,8 @@ pub struct CreateReservationRequest {
     pub group_number: Option<i32>,
     #[serde(default)]
     pub players: Vec<PartyPlayerDto>,
+    #[serde(default)]
+    pub remarks: PartyRemarksDto,
 }
 
 #[derive(Debug, Serialize, ToSchema)]
@@ -940,6 +983,7 @@ pub async fn create_reservation(
         request.organizer,
         request.group_number,
         request.players.into_iter().map(Into::into).collect(),
+        request.remarks.into(),
     )
     .map_err(AppError::from)?;
     let created = use_case
@@ -1112,6 +1156,10 @@ pub struct UpdateReservationPartyRequest {
     /// group as one thing — it retypes the cell, it does not amend seat three.
     #[serde(default)]
     pub players: Vec<PartyPlayerDto>,
+    /// Replaced together with the roster: absent clears them, like every other
+    /// field here.
+    #[serde(default)]
+    pub remarks: PartyRemarksDto,
 }
 
 /// PATCH /v1/course/reservations/{reservation_id}/party
@@ -1141,6 +1189,7 @@ pub async fn update_reservation_party(
         request.organizer,
         request.group_number,
         request.players.into_iter().map(Into::into).collect(),
+        request.remarks.into(),
     )
     .map_err(AppError::from)?;
     let use_case = UpdateReservationPartyUseCase::new(reservation_gateway(&state));

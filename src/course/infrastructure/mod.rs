@@ -74,7 +74,7 @@ pub use field_staff_shift_gateway::FieldStaffShiftGateway;
 pub use generated_through_repository::MySqlGeneratedThroughRepository;
 pub use membership_discounts_repository::MySqlMembershipDiscountsRepository;
 pub use membership_play_windows_repository::MySqlMembershipPlayWindowsRepository;
-pub use party_custom_fields::{party_from_request, PartyPlayerInput};
+pub use party_custom_fields::{party_from_request, PartyPlayerInput, PartyRemarksInput};
 pub use player_tag_options_repository::MySqlPlayerTagOptionsRepository;
 pub use policy_authorizer::{AllowAllAuthorizer, PolicyCourseAuthorizer, ALLOW_ALL};
 pub use pricing_settings_repository::MySqlPricingSettingsRepository;

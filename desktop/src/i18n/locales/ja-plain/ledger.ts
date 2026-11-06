@@ -57,6 +57,9 @@ export const ledger = {
     groupNumber: '{{n}}組',
     unnamedSeat: '（まだ入れていません）',
     organizer: 'まとめ役 {{name}}',
+    remarkMeal: '食事 {{value}}',
+    remarkScoreTally: '集計 {{value}}',
+    remarkSettlement: 'お会計 {{value}}',
     playType: {
       caddie: 'キャディつき',
       self: 'セルフ',
@@ -261,5 +264,17 @@ export const ledger = {
     failed: 'よやくを ほぞんできませんでした',
     cancel: 'やめる',
     emptyPlayerName: '名前が ない プレイヤーは ほぞんできません。',
+  },
+  remarks: {
+    title: '備考',
+    meal: '食事',
+    mealPlaceholder: 'たとえば）各自注文',
+    scoreTally: 'スコアの集計',
+    scoreTallyYes: 'する',
+    scoreTallyNo: 'しない',
+    settlement: 'お会計',
+    settlementIndividual: 'ひとりずつ',
+    settlementTogether: 'まとめて',
+    unset: 'きめていない',
   },
 } as const

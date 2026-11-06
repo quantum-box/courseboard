@@ -61,6 +61,9 @@ export const ledger = {
     groupNumber: 'group {{n}}',
     unnamedSeat: '(not entered)',
     organizer: 'Organizer {{name}}',
+    remarkMeal: 'Meal {{value}}',
+    remarkScoreTally: 'Tally {{value}}',
+    remarkSettlement: 'Pay {{value}}',
     playType: {
       caddie: 'With caddie',
       self: 'Self play',
@@ -265,5 +268,17 @@ export const ledger = {
     failed: 'Could not save the booking',
     cancel: 'Cancel',
     emptyPlayerName: 'A player with no name cannot be saved.',
+  },
+  remarks: {
+    title: 'Remarks',
+    meal: 'Meal',
+    mealPlaceholder: 'e.g. order individually',
+    scoreTally: 'Score tally',
+    scoreTallyYes: 'Yes',
+    scoreTallyNo: 'No',
+    settlement: 'Settlement',
+    settlementIndividual: 'Individual',
+    settlementTogether: 'Together',
+    unset: 'Not set',
   },
 } as const

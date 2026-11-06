@@ -1,6 +1,7 @@
 import { Tooltip, TooltipContent, TooltipTrigger } from '@tachyon-sdk/native-ui'
 import { ChevronLeft, ChevronRight } from 'lucide-react'
 import { Fragment, useMemo, type MouseEvent as ReactMouseEvent } from 'react'
+import type { TFunction } from 'i18next'
 import { useTranslation } from 'react-i18next'
 
 import {
@@ -29,7 +30,7 @@ import {
   type ResourceStatus,
   type SeatCell,
 } from './ledgerLayout'
-import type { LedgerColumn, LedgerSlot } from './models'
+import type { LedgerColumn, LedgerSlot, PartyRemarks } from './models'
 import {
   reservationBlockReason,
   type ReservationBlockReason,
@@ -527,6 +528,7 @@ function GroupCell({
 }) {
   const { t } = useTranslation(['ledger'])
   const organizer = item.party?.organizer?.trim()
+  const remarks = remarkSummary(item.party?.remarks, t)
   const isUnassignedCaddie =
     item.playType === 'caddie' && shiftsConfirmed && unassignedIds.has(item.id)
   return (
@@ -542,6 +544,7 @@ function GroupCell({
         <span className="ledger-group-text">
           <strong>{groupTitle(item)}</strong>
           {organizer ? <small>{t('ledger:cell.organizer', { name: organizer })}</small> : null}
+          {remarks ? <small className="ledger-group-remarks">{remarks}</small> : null}
           {isUnassignedCaddie ? (
             <small className="ledger-unassigned-badge">
               {t('ledger:cell.unassignedCaddie')}
@@ -551,6 +554,30 @@ function GroupCell({
       </button>
     </td>
   )
+}
+
+/** `食 各自注文 · 集計 有 · 精算 個人`, or nothing when no remark was written. */
+function remarkSummary(
+  remarks: PartyRemarks | null | undefined,
+  t: TFunction<['ledger']>,
+): string {
+  if (!remarks) return ''
+  const parts: string[] = []
+  const meal = remarks.meal?.trim()
+  if (meal) parts.push(t('ledger:cell.remarkMeal', { value: meal }))
+  if (typeof remarks.scoreTally === 'boolean') {
+    parts.push(t('ledger:cell.remarkScoreTally', {
+      value: t(remarks.scoreTally ? 'ledger:remarks.scoreTallyYes' : 'ledger:remarks.scoreTallyNo'),
+    }))
+  }
+  if (remarks.settlement === 'individual' || remarks.settlement === 'together') {
+    parts.push(t('ledger:cell.remarkSettlement', {
+      value: t(remarks.settlement === 'individual'
+        ? 'ledger:remarks.settlementIndividual'
+        : 'ledger:remarks.settlementTogether'),
+    }))
+  }
+  return parts.join(' · ')
 }
 
 function SeatCellView({ cell }: { cell: SeatCell }) {

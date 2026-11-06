@@ -106,6 +106,155 @@ pub struct PartyDetails {
     group_number: Option<i32>,
     #[getter(skip)]
     players: Vec<PartyPlayer>,
+    #[getter(skip)]
+    remarks: PartyRemarks,
+}
+
+/// How a group pays at the end of the round (`【精算】` on the paper ledger).
+///
+/// An enum rather than text because checkout reads it: a desk that has to
+/// interpret `個人` / `個別` / `各自` by eye is the mistake this field exists to
+/// stop.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum PartySettlement {
+    /// Every player settles their own bill.
+    Individual,
+    /// One person (usually the organizer) settles for the whole group.
+    Together,
+}
+
+impl PartySettlement {
+    pub fn as_str(self) -> &'static str {
+        match self {
+            Self::Individual => "individual",
+            Self::Together => "together",
+        }
+    }
+
+    pub fn parse(value: &str) -> Option<Self> {
+        match value.trim() {
+            "individual" => Some(Self::Individual),
+            "together" => Some(Self::Together),
+            _ => None,
+        }
+    }
+
+    /// The words a paper ledger uses after `【精算】`.
+    fn from_ledger_word(value: &str) -> Option<Self> {
+        match value.trim() {
+            "個人" | "個別" | "各自" => Some(Self::Individual),
+            "一括" | "まとめ" | "まとめて" | "代表" | "代表者" | "組" | "幹事" => {
+                Some(Self::Together)
+            }
+            _ => None,
+        }
+    }
+}
+
+/// The desk instructions a booking carries besides who is playing: the
+/// `【食】各自注文 / 【集計】有 / 【精算】個人` lines of a start ledger.
+///
+/// Kept as separate fields rather than one note because each one is read by a
+/// different part of the day: the restaurant reads the meal, the competition
+/// desk reads whether scores are tallied, checkout reads the settlement.
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+pub struct PartyRemarks {
+    /// What the group does about lunch (`各自注文`, `弁当4`, …). Free text:
+    /// every course and every restaurant phrases it its own way.
+    meal: Option<String>,
+    /// Whether the competition's scores are tallied by the course.
+    score_tally: Option<bool>,
+    settlement: Option<PartySettlement>,
+}
+
+impl PartyRemarks {
+    pub fn try_new(
+        meal: Option<String>,
+        score_tally: Option<bool>,
+        settlement: Option<PartySettlement>,
+    ) -> Result<Self, CourseError> {
+        Ok(Self {
+            meal: normalize_optional(meal)?,
+            score_tally,
+            settlement,
+        })
+    }
+
+    pub fn meal(&self) -> Option<&str> {
+        self.meal.as_deref()
+    }
+
+    pub fn score_tally(&self) -> Option<bool> {
+        self.score_tally
+    }
+
+    pub fn settlement(&self) -> Option<PartySettlement> {
+        self.settlement
+    }
+
+    pub fn is_empty(&self) -> bool {
+        self.meal.is_none() && self.score_tally.is_none() && self.settlement.is_none()
+    }
+
+    /// Read the `【食】… 【集計】… 【精算】…` lines a start ledger prints under a
+    /// group.
+    ///
+    /// Returns the lines it could not place, so whoever imports a sheet can put
+    /// them in the booking's notes instead of losing them: an unknown
+    /// `【精算】カード` is still an instruction somebody wrote down.
+    pub fn from_ledger_lines<'a>(lines: impl IntoIterator<Item = &'a str>) -> (Self, Vec<String>) {
+        let mut remarks = Self::default();
+        let mut leftovers = Vec::new();
+        for line in lines {
+            let line = line.trim();
+            if line.is_empty() {
+                continue;
+            }
+            let placed = split_bracketed(line).is_some_and(|(label, value)| match label {
+                "食" | "食事" if !value.is_empty() && remarks.meal.is_none() => {
+                    match normalize_optional(Some(value.to_string())) {
+                        Ok(meal) => {
+                            remarks.meal = meal;
+                            true
+                        }
+                        Err(_) => false,
+                    }
+                }
+                "集計" if remarks.score_tally.is_none() => match value {
+                    "有" | "あり" | "有り" => {
+                        remarks.score_tally = Some(true);
+                        true
+                    }
+                    "無" | "なし" | "無し" => {
+                        remarks.score_tally = Some(false);
+                        true
+                    }
+                    _ => false,
+                },
+                "精算" if remarks.settlement.is_none() => {
+                    match PartySettlement::from_ledger_word(value) {
+                        Some(settlement) => {
+                            remarks.settlement = Some(settlement);
+                            true
+                        }
+                        None => false,
+                    }
+                }
+                _ => false,
+            });
+            if !placed {
+                leftovers.push(line.to_string());
+            }
+        }
+        (remarks, leftovers)
+    }
+}
+
+/// `【食】各自注文` → `("食", "各自注文")`.
+fn split_bracketed(line: &str) -> Option<(&str, &str)> {
+    let rest = line.strip_prefix('【')?;
+    let (label, value) = rest.split_once('】')?;
+    Some((label.trim(), value.trim()))
 }
 
 impl PartyDetails {
@@ -128,7 +277,17 @@ impl PartyDetails {
             organizer: normalize_optional(organizer)?,
             group_number,
             players,
+            remarks: PartyRemarks::default(),
         })
+    }
+
+    pub fn with_remarks(mut self, remarks: PartyRemarks) -> Self {
+        self.remarks = remarks;
+        self
+    }
+
+    pub fn remarks(&self) -> &PartyRemarks {
+        &self.remarks
     }
 
     pub fn competition_name(&self) -> Option<&str> {
@@ -154,6 +313,7 @@ impl PartyDetails {
             && self.organizer.is_none()
             && self.group_number.is_none()
             && self.players.is_empty()
+            && self.remarks.is_empty()
     }
 
     /// Named players, which is not the same as the booked party size.
@@ -279,6 +439,40 @@ mod tests {
             .map(|index| player(&format!("player {index}")))
             .collect();
         assert!(PartyDetails::try_new(None, None, None, players).is_err());
+    }
+
+    #[test]
+    fn a_start_ledger_footer_splits_into_the_fields_each_desk_reads() {
+        let (remarks, leftovers) =
+            PartyRemarks::from_ledger_lines(["【食】各自注文", "【集計】有", "【精算】個人"]);
+        assert_eq!(remarks.meal(), Some("各自注文"));
+        assert_eq!(remarks.score_tally(), Some(true));
+        assert_eq!(remarks.settlement(), Some(PartySettlement::Individual));
+        assert!(leftovers.is_empty());
+    }
+
+    #[test]
+    fn a_remark_the_ledger_does_not_know_is_handed_back_instead_of_dropped() {
+        let (remarks, leftovers) =
+            PartyRemarks::from_ledger_lines(["【精算】カード", "早めに到着", "【集計】無"]);
+        assert_eq!(remarks.settlement(), None);
+        assert_eq!(remarks.score_tally(), Some(false));
+        assert_eq!(leftovers, vec!["【精算】カード", "早めに到着"]);
+    }
+
+    #[test]
+    fn a_group_with_only_remarks_is_not_an_empty_group() {
+        let remarks = PartyRemarks::try_new(None, None, Some(PartySettlement::Together)).unwrap();
+        let details = PartyDetails::default().with_remarks(remarks);
+        assert!(!details.is_empty());
+    }
+
+    #[test]
+    fn settlement_round_trips_through_its_wire_name() {
+        for value in [PartySettlement::Individual, PartySettlement::Together] {
+            assert_eq!(PartySettlement::parse(value.as_str()), Some(value));
+        }
+        assert_eq!(PartySettlement::parse("個人"), None);
     }
 
     #[test]

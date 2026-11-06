@@ -67,6 +67,9 @@ export const ledger = {
     groupNumber: '{{n}}組',
     unnamedSeat: '（未入力）',
     organizer: '幹事 {{name}}',
+    remarkMeal: '食 {{value}}',
+    remarkScoreTally: '集計 {{value}}',
+    remarkSettlement: '精算 {{value}}',
     playType: {
       caddie: 'キャディ付き',
       self: 'セルフ',
@@ -270,5 +273,17 @@ export const ledger = {
     failed: '予約を保存できませんでした',
     cancel: 'やめる',
     emptyPlayerName: '名前が空のプレイヤーは保存できません。',
+  },
+  remarks: {
+    title: '備考',
+    meal: '食事',
+    mealPlaceholder: '例）各自注文',
+    scoreTally: 'スコア集計',
+    scoreTallyYes: '有',
+    scoreTallyNo: '無',
+    settlement: '精算',
+    settlementIndividual: '個人',
+    settlementTogether: 'まとめて',
+    unset: '未設定',
   },
 } as const
