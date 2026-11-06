@@ -10,6 +10,7 @@ pub mod http_field;
 pub mod http_ops;
 pub mod http_reservation_report;
 pub mod http_simulator;
+pub mod http_start_ledger;
 pub mod openapi;
 
 #[cfg(test)]

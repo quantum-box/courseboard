@@ -17,6 +17,7 @@ use super::http_field;
 use super::http_ops;
 use super::http_reservation_report;
 use super::http_simulator;
+use super::http_start_ledger;
 use crate::{feature_delivery, feature_flags, profile_proxy};
 
 /// Standard API error body returned by [`crate::AppError`].
@@ -62,6 +63,13 @@ impl Modify for SecurityAddon {
         http::get_tee_sheet,
         http::get_tee_ledger,
         http::create_reservation,
+        http_start_ledger::create_start_ledger_job,
+        http_start_ledger::get_start_ledger_job,
+        http_start_ledger::cancel_start_ledger_job,
+        http_start_ledger::confirm_start_ledger_job,
+        http_start_ledger::advance_start_ledger_job,
+        http_start_ledger::get_start_ledger_context,
+        http_start_ledger::import_start_ledger,
         http::cancel_reservation,
         http::update_reservation_booking,
         http::update_reservation_party,

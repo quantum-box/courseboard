@@ -25,6 +25,7 @@ import { settlement } from './settlement'
 import { shifts } from './shifts'
 import { simulator } from './simulator'
 import { staff } from './staff'
+import { startLedgerImport } from './startLedgerImport'
 import { timeline } from './timeline'
 
 /** Japanese is the source of truth: every key must exist here first. */
@@ -56,6 +57,7 @@ export const ja = {
   shifts,
   simulator,
   staff,
+  startLedgerImport,
   timeline,
 } as const
 

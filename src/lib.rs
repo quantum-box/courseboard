@@ -778,6 +778,47 @@ pub fn build_router(state: AppState) -> Router {
                 middleware::from_fn_with_state(state.clone(), require_valid_token),
             ),
         )
+        // Static `start-ledger` before `:reservation_id`, so the import is
+        // never read as somebody's booking id.
+        .route(
+            "/v1/course/reservations/start-ledger/jobs",
+            post(course::interfaces::http_start_ledger::create_start_ledger_job).route_layer(
+                middleware::from_fn_with_state(state.clone(), require_valid_token),
+            ),
+        )
+        .route(
+            "/v1/course/reservations/start-ledger/jobs/:job_id",
+            get(course::interfaces::http_start_ledger::get_start_ledger_job)
+                .delete(course::interfaces::http_start_ledger::cancel_start_ledger_job)
+                .route_layer(middleware::from_fn_with_state(
+                    state.clone(),
+                    require_valid_token,
+                )),
+        )
+        .route(
+            "/v1/course/reservations/start-ledger/jobs/:job_id/confirm",
+            post(course::interfaces::http_start_ledger::confirm_start_ledger_job).route_layer(
+                middleware::from_fn_with_state(state.clone(), require_valid_token),
+            ),
+        )
+        .route(
+            "/v1/course/reservations/start-ledger/jobs/:job_id/advance",
+            post(course::interfaces::http_start_ledger::advance_start_ledger_job).route_layer(
+                middleware::from_fn_with_state(state.clone(), require_valid_token),
+            ),
+        )
+        .route(
+            "/v1/course/reservations/start-ledger/context",
+            get(course::interfaces::http_start_ledger::get_start_ledger_context).route_layer(
+                middleware::from_fn_with_state(state.clone(), require_valid_token),
+            ),
+        )
+        .route(
+            "/v1/course/reservations/start-ledger/import",
+            post(course::interfaces::http_start_ledger::import_start_ledger).route_layer(
+                middleware::from_fn_with_state(state.clone(), require_valid_token),
+            ),
+        )
         .route(
             "/v1/course/reservations",
             post(course::interfaces::http::create_reservation).route_layer(

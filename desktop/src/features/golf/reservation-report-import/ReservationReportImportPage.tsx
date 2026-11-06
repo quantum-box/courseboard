@@ -430,6 +430,7 @@ export function ReservationReportImportPage() {
       ) : null}
 
       <Notice tone="info">CSV・Excelの予約表集計は共通取込で全行を確認できます。<Button onClick={() => navigate('golf/data-imports/courseboardReservationReports')}>共通取込を開く</Button></Notice>
+      <Notice tone="info">スタート予約台帳(ＡＬＬ)のPDFは、1組ずつ予約として台帳に登録できます。<Button onClick={() => navigate('golf/reservation-report-import/start-ledger')}>スタート予約台帳PDFをとりこむ</Button></Notice>
       {stage === 'choose' ? (
         <Panel title={t('reservationReportImport:step.choose')} className="reservation-report-panel">
           <form className="reservation-report-choose-form" onSubmit={event => { void handlePreview(event) }}>

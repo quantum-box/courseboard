@@ -315,6 +315,7 @@ fn booking_for(
         golf_course_id: course_id.clone(),
         party: group.party()?,
         prepayment_policy: None,
+        notes: None,
         seed_key: Some(group.seed_key(date)),
     })
 }
