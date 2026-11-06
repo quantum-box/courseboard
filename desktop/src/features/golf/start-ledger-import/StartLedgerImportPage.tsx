@@ -13,7 +13,7 @@ import {
   START_LEDGER_LIMITS, stepStartLedgerJob, TERMINAL_STATUSES, uploadStartLedgerPdfs, writeOperation,
   type StartLedgerContext, type StartLedgerRead,
 } from './api'
-import { blocking, buildReview, chunks, partiesToImport, pendingParties, rematch, reviewIssues, soldOn, toImportParty, type ReviewParty } from './review'
+import { blocking, buildReview, chunks, isDone, partiesToImport, pendingParties, rematch, reviewIssues, soldOn, toImportParty, type ReviewParty } from './review'
 import '../common-imports/document-import.css'
 
 const PAGE_SIZE = 20
@@ -124,21 +124,28 @@ export function StartLedgerImportPage() {
   }
 
   function edit(key: string, change: (party: ReviewParty) => ReviewParty) {
-    setParties(previous => previous.map(party => party.key === key ? { ...change(party), checked: false } : party))
+    // A correction makes a failed group sendable again, so its failure no longer applies.
+    setParties(previous => previous.map(party => party.key === key
+      ? { ...change(party), checked: false, result: party.result?.outcome === 'failed' ? undefined : party.result }
+      : party))
   }
 
   async function importChecked(signal: AbortSignal) {
     const targets = partiesToImport(parties)
-    for (const batch of chunks(targets, START_LEDGER_LIMITS.importBatch)) {
-      const results = await importStartLedgerParties(date, batch.map(toImportParty), signal)
-      signal.throwIfAborted()
-      setParties(previous => previous.map(party => {
-        const index = batch.findIndex(item => item.key === party.key)
-        return index < 0 ? party : { ...party, result: results[index] }
-      }))
+    const outcomes = new Map<string, ReviewParty['result']>()
+    try {
+      for (const batch of chunks(targets, START_LEDGER_LIMITS.importBatch)) {
+        const results = await importStartLedgerParties(date, batch.map(toImportParty), signal)
+        signal.throwIfAborted()
+        batch.forEach((item, index) => outcomes.set(item.key, results[index]))
+        setParties(previous => previous.map(party => outcomes.has(party.key) ? { ...party, result: outcomes.get(party.key) } : party))
+      }
+    } finally {
+      clearResourceCache('tee-ledger')
     }
-    clearResourceCache('tee-ledger')
-    if (targets.length) writeOperation(storageKey, null)
+    // Keep the read recoverable until every group still in play is in the ledger.
+    const settled = parties.map(party => outcomes.has(party.key) ? { ...party, result: outcomes.get(party.key) } : party)
+    if (settled.every(party => party.excluded || isDone(party))) writeOperation(storageKey, null)
   }
 
   const activeContext = context ?? { courses: [], plans: [], booked: [] }
@@ -191,7 +198,7 @@ export function StartLedgerImportPage() {
           {parties.slice(page * PAGE_SIZE, (page + 1) * PAGE_SIZE).map(party => {
             const issues = reviewIssues(party, parties, activeContext)
             const plan = activeContext.plans.find(item => item.reservationServiceId === party.planId)
-            const locked = busy || party.excluded || party.result?.outcome === 'created' || party.result?.outcome === 'already_booked'
+            const locked = busy || party.excluded || isDone(party)
             return <section className="document-row" key={party.key} aria-label={`${party.source.courseName ?? ''} ${party.teeTime}`}>
               <h2>{party.source.courseName ?? '—'} {party.teeTime} {party.customerName}</h2>
               <p>{t('printed', { course: party.source.courseName ?? '', time: party.source.teeTime ?? '', style: party.source.playStyleText ?? '', plan: party.source.planName ?? '' })}</p>
@@ -219,7 +226,7 @@ export function StartLedgerImportPage() {
                 </FormGrid>)}
                 {locked ? null : <PartyRemarksFields value={party.remarks} onChange={remarks => edit(party.key, item => ({ ...item, remarks }))} />}
                 <Field label={t('notes')}><Input value={party.notes} disabled={locked} maxLength={1000} onChange={event => edit(party.key, item => ({ ...item, notes: event.target.value }))} /></Field>
-                {!party.result && <label><input type="checkbox" checked={party.checked} disabled={busy || blocking(issues)} onChange={event => setParties(previous => previous.map(item => item.key === party.key ? { ...item, checked: event.target.checked } : item))} /> {t('checked')}</label>}
+                {!isDone(party) && <label><input type="checkbox" checked={party.checked} disabled={busy || blocking(issues)} onChange={event => setParties(previous => previous.map(item => item.key === party.key ? { ...item, checked: event.target.checked } : item))} /> {t('checked')}</label>}
               </>}
               {!party.result && <Button disabled={busy} onClick={() => setParties(previous => previous.map(item => item.key === party.key ? { ...item, excluded: !item.excluded, checked: false } : item))}>{party.excluded ? t('restore') : t('exclude')}</Button>}
             </section>

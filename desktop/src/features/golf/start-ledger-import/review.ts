@@ -123,12 +123,17 @@ export function blocking(issues: ReviewIssues) {
 
 /** Groups that still need the desk before anything is written. */
 export function pendingParties(parties: readonly ReviewParty[], context: StartLedgerContext) {
-  return parties.filter(party => !party.excluded && !party.result && (!party.checked || blocking(reviewIssues(party, parties, context))))
+  return parties.filter(party => !party.excluded && !isDone(party) && (!party.checked || blocking(reviewIssues(party, parties, context))))
+}
+
+/** The group is in the ledger, by this import or an earlier booking. */
+export function isDone(party: ReviewParty) {
+  return party.result?.outcome === 'created' || party.result?.outcome === 'already_booked'
 }
 
 /** Groups to send: checked, not excluded, not already done. */
 export function partiesToImport(parties: readonly ReviewParty[]) {
-  return parties.filter(party => !party.excluded && party.checked && party.result?.outcome !== 'created' && party.result?.outcome !== 'already_booked')
+  return parties.filter(party => !party.excluded && party.checked && !isDone(party))
 }
 
 export function toImportParty(party: ReviewParty): StartLedgerImportParty {

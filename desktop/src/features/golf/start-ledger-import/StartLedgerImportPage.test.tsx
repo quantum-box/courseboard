@@ -71,7 +71,8 @@ it('reads a PDF, lists one group at a time, and books only the checked groups', 
     competitionName: null, players: [{ name: '丹治 敦', tag: '共通', memberNumber: '1' }], remarks: {}, notes: null,
   }], expect.any(AbortSignal))
   expect(within(first).getByText('登録しました')).toBeTruthy()
-  await waitFor(() => expect(localStorage.getItem('courseboard.start-ledger-operation:tenant-a:platform-a:actor-a')).toBeNull())
+  // The second group is still unbooked, so a reload must still find this read.
+  expect(JSON.parse(localStorage.getItem('courseboard.start-ledger-operation:tenant-a:platform-a:actor-a')!).jobId).toBe('goj_1')
 })
 
 it('resumes the read this desk left behind', async () => {

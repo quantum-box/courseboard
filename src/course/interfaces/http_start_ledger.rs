@@ -135,6 +135,7 @@ impl From<StartLedgerParty> for StartLedgerPartyDraftDto {
                     .remarks
                     .settlement()
                     .map(|value| value.as_str().to_string()),
+                note: party.remarks.note().map(str::to_string),
             },
             notes: party.notes,
             copied_from_above: party
@@ -644,6 +645,7 @@ mod tests {
                 meal: Some("各自注文".into()),
                 score_tally: Some(true),
                 settlement: Some("individual".into()),
+                note: None,
             },
             notes: Some("2B@2750".into()),
         }

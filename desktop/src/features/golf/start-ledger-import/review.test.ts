@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest'
 import type { StartLedgerContext, StartLedgerPartyDraft, StartLedgerRead } from './api'
-import { blocking, buildReview, chunks, competitionFrom, matchCourse, matchPlan, partiesToImport, pendingParties, reviewIssues, toImportParty } from './review'
+import { blocking, buildReview, chunks, competitionFrom, matchCourse, matchPlan, isDone, partiesToImport, pendingParties, reviewIssues, toImportParty } from './review'
 
 const context: StartLedgerContext = {
   courses: [{ id: 'out', name: '空沼 OUT' }, { id: 'in', name: '空沼IN' }],
@@ -49,7 +49,7 @@ describe('review', () => {
     expect(parties[0]).toMatchObject({ courseId: 'out', planId: 'early133', customerName: '菊池 芳彦', competitionName: '', checked: false })
     expect(parties[0]!.players).toHaveLength(4)
     expect(parties[1]).toMatchObject({ courseId: 'in', planId: 'early19', competitionName: '１・３会', notes: '2B@2750' })
-    expect(parties[1]!.remarks).toEqual({ meal: '各自注文', scoreTally: 'yes', settlement: 'individual' })
+    expect(parties[1]!.remarks).toEqual({ meal: '各自注文', scoreTally: 'yes', settlement: 'individual', note: '' })
   })
 
   it('warns when the sheet says caddie and the plan is self-play', () => {
@@ -76,6 +76,13 @@ describe('review', () => {
     expect(pendingParties(checked, context).map(party => party.key)).toEqual(['1'])
     const done = checked.map(party => party.key === '0' ? { ...party, result: { outcome: 'created' as const, reservationId: 'r-9' } } : party)
     expect(partiesToImport(done)).toEqual([])
+  })
+
+  it('keeps a failed group pending and sendable again', () => {
+    const failed = parties.map(party => party.key === '0' ? { ...party, checked: true, result: { outcome: 'failed' as const, message: 'bad time' } } : party)
+    expect(isDone(failed[0]!)).toBe(false)
+    expect(partiesToImport(failed).map(party => party.key)).toEqual(['0'])
+    expect(pendingParties(failed, context).map(party => party.key)).toContain('1')
   })
 
   it('sends named players, the headcount, remarks, and notes', () => {
