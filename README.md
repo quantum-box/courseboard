@@ -130,6 +130,37 @@ SMS から開く公開 endpoint です。operator bearer token は要求しま�
 `GET /public/cancellation-fees/{token}` は Field invoice の公開状態を読み、paid
 であれば Course Board 側の collection も paid に同期します。
 
+## 対話型エージェント
+
+UI の「エージェント」（`/{tenantId}/agent`）で、予約・顧客・キャディ・売上集計を
+自然言語で依頼できます。Field main `aef801090` の対話型 Agent と同じ
+`@tachyon-sdk/agent` セッション SDK と AIP 実行基盤を使います。
+
+- CourseBoard は Field の `/v1/field/agent/sessions` でセッションを作り、
+  `execute-request` から現在のモデルと Field 用ツール定義を取得します。
+- CourseBoard の OpenAPI から、業務操作の検索・仕様確認・実行ツールを追加します。
+  予約など CourseBoard 所有のデータには `/v1/course/*`、Field 所有の操作には
+  Field の `tool-call` を使います。各 API の IAM・tenant・feature 判定はそのまま適用します。
+- 変更は実際の送信値をチャット内で表示し、利用者が「この内容で実行」を押してから
+  行います。通信失敗時に変更を自動再実行しません。
+- 会話は現在の画面内で保持します。画面離脱・テナント切替で中断し、新しい会話を
+  開きます。途中まで実行済みの変更は取り消しません。
+- 既存の `TACHYON_FIELD_API_URL` と `TACHYON_AUTH_API_URL` を使い、Cognito の
+  利用者トークンを引き継ぎます。新しいモデル API key や service account は不要です。
+  接続先には上記 Field Agent API と AIP が必要です。
+- 本番 Lambda は SSE をバッファするため、`courseboard-agent-stream` Worker が
+  `execute-request` で認可・組み立て済みの要求を受け取り、AIP からのストリームを
+  直接返します。モデル・ツール・利用者認証を Worker 側で作り直しません。
+  ローカル axum は直接ストリームを返します。Lambda の PR preview で対話ツールを
+  検証するには、preview API を向いたストリーム中継が別途必要です。
+- 開発モックでは会話画面のデモのみ表示します。AI 接続・業務操作は行いません。
+
+配備時は API → `courseboard-agent-stream` → UI の順で反映してください。
+Worker の `COURSEBOARD_API_ORIGIN` は Tachyon の main deployment の安定した
+Function URL です。API origin が変わる場合は Worker の設定も更新します。
+
+添付ファイル、会話履歴一覧、バックグラウンドでの継続実行は含みません。
+
 ## 税額計算 API
 
 ### `POST /calculate`

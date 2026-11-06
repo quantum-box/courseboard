@@ -1,3 +1,4 @@
+import { agent } from './agent'
 import { auth } from './auth'
 import { budgets } from './budgets'
 import { caddies } from './caddies'
@@ -30,6 +31,7 @@ import { timeline } from './timeline'
 
 /** Japanese is the source of truth: every key must exist here first. */
 export const ja = {
+  agent,
   auth,
   budgets,
   caddies,

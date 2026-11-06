@@ -1,0 +1,6 @@
+{
+  "name": "courseboard-agent-stream",
+  "private": true,
+  "type": "module",
+  "scripts": { "test": "node --test worker.test.ts" }
+}

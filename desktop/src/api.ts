@@ -266,11 +266,12 @@ async function protectedFetch(
   retried = false,
   tokenOverride?: string,
   expectedContext?: ApiAuthContext | null,
+  baseOverride?: string,
 ) {
   const context = expectedContext === undefined ? apiAuthContext : expectedContext
   const token = tokenOverride ?? await accessTokenForProtectedRequest(context)
   assertAuthContextCurrent(context)
-  const requestUrl = join(operatorApiBaseUrl(), path)
+  const requestUrl = join(baseOverride ?? operatorApiBaseUrl(), path)
   const isNative = '__TAURI_INTERNALS__' in window
   const defaultCredentials = protectedRequestCredentials(
     requestUrl,
@@ -289,7 +290,7 @@ async function protectedFetch(
     if (!retried && context) {
       const refreshed = await context.getAccessToken(true)
       assertAuthContextCurrent(context)
-      if (refreshed) return protectedFetch(path, init, true, refreshed, context)
+      if (refreshed) return protectedFetch(path, init, true, refreshed, context, baseOverride)
       if (shouldSoftSignOutOn401({
         hasAuthContext: true,
         alreadyRetried: false,
@@ -339,6 +340,16 @@ export async function courseboardApiJson<T>(path: string, init?: RequestInit) {
     if (mocked !== undefined) return mocked as T
   }
   return protectedJson<T>(normalized, init)
+}
+
+/** Authenticated streaming uses the same token refresh and tenant guard as JSON calls. */
+export async function courseboardApiStream(path: string, init?: RequestInit, baseUrl?: string) {
+  const response = await protectedFetch(path, init, false, undefined, undefined, baseUrl)
+  if (!response.ok) throw await parseError(response)
+  if (!response.body || !response.headers.get('content-type')?.startsWith('text/event-stream')) {
+    throw new ApiError('Agent response was not an event stream', 502)
+  }
+  return response.body
 }
 
 export async function courseboardApiBlob(path: string, init?: RequestInit) {

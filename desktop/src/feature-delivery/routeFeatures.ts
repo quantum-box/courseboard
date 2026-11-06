@@ -94,6 +94,8 @@ export const EXEMPT_ROUTES: ReadonlySet<string> = new Set([
   'golf',
   'settings',
   'settings/members',
+  // AI access is authorized by Field/AIP; each business operation retains its feature gate.
+  'agent',
   'download',
   'privacy',
   'terms',

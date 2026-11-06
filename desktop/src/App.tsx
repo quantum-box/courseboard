@@ -1,3 +1,4 @@
+import { AgentPage } from './features/agent/AgentPage'
 import { Button } from '@tachyon-sdk/native-ui'
 import { ArrowLeft, MapPin } from 'lucide-react'
 import { useEffect } from 'react'
@@ -124,6 +125,7 @@ function OperatorWebRedirect({ href }: { href: string }) {
 function RouteContent({ route }: { route: string }) {
   // Hooks run for every route rather than beside the branch that needs them.
   const reportImportGate = useRouteGate('golf/reservation-report-import')
+  if (route === 'agent') return <AgentPage />
   if (route === 'golf') return <GolfHomePage />
   if (route === 'golf/courses') return <CoursesPage />
   if (route.startsWith('golf/courses/')) {

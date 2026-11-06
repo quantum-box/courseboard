@@ -12,6 +12,7 @@ export const nav = {
     tenantMaster: '最初に決める設定',
   },
   items: {
+    agent: { label: 'エージェント', description: '予約・顧客・集計をAIに依頼する' },
     golf: {
       label: 'ホーム',
       description: '今日の仕事の入口',

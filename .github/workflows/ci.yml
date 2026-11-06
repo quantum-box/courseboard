@@ -82,6 +82,11 @@ jobs:
       - name: Unit tests
         run: npm run test
 
+      - name: Agent stream worker tests
+        run: |
+          node --test ../tooling/agent-stream/worker.test.ts
+          npx tsc --noEmit --target ES2022 --module NodeNext --moduleResolution NodeNext --lib ES2022,DOM,DOM.Iterable --skipLibCheck ../tooling/agent-stream/worker.ts
+
       - name: Build web assets
         run: npm run build
         env:

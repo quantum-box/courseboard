@@ -1,3 +1,4 @@
+import { agent } from './agent'
 import { auth } from './auth'
 import { budgets } from './budgets'
 import { caddies } from './caddies'
@@ -29,6 +30,7 @@ import { startLedgerImport } from './startLedgerImport'
 import { timeline } from './timeline'
 
 export const en = {
+  agent,
   auth,
   budgets,
   caddies,

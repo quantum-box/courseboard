@@ -311,6 +311,9 @@ export function routeCapabilityDecision(
   route: string,
   capabilities: EffectiveCapabilities,
 ): boolean | null | undefined {
+  if (route === 'agent') return Object.values(capabilities.actions).some(value => value === true)
+    || capabilities.cancellationFees.list || capabilities.cancellationFees.manage
+    || capabilities.agentDocuments?.invoices?.list === true || capabilities.agentDocuments?.quotations?.list === true
   if (route === 'cancellation-fees/new') return capabilities.cancellationFees.manage
   if (route === 'cancellation-fees' || route.startsWith('cancellation-fees/')) {
     return capabilities.cancellationFees.list

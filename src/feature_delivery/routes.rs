@@ -54,6 +54,8 @@ use FeatureRoute::{Exempt, Feature, FieldProxy};
 const ROUTE_RULES: &[(&str, &str, FeatureRoute)] = &[
     // Platform and exemptions.
     ("*", "/v1/me", Exempt(Platform)),
+    // Field authorizes the AI runtime; business tools retain their own feature gates.
+    ("*", "/v1/course/agent", Exempt(Platform)),
     ("*", "/v1/course/feature-flags", Exempt(Platform)),
     ("*", "/v1/course/feature-deliveries", Exempt(Platform)),
     ("*", "/v1/field/client-capabilities", Exempt(Platform)),

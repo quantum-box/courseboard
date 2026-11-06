@@ -13,6 +13,7 @@ export const nav: DeepPartial<typeof source> = {
     tenantMaster: '最初に決めておく設定',
   },
   items: {
+    agent: { label: 'エージェント', description: 'AIに話しかけて予約やお客様の情報を調べます' },
     golf: {
       label: '最初の画面',
       description: '今日の仕事はここから始めます',
