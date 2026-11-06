@@ -4,6 +4,7 @@ import { useMemo, useState } from 'react'
 import { useTranslation } from 'react-i18next'
 
 import { courseboardApiJson } from '../../../api'
+import { routeDeliveryDecision, useOptionalFeatureDelivery } from '../../../feature-delivery/FeatureDelivery'
 import {
   DataTable,
   type DataTableColumn,
@@ -95,6 +96,13 @@ export function CustomersPage() {
     },
   ], [t])
 
+  // A screen the tenant's plan leaves out is not offered from here either:
+  // the sidebar already hides it, and a button that only leads to "not in
+  // your plan" is a dead end on the desk's busiest screen.
+  // An unknown answer hides too, as it does in the sidebar (PLT-5229).
+  const delivery = useOptionalFeatureDelivery()
+  const offered = (route: string) => routeDeliveryDecision(route, delivery) === true
+
   return (
     <div className="page-stack">
       {/* Registering sits on the panel's own header rather than a strip above
@@ -108,34 +116,42 @@ export function CustomersPage() {
             {/* Reading a sheet is its own screen, not a sheet-over-the-ledger:
                 it needs the scan and the rows side by side, which is more than
                 a quick aside while the desk is on the phone. */}
-            <Button
-              type="button"
-              variant="ghost"
-              onClick={event => navigateFromClick(event, 'golf/customers/reception')}
-            >
-              <FileScan /> {t('customers:reception.open')}
-            </Button>
+            {offered('golf/customers/reception') && (
+              <Button
+                type="button"
+                variant="ghost"
+                onClick={event => navigateFromClick(event, 'golf/customers/reception')}
+              >
+                <FileScan /> {t('customers:reception.open')}
+              </Button>
+            )}
             {/* Ringing people back starts from a ranked slice of the ledger,
                 which is a different question from "who is this person" and so
                 a different screen. */}
-            <Button
-              type="button"
-              variant="ghost"
-              onClick={event => navigateFromClick(event, 'golf/customers/call-list')}
-            >
-              <PhoneCall /> {t('customers:callList.open')}
-            </Button>
+            {offered('golf/customers/call-list') && (
+              <Button
+                type="button"
+                variant="ghost"
+                onClick={event => navigateFromClick(event, 'golf/customers/call-list')}
+              >
+                <PhoneCall /> {t('customers:callList.open')}
+              </Button>
+            )}
             {/* Who cancelled and who still owes for it: the same ledger read
                 by what people gave up rather than by who they are, and the
                 only place a cancellation fee starts from a real booking. */}
-            <Button
-              type="button"
-              variant="ghost"
-              onClick={event => navigateFromClick(event, 'golf/customers/cancellations')}
-            >
-              <CalendarX /> {t('customers:cancellations.open')}
-            </Button>
-            <Button onClick={() => navigate('golf/data-imports/customer')}>顧客データをとりこむ</Button>
+            {offered('golf/customers/cancellations') && (
+              <Button
+                type="button"
+                variant="ghost"
+                onClick={event => navigateFromClick(event, 'golf/customers/cancellations')}
+              >
+                <CalendarX /> {t('customers:cancellations.open')}
+              </Button>
+            )}
+            {offered('golf/data-imports/customer') && (
+              <Button onClick={() => navigate('golf/data-imports/customer')}>顧客データをとりこむ</Button>
+            )}
             <Button type="button" variant="primary" onClick={() => setCreating(true)}>
               <UserPlus /> {t('customers:create.open')}
             </Button>
