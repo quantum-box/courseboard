@@ -155,10 +155,6 @@ export const caddies: DeepPartial<typeof source> = {
       title: 'Nothing to assign',
       description: 'There are no open caddie-required bookings, or no caddies available.',
     },
-    offDuty: {
-      title: '{{n}} candidate(s) are not on duty',
-      description: 'You can still commit this plan. Nobody has clocked in when the morning plan is drawn up; check that they clock in during the day.',
-    },
     candidate: 'Candidate',
     skipped: 'Skipped {{n}}',
     deadlineWarning: {

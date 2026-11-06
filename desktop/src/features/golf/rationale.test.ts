@@ -1,8 +1,6 @@
 import { describe, expect, it } from 'vitest'
 import {
-  attendanceLookup,
   clockRequestBody,
-  offDutyCandidates,
   offDutyReason,
   readableRationale,
 } from './CaddiesPage'
@@ -55,30 +53,6 @@ describe('offDutyReason', () => {
   it('treats a caddie missing from the snapshot as not clocked in', () => {
     // The snapshot is what a clock-in writes to, so absence is the safe read.
     expect(offDutyReason(undefined)).toBe('notClocked')
-  })
-})
-
-describe('offDutyCandidates', () => {
-  const attendance = attendanceLookup([
-    { caddieProfileId: 'a', displayName: 'A', attendanceStatus: 'working', todayAssignments: 0, roundsWithoutClockInToday: 0 },
-    { caddieProfileId: 'b', displayName: 'B', attendanceStatus: 'not_clocked', todayAssignments: 0, roundsWithoutClockInToday: 0 },
-  ])
-
-  it('reports only the candidates who are not on duty', () => {
-    const flagged = offDutyCandidates(
-      [{ caddieProfileId: 'a' }, { caddieProfileId: 'b' }, { caddieProfileId: 'c' }],
-      attendance,
-    )
-    expect(flagged.map(entry => entry.candidate.caddieProfileId)).toEqual(['b', 'c'])
-    expect(flagged.map(entry => entry.reason)).toEqual(['notClocked', 'notClocked'])
-  })
-
-  it('keeps them in the plan rather than filtering them out', () => {
-    // The morning plan is drawn up before anyone has clocked in; filtering
-    // would leave the dispatch board empty every day.
-    const candidates = [{ caddieProfileId: 'b' }]
-    expect(offDutyCandidates(candidates, attendance)).toHaveLength(1)
-    expect(candidates).toHaveLength(1)
   })
 })
 

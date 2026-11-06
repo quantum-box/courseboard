@@ -146,10 +146,6 @@ export const caddies: DeepPartial<typeof source> = {
       title: '決める組がありません',
       description: '担当がまだの組がないか、出られるキャディがいません。',
     },
-    offDuty: {
-      title: 'まだ出勤していない人が{{n}}人います',
-      description: 'このまま決めてもかまいません。朝はまだ出勤していないのがふつうです。あとで出勤の打刻がされているか見てください。',
-    },
     candidate: 'この人が候補',
     skipped: '{{n}}件は決められませんでした',
     deadlineWarning: {

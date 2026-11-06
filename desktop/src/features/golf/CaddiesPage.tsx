@@ -239,8 +239,8 @@ export function attendanceLookup(items: AttendanceSnapshot[]): AttendanceLookup 
  *
  * Dispatch is planned before the course opens, so at 6am nobody has clocked in
  * yet and hiding un-clocked caddies would leave the board empty every morning.
- * They stay selectable; the screen says which ones are not on duty and warns
- * again before the assignment is committed.
+ * Attendance is informational while planning; shift placement determines
+ * whether a candidate needs a planning warning.
  *
  * A caddie missing from the day's snapshot is treated as not clocked in — the
  * safe reading, since the snapshot is what the clock-in writes to.
@@ -252,16 +252,6 @@ export function offDutyReason(
   if (status === 'clocked_out') return 'clockedOut'
   if (status === 'not_linked') return 'notLinked'
   return 'notClocked'
-}
-
-export function offDutyCandidates<T extends { caddieProfileId: string }>(
-  candidates: T[],
-  attendance: AttendanceLookup,
-): { candidate: T; reason: Exclude<ReturnType<typeof offDutyReason>, null> }[] {
-  return candidates.flatMap(candidate => {
-    const reason = offDutyReason(attendance.get(candidate.caddieProfileId))
-    return reason ? [{ candidate, reason }] : []
-  })
 }
 
 type CaddieSupply = {
@@ -1103,7 +1093,6 @@ function DispatchView({
 
             <AutoAssignPanel
               date={date}
-              attendance={attendanceById}
               onChanged={onChanged}
               setFlash={setFlash}
             />
@@ -1557,12 +1546,10 @@ function ReinforcementSheet({
 
 export function AutoAssignPanel({
   date,
-  attendance,
   onChanged,
   setFlash,
 }: {
   date: string
-  attendance: AttendanceLookup
   onChanged: () => void
   setFlash: (flash: Flash) => void
 }) {
@@ -1577,9 +1564,6 @@ export function AutoAssignPanel({
     setError(null)
   }, [date])
 
-  // Surfaced before the plan is committed, not used to filter it: the morning
-  // plan is drawn up before anyone has clocked in.
-  const offDuty = offDutyCandidates(plan?.assigned ?? [], attendance)
   const placementWarnings = plan?.assigned.flatMap(item => {
     const status = placementWarningStatus(item.shiftPlacementStatus)
     return status ? [{ item, status }] : []
@@ -1743,21 +1727,6 @@ export function AutoAssignPanel({
               ))}
             </div>
           )}
-          {offDuty.length > 0 ? (
-            <Notice
-              tone="warning"
-              title={t('caddies:autoAssign.offDuty.title', { n: String(offDuty.length) })}
-            >
-              <p>{t('caddies:autoAssign.offDuty.description')}</p>
-              <ul className="mt-1 list-inside list-disc space-y-1">
-                {offDuty.map(({ candidate, reason }) => (
-                  <li key={`${candidate.reservationId}-${candidate.caddieProfileId}`}>
-                    {candidate.caddieDisplayName}: {t(`caddies:offDuty.${reason}`)}
-                  </li>
-                ))}
-              </ul>
-            </Notice>
-          ) : null}
           {plan.skipped.length > 0 ? (
             <Notice
               tone="warning"
@@ -1817,7 +1786,9 @@ function RecommendationsPanel({
                   return (
                     <>
                       {reason ? (
-                        <Badge variant="warning">{t(`caddies:offDuty.${reason}`)}</Badge>
+                        <Badge variant={reason === 'notClocked' ? 'neutral' : 'warning'}>
+                          {t(`caddies:offDuty.${reason}`)}
+                        </Badge>
                       ) : null}
                       {placement ? (
                         <Badge variant="warning">
