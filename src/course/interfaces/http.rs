@@ -368,11 +368,17 @@ pub struct PartyRemarksDto {
     #[serde(default, skip_serializing_if = "Option::is_none")]
     #[schema(example = "individual")]
     pub settlement: Option<String>,
+    /// Free text for anything the three fixed lines cannot say. At most 500 characters.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub note: Option<String>,
 }
 
 impl PartyRemarksDto {
     fn is_empty(&self) -> bool {
-        self.meal.is_none() && self.score_tally.is_none() && self.settlement.is_none()
+        self.meal.is_none()
+            && self.score_tally.is_none()
+            && self.settlement.is_none()
+            && self.note.is_none()
     }
 }
 
@@ -382,6 +388,7 @@ impl From<PartyRemarksDto> for PartyRemarksInput {
             meal: value.meal,
             score_tally: value.score_tally,
             settlement: value.settlement,
+            note: value.note,
         }
     }
 }
@@ -409,6 +416,7 @@ impl From<&PartyDetails> for PartyDto {
                     .remarks()
                     .settlement()
                     .map(|settlement| settlement.as_str().to_string()),
+                note: value.remarks().note().map(str::to_string),
             },
         }
     }

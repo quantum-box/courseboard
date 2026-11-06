@@ -75,6 +75,8 @@ export type PartyRemarks = {
   scoreTally?: boolean | null
   /** Each player pays, or one person pays for the group. */
   settlement?: PartySettlement | string | null
+  /** Free text for anything the three fixed lines cannot say (at most 500 characters). */
+  note?: string | null
 }
 
 export type PartyDetails = {

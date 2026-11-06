@@ -556,7 +556,7 @@ function GroupCell({
   )
 }
 
-/** `食 各自注文 · 集計 有 · 精算 個人`, or nothing when no remark was written. */
+/** `食 各自注文 · 集計 有 · 精算 個人 · 早めに到着`, or nothing when no remark was written. */
 function remarkSummary(
   remarks: PartyRemarks | null | undefined,
   t: TFunction<['ledger']>,
@@ -577,6 +577,9 @@ function remarkSummary(
         : 'ledger:remarks.settlementTogether'),
     }))
   }
+  // Only the first line: the cell is one row high; the full note is on the sheet.
+  const note = remarks.note?.trim().split('\n')[0]?.trim()
+  if (note) parts.push(note)
   return parts.join(' · ')
 }
 
