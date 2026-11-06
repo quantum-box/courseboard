@@ -4,6 +4,7 @@ import { act, cleanup, fireEvent, render, screen } from '@testing-library/react'
 import { I18nextProvider } from 'react-i18next'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 
+import { MockFeatureDeliveryProvider } from '../../../feature-delivery/FeatureDelivery'
 import { clearResourceCache } from '../../../hooks/useResource'
 import { i18next } from '../../../i18n'
 import { CustomersPage } from './CustomersPage'
@@ -63,5 +64,46 @@ describe('customer ledger requests', () => {
     expect(api.json).toHaveBeenCalledTimes(2)
     expect(api.json).toHaveBeenLastCalledWith('/v1/course/customers?limit=20&offset=20')
     expect(screen.getByText('顧客 20')).toBeTruthy()
+  })
+  it('leaves out the buttons for screens the plan does not provide', async () => {
+    render(
+      <I18nextProvider i18n={i18next}>
+        <MockFeatureDeliveryProvider provided={['courseboard.customers']}>
+          <CustomersPage />
+        </MockFeatureDeliveryProvider>
+      </I18nextProvider>,
+    )
+
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(250)
+    })
+
+    expect(screen.queryByRole('button', { name: /受付用紙から登録する/ })).toBeNull()
+    expect(screen.queryByRole('button', { name: /キャンセルした人をさがす/ })).toBeNull()
+    expect(screen.queryByRole('button', { name: /顧客データをとりこむ/ })).toBeNull()
+    expect(screen.getByRole('button', { name: /架電リスト/ })).toBeTruthy()
+  })
+
+  it('offers every screen the plan provides', async () => {
+    render(
+      <I18nextProvider i18n={i18next}>
+        <MockFeatureDeliveryProvider provided={[
+          'courseboard.customers',
+          'courseboard.customers.reception',
+          'courseboard.customers.cancellations',
+          'courseboard.data_imports',
+        ]}>
+          <CustomersPage />
+        </MockFeatureDeliveryProvider>
+      </I18nextProvider>,
+    )
+
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(250)
+    })
+
+    expect(screen.getByRole('button', { name: /受付用紙から登録する/ })).toBeTruthy()
+    expect(screen.getByRole('button', { name: /キャンセルした人をさがす/ })).toBeTruthy()
+    expect(screen.getByRole('button', { name: /顧客データをとりこむ/ })).toBeTruthy()
   })
 })
