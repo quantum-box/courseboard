@@ -1,3 +1,4 @@
+import { MOCK_FIXTURE_DATE } from './mockFixture'
 /**
  * Development auth (`VITE_COURSEBOARD_AUTH_MODE=development`) only stubs the
  * session. Feature screens still call Field API through the Vite proxy, which
@@ -60,7 +61,7 @@ const TENANT_ID = () =>
  * affordance in the timeline has to send the operator to this day; a second
  * copy of the date in the page drifts the moment these fixtures move.
  */
-export const MOCK_FIXTURE_DATE = '2026-11-06'
+export { MOCK_FIXTURE_DATE } from './mockFixture'
 
 const NOW = `${MOCK_FIXTURE_DATE}T09:00:00+09:00`
 const TODAY = MOCK_FIXTURE_DATE

@@ -98,9 +98,5 @@ export const appRoutes: AppRoute[] = [
 
 export const NOT_FOUND_TITLE = '画面が見つかりません'
 
-/**
- * モックデータの基準日（src/dev/mockFieldApi.ts の MOCK_FIXTURE_DATE と同値）。
- * mockFieldApi は import.meta.env に依存していて Playwright の Node からは
- * import できないため、ここに複製している。
- */
-export const MOCK_FIXTURE_DATE = '2026-07-18'
+// Keep E2E navigation on the same date as the browser fixtures.
+export { MOCK_FIXTURE_DATE } from '../src/dev/mockFixture'

@@ -13,6 +13,7 @@ import { e2eManagedMockServer, MOCK_FIXTURE_DATE } from './routes'
  */
 
 const D = MOCK_FIXTURE_DATE
+const MONTH = D.slice(0, 7)
 
 test.describe('データ出力', () => {
   test('設定から出力列を保存し、CSVをダウンロードできる', async ({ page }) => {
@@ -149,8 +150,8 @@ test.describe('ホーム', () => {
 
 test.describe('予約台帳', () => {
   test('基準日の予約が表示される', async ({ page }) => {
-    await page.goto(`/golf/ledger?date=${D}`)
-    await expect(page.getByRole('region', { name: '東コース' })).toBeVisible()
+    await page.goto(`/golf/ledger?date=${D}&courses=course_east`)
+    await expect(page.getByRole('region', { name: '滝のCC 東コース' })).toBeVisible()
     // 手書きフィクスチャのコンペ（山田会）と幹事名が台帳に載る
     await expect(page.getByText('山田会 1組').first()).toBeVisible()
     await expect(page.getByText('幹事 山田 太郎').first()).toBeVisible()
@@ -161,18 +162,18 @@ test.describe('予約台帳', () => {
   test('コースのしぼり込みと日送りが URL に反映される', async ({ page }) => {
     await page.goto(`/golf/ledger?date=${D}`)
     const toolbar = page.locator('[aria-label="しぼり込み"]')
-    await toolbar.getByRole('button', { name: '東コース', exact: true }).click()
+    await toolbar.getByRole('button', { name: '滝のCC 東コース', exact: true }).click()
     await expect(page).toHaveURL(/courses=course_east/)
 
     await page.getByRole('button', { name: '前の日' }).click()
-    await expect(page).toHaveURL(/date=2026-07-17/)
+    await expect(page).toHaveURL(/date=2026-11-05/)
   })
 })
 
 test.describe('タイムライン', () => {
   test('空の日は空状態、基準日はスタート表が埋まる', async ({ page }) => {
-    // データの無い日（今日）は空状態
-    await page.goto('/golf/timeline')
+    // サンプル範囲外の日は空状態
+    await page.goto('/golf/timeline?date=2027-01-01')
     await expect(page.getByText('この日のスタートはありません')).toBeVisible()
 
     // 基準日はスタート表とキャディの列が埋まる
@@ -245,28 +246,31 @@ test.describe('顧客台帳', () => {
 })
 
 test.describe('プレー商品', () => {
-  test('一覧の内容とコース未設定の警告、詳細への遷移', async ({ page }) => {
+  test('OUT・INに対応する商品と詳細への遷移', async ({ page }) => {
     await page.goto('/golf/products')
-    await expect(page.getByText('キャディ付き18ホール')).toBeVisible()
-    await expect(page.getByText('コース未設定のプランが 1 件あります', { exact: false })).toBeVisible()
+    await expect(page.getByText('真駒内CC 空沼 18H キャディ付き')).toBeVisible()
+    const productRow = page.getByRole('row').filter({ hasText: '真駒内CC 空沼 18H キャディ付き' })
+    await expect(productRow).toContainText('真駒内CC 空沼 OUT')
+    await expect(productRow).toContainText('真駒内CC 空沼 IN')
+    await expect(page.getByText('コース未設定のプランが', { exact: false })).toHaveCount(0)
 
-    await page.getByText('キャディ付き18ホール').click()
+    await page.getByText('真駒内CC 空沼 18H キャディ付き').click()
     await expect(page).toHaveURL(/golf\/products\/svc/)
-    await expect(page.getByRole('heading', { name: 'キャディ付き18ホール' })).toBeVisible()
+    await expect(page.getByRole('heading', { name: '真駒内CC 空沼 18H キャディ付き' })).toBeVisible()
   })
 })
 
 test.describe('コース', () => {
   test('一覧から受付枠画面へ遷移できる', async ({ page }) => {
     await page.goto('/golf/courses')
-    await expect(page.getByText('東コース')).toBeVisible()
-    await expect(page.getByText('西コース')).toBeVisible()
-    await expect(page.getByText('羊ケ丘コース')).toBeVisible()
+    await expect(page.getByText('滝のCC 東コース', { exact: true })).toBeVisible()
+    await expect(page.getByText('滝のCC 西コース', { exact: true })).toBeVisible()
+    await expect(page.getByText('羊ヶ丘CC OUT', { exact: true })).toBeVisible()
 
-    await page.getByRole('button', { name: '東コース の受付枠を開く' }).click()
+    await page.getByRole('button', { name: '滝のCC 東コース の受付枠を開く' }).click()
     await expect(page).toHaveURL(/golf\/courses\/course_east/)
-    // 見出しはコースの略称（東）を使う
-    await expect(page.getByRole('heading', { name: '受付枠 · 東' })).toBeVisible()
+    // 受付枠の見出しには選んだコース名が表示される
+    await expect(page.getByRole('heading', { name: '受付枠 · 滝のCC 東コース' })).toBeVisible()
     await expect(page.getByRole('heading', { name: '受付する時間' })).toBeVisible()
   })
 })
@@ -274,10 +278,10 @@ test.describe('コース', () => {
 test.describe('キャディ名簿', () => {
   test('名簿の検索と詳細表示', async ({ page }) => {
     await page.goto('/golf/caddies')
-    await expect(page.getByText('40 / 40人')).toBeVisible()
+    await expect(page.getByText('245 / 245人')).toBeVisible()
 
     await page.getByLabel('キャディをさがす').fill('佐藤')
-    await expect(page.getByText('1 / 40人')).toBeVisible()
+    await expect(page.getByText('1 / 245人')).toBeVisible()
 
     await page.getByText('佐藤 彩').first().click()
     await expect(page).toHaveURL(/golf\/caddies\/caddie_aya/)
@@ -287,12 +291,27 @@ test.describe('キャディ名簿', () => {
 
   test('配置画面に割当とおすすめが出る', async ({ page }) => {
     await page.goto(`/golf/caddies/dispatch?date=${D}`)
-    await expect(page.getByRole('heading', { name: '未配置を解消する' })).toBeVisible()
-    await expect(page.getByRole('heading', { name: '自動で配置する' })).toBeVisible()
-    const assigned = page.getByText('配置済み 70組', { exact: true })
+    await expect(page.getByRole('heading', { name: 'キャディが決まっていない組' })).toBeVisible()
+    await expect(page.getByRole('button', { name: 'キャディを自動配置' })).toBeVisible()
+    const assigned = page.getByText(/^配置済み [1-9][0-9]*組$/)
     await expect(assigned).toBeVisible()
     await assigned.click()
     await expect(page.getByText(/担当を変えるときは、その行の「付け替え」から/)).toBeVisible()
+  })
+
+  test('台帳から自動配置を開き、未配置の理由を確認して閉じる', async ({ page }) => {
+    await page.goto(`/golf/caddies/dispatch?date=${D}`)
+    await expect(page.getByRole('region', { name: 'キャディ未配置の予約台帳' })).toBeVisible()
+    await expect(page.getByRole('button', { name: '台帳表示', exact: true })).toHaveAttribute('aria-pressed', 'true')
+    await page.getByRole('button', { name: 'キャディを自動配置' }).click()
+    const dialog = page.getByRole('dialog', { name: '自動で配置する' })
+    await expect(dialog).toBeVisible()
+    const details = dialog.locator('summary').filter({ hasText: '候補者ごとの理由' }).first()
+    await expect(details).toBeVisible()
+    await details.click()
+    await expect(dialog.getByText('別の組・業務を担当中', { exact: true }).first()).toBeVisible()
+    await dialog.getByRole('button', { name: '閉じる', exact: true }).click()
+    await expect(dialog).toBeHidden()
   })
 
   test('出勤ボードが表示される', async ({ page }) => {
@@ -302,7 +321,7 @@ test.describe('キャディ名簿', () => {
   })
 
   test('シフト表と休みのルールが開ける', async ({ page }) => {
-    await page.goto('/golf/caddies/shifts?yearMonth=2026-07')
+    await page.goto(`/golf/caddies/shifts?yearMonth=${MONTH}`)
     await expect(page.getByRole('button', { name: 'シフト案を作る' })).toBeVisible()
     await expect(page.getByText('佐藤 彩').first()).toBeVisible()
 
@@ -312,10 +331,11 @@ test.describe('キャディ名簿', () => {
   })
 
   test('給与画面にランク別の支給額が出る', async ({ page }) => {
-    await page.goto('/golf/caddies/payroll?yearMonth=2026-07')
+    await page.goto(`/golf/caddies/payroll?yearMonth=${MONTH}`)
     await expect(page.getByRole('heading', { name: '給与への受け渡し' })).toBeVisible()
     await expect(page.getByText('144,000').first()).toBeVisible()
-    // 個人単価の上書き（田中 美香）
+    // 個人単価の上書き（田中 美香）。人数が増えても検索して対象行を検証する。
+    await page.getByPlaceholder('キャディ名・ランクでしぼる').fill('田中 美香')
     await expect(page.getByText('本人ごとの単価').first()).toBeVisible()
   })
 })
@@ -333,9 +353,9 @@ test.describe('社員名簿', () => {
 
 test.describe('売上目標', () => {
   test('月の進みぐあいが集計される', async ({ page }) => {
-    await page.goto('/golf/budgets?yearMonth=2026-08')
+    await page.goto(`/golf/budgets?yearMonth=${MONTH}`)
     await expect(page.getByRole('heading', { name: 'この月の進みぐあい' })).toBeVisible()
-    await expect(page.getByText('￥16,740,000').first()).toBeVisible()
+    await expect(page.getByText('￥48,600,000').first()).toBeVisible()
     await expect(page.getByRole('heading', { name: '登録ずみの目標' })).toBeVisible()
   })
 })
