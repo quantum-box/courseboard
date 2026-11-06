@@ -115,9 +115,9 @@ describe('CaddiesPage dispatch tabs', () => {
     expect(dutyTab.className).toContain('bg-background')
     expect(roundTab.compareDocumentPosition(dateInput) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy()
 
-    expect(screen.getByRole('heading', { name: '未配置を解消する' })).toBeTruthy()
+    expect(screen.queryByRole('heading', { name: '未配置を解消する' })).toBeNull()
     expect(await screen.findByRole('heading', { name: 'キャディが決まっていない組' })).toBeTruthy()
-    expect(screen.getByRole('heading', { name: /自動.*配置/ })).toBeTruthy()
+    expect(screen.getByRole('button', { name: 'キャディを自動配置' })).toBeTruthy()
     const assigned = document.querySelector('details.collapsible-section')
     expect(assigned).toBeTruthy()
     expect(assigned?.hasAttribute('open')).toBe(false)

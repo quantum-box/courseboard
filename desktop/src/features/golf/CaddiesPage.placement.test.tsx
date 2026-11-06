@@ -70,9 +70,39 @@ describe('AutoAssignPanel shift placement warning', () => {
     vi.restoreAllMocks()
   })
 
+  it('explains who cannot take each skipped round', async () => {
+    api.json.mockResolvedValue({ dryRun: true, assigned: [], skipped: [{
+      reservationId: 'round-skipped', scheduledAt: '2026-11-06T09:00:00+09:00', reason: 'no_caddie_available',
+      unavailableCaddies: [
+        { caddieProfileId: 'c1', displayName: '田中 恵美', reasons: ['busy', 'daily_limit'] },
+        { caddieProfileId: 'c2', displayName: '山田 美穂', reasons: ['outside_shift'] },
+      ],
+    }] })
+    renderPanel('2026-11-06')
+    fireEvent.click(screen.getByRole('button', { name: 'キャディを自動配置' }))
+    expect(await screen.findByText('候補者ごとの理由（2人）')).toBeTruthy()
+    fireEvent.click(screen.getByText('候補者ごとの理由（2人）'))
+    expect(screen.getByText('田中 恵美')).toBeTruthy()
+    expect(screen.getByText('別の組・業務を担当中 · この日の担当上限に到達')).toBeTruthy()
+    expect(screen.getByText('山田 美穂')).toBeTruthy()
+    expect(screen.getByText('この時間はシフト対象外・休み')).toBeTruthy()
+  })
+
+  it('opens the preview in a dialog and closes without assigning', async () => {
+    renderPanel()
+    expect(screen.queryByRole('dialog')).toBeNull()
+    fireEvent.click(screen.getByRole('button', { name: 'キャディを自動配置' }))
+    await waitFor(() => expect(screen.getByText('佐藤 彩')).toBeTruthy())
+    expect(screen.getByRole('dialog', { name: '自動で配置する' })).toBeTruthy()
+    fireEvent.click(screen.getByRole('button', { name: '閉じる' }))
+    await waitFor(() => expect(screen.queryByRole('dialog')).toBeNull())
+    expect(calls).toHaveLength(1)
+    expect(JSON.parse(String(calls[0]?.init?.body)).dryRun).toBe(true)
+  })
+
   it('shows badges and one aggregate notice for unconfirmed and unplaced preview rows', async () => {
     renderPanel()
-    fireEvent.click(screen.getByRole('button', { name: '配置を試す' }))
+    fireEvent.click(screen.getByRole('button', { name: 'キャディを自動配置' }))
 
     await waitFor(() => expect(screen.getByText('佐藤 彩')).toBeTruthy())
     expect(screen.getAllByText('当日のシフトが未確定')).toHaveLength(1)
@@ -87,7 +117,7 @@ describe('AutoAssignPanel shift placement warning', () => {
       return result(['on_course', undefined], false)
     })
     renderPanel()
-    fireEvent.click(screen.getByRole('button', { name: '配置を試す' }))
+    fireEvent.click(screen.getByRole('button', { name: 'キャディを自動配置' }))
 
     await waitFor(() => expect(screen.getByText('佐藤 彩')).toBeTruthy())
     expect(screen.queryByText('当日のシフトが未確定')).toBeNull()
@@ -107,7 +137,7 @@ describe('AutoAssignPanel shift placement warning', () => {
         return plan
       })
       renderPanel(date)
-      fireEvent.click(screen.getByRole('button', { name: '配置を試す' }))
+      fireEvent.click(screen.getByRole('button', { name: 'キャディを自動配置' }))
 
       await waitFor(() => expect(screen.getByText('佐藤 彩')).toBeTruthy())
       expect(screen.getByText('未出勤')).toBeTruthy()
@@ -124,7 +154,7 @@ describe('AutoAssignPanel shift placement warning', () => {
   it('combines placement and deadline warnings in one non-blocking execute confirmation', async () => {
     const confirm = vi.spyOn(window, 'confirm').mockReturnValue(false)
     renderPanel()
-    fireEvent.click(screen.getByRole('button', { name: '配置を試す' }))
+    fireEvent.click(screen.getByRole('button', { name: 'キャディを自動配置' }))
     await waitFor(() => expect(screen.getByText('佐藤 彩')).toBeTruthy())
 
     fireEvent.click(screen.getByRole('button', { name: 'この配置で決める' }))

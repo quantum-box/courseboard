@@ -1,12 +1,11 @@
 import { Badge, Button } from '@tachyon-sdk/native-ui'
-import { UserPlus } from 'lucide-react'
-import { useCallback, useMemo, useState } from 'react'
+import { List, Table2, UserPlus } from 'lucide-react'
+import { useCallback, useMemo, useState, type ReactNode } from 'react'
 import { useTranslation } from 'react-i18next'
 
 import { courseboardApiJson, COURSE_TIME_ZONE } from '../../api'
 import {
   EmptyState,
-  Field,
   LoadingState,
   NativeSelect,
   Panel,
@@ -16,6 +15,8 @@ import { Sheet } from '../../components/Sheet'
 import { CaddieLink } from './CaddieLink'
 import { placementWarningStatus, type ShiftPlacementStatus } from './caddiePlacement'
 import { holdsTheRound, roundIsStillOn, unassignedCaddieRounds } from './caddieRoundCoverage'
+import type { PartyDetails } from './ledger/models'
+import { UnassignedRoundsLedger } from './UnassignedRoundsLedger'
 import { useResource } from '../../hooks/useResource'
 import { showToast } from '../../lib/toast'
 import {
@@ -46,6 +47,8 @@ export type TeeSheetRow = {
   partySize: number
   partyName?: string
   displayName?: string
+  durationMinutes?: number
+  party?: PartyDetails | null
   /** Absent on older rows; only the cancelled states are read here. */
   status?: string
 }
@@ -131,18 +134,21 @@ export function UnassignedRoundsPanel({
   horizon,
   onHorizonChange,
   onChanged,
+  toolbar,
 }: {
   sheet: ResourceValue<{ items: TeeSheetRow[] }>
   assignments: DayAssignment[]
   horizon: Horizon
   onHorizonChange: (horizon: Horizon) => void
   onChanged: () => void
+  toolbar?: ReactNode
 }) {
   const { t } = useTranslation(['caddies', 'common'])
   const [naming, setNaming] = useState<TeeSheetRow | null>(null)
   // The board is every course at once, which is right for a desk that runs
   // several — but staffing one course at a time is the usual way through it.
   const [courseFilter, setCourseFilter] = useState('')
+  const [view, setView] = useState<'ledger' | 'list'>('ledger')
 
   const rounds = useMemo(
     () => unassignedCaddieRounds(sheet.data?.items ?? [], assignments),
@@ -150,9 +156,13 @@ export function UnassignedRoundsPanel({
   )
   const courses = useMemo(() => {
     const named = new Map<string, string>()
-    for (const row of rounds) named.set(row.golfCourseId, row.courseName)
+    for (const row of sheet.data?.items ?? []) {
+      if (roundIsStillOn(row) && row.playType === 'caddie') named.set(row.golfCourseId, row.courseName)
+    }
     return [...named].map(([id, name]) => ({ id, name }))
-  }, [rounds])
+  }, [sheet.data])
+  const hasCaddieBookings = (sheet.data?.items ?? []).some(row => roundIsStillOn(row) && row.playType === 'caddie')
+  const emptyKey = !hasCaddieBookings ? 'noBookings' : rounds.length > 0 ? 'noMatches' : 'empty'
   const shown = useMemo(() => {
     const picked = courseFilter === ''
       ? rounds
@@ -175,12 +185,22 @@ export function UnassignedRoundsPanel({
   return (
     <Panel
       title={t('caddies:unassigned.title')}
-      description={t('caddies:unassigned.description')}
       actions={(
-        <div className="flex flex-wrap items-end gap-3">
+        <div className="flex flex-wrap items-center gap-2">
+          {toolbar}
+          <div className="horizon-switch unassigned-view-switch" role="group" aria-label={t('caddies:unassigned.viewLabel')}>
+            {(['ledger', 'list'] as const).map(option => (
+              <button key={option} type="button" className={`horizon-chip${view === option ? ' is-on' : ''}`}
+                aria-pressed={view === option} onClick={() => setView(option)}>
+                {option === 'ledger' ? <Table2 aria-hidden="true" /> : <List aria-hidden="true" />}
+                {t(`caddies:unassigned.views.${option}`)}
+              </button>
+            ))}
+          </div>
           {courses.length > 1 ? (
-            <Field label={t('caddies:unassigned.courseFilter')} requirement="none" className="w-full sm:w-48">
+            <div className="w-full sm:w-48">
               <NativeSelect
+                aria-label={t('caddies:unassigned.courseFilter')}
                 value={courseFilter}
                 onChange={event => setCourseFilter(event.target.value)}
               >
@@ -189,7 +209,7 @@ export function UnassignedRoundsPanel({
                   <option key={course.id} value={course.id}>{course.name}</option>
                 ))}
               </NativeSelect>
-            </Field>
+            </div>
           ) : null}
           {/* Staffing runs ahead of the day, so the groups still missing
               somebody are read a fortnight at a time as well as one day. */}
@@ -213,8 +233,8 @@ export function UnassignedRoundsPanel({
       {sheet.error ? <ResourceError error={sheet.error} onRetry={sheet.refresh} /> : null}
       {!sheet.loading && !sheet.error && shown.length === 0 ? (
         <EmptyState
-          title={t('caddies:unassigned.empty.title')}
-          description={t('caddies:unassigned.empty.description')}
+          title={t(`caddies:unassigned.${emptyKey}.title`)}
+          description={t(`caddies:unassigned.${emptyKey}.description`)}
         />
       ) : null}
 
@@ -222,8 +242,9 @@ export function UnassignedRoundsPanel({
           list scrolls inside the panel rather than pushing the rest of the
           screen down, and each day says how many it holds so the desk can see
           which day needs the work without reading every row. */}
-      <div className="unassigned-scroll">
-        {byDay.map(([day, dayRounds]) => (
+
+      <div className={view === 'list' ? 'unassigned-scroll' : 'dispatch-ledger-days'}>
+        {!sheet.loading && !sheet.error ? byDay.map(([day, dayRounds]) => (
           <section key={day} className="unassigned-day">
             {horizon > 1 ? (
               <h3 className="unassigned-day-heading">
@@ -233,32 +254,37 @@ export function UnassignedRoundsPanel({
                 </span>
               </h3>
             ) : null}
-            <div className="space-y-2">
-        {dayRounds.map(round => (
-          <div
-            key={round.id}
-            className="flex flex-wrap items-center gap-3 rounded-lg border border-border bg-background p-3"
-          >
-            <span className="font-mono text-sm font-semibold">
-              {wallClock(round.teeTime)}
-            </span>
-            <div className="min-w-0 flex-1">
-              <p className="truncate font-medium text-foreground">
-                {round.partyName || round.reservationNumber}
-              </p>
-              <p className="text-xs text-muted-foreground">
-                {round.courseName} · {t('caddies:unassigned.players', { n: String(round.partySize) })}
-              </p>
-            </div>
-            <Button type="button" variant="secondary" size="sm" onClick={() => setNaming(round)}>
-              <UserPlus />
-              {t('caddies:unassigned.name')}
-            </Button>
-          </div>
-        ))}
-            </div>
+            {view === 'ledger' ? (
+              <UnassignedRoundsLedger rounds={dayRounds} courseOrder={courses.map(course => course.id)}
+                selectedId={naming?.id ?? null} onSelect={setNaming} />
+            ) : (
+              <div className="space-y-2">
+                {dayRounds.map(round => (
+                  <div
+                    key={round.id}
+                    className="flex flex-wrap items-center gap-3 rounded-lg border border-border bg-background p-3"
+                  >
+                    <span className="font-mono text-sm font-semibold">
+                      {wallClock(round.teeTime)}
+                    </span>
+                    <div className="min-w-0 flex-1">
+                      <p className="truncate font-medium text-foreground">
+                        {round.partyName || round.reservationNumber}
+                      </p>
+                      <p className="text-xs text-muted-foreground">
+                        {round.courseName} · {t('caddies:unassigned.players', { n: String(round.partySize) })}
+                      </p>
+                    </div>
+                    <Button type="button" variant="secondary" size="sm" onClick={() => setNaming(round)}>
+                      <UserPlus />
+                      {t('caddies:unassigned.name')}
+                    </Button>
+                  </div>
+                ))}
+              </div>
+            )}
           </section>
-        ))}
+        )) : null}
       </div>
 
       <NameCaddieSheet

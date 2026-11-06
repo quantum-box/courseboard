@@ -1042,9 +1042,21 @@ pub struct AutoAssignPlanItemDto {
 
 #[derive(Debug, Serialize, Deserialize, PartialEq, Eq, ToSchema)]
 #[serde(rename_all = "camelCase")]
+pub struct AutoAssignUnavailableCaddieDto {
+    pub caddie_profile_id: String,
+    pub display_name: String,
+    pub reasons: Vec<String>,
+}
+
+#[derive(Debug, Serialize, Deserialize, PartialEq, Eq, ToSchema)]
+#[serde(rename_all = "camelCase")]
 pub struct AutoAssignSkippedDto {
     pub reservation_id: String,
     pub reason: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub scheduled_at: Option<DateTime<Utc>>,
+    #[serde(default)]
+    pub unavailable_caddies: Vec<AutoAssignUnavailableCaddieDto>,
 }
 
 /// Carried when the month's filing deadline has passed and caddies remain
@@ -1088,6 +1100,16 @@ impl From<AutoAssignResult> for AutoAssignResultDto {
                 .map(|item| AutoAssignSkippedDto {
                     reservation_id: item.reservation_id().to_string(),
                     reason: item.reason().to_string(),
+                    scheduled_at: item.scheduled_at,
+                    unavailable_caddies: item
+                        .unavailable_caddies
+                        .iter()
+                        .map(|caddie| AutoAssignUnavailableCaddieDto {
+                            caddie_profile_id: caddie.caddie_id.clone(),
+                            display_name: caddie.display_name.clone(),
+                            reasons: caddie.reasons.clone(),
+                        })
+                        .collect(),
                 })
                 .collect(),
             deadline_warning: value.deadline_warning().map(|warning| DeadlineWarningDto {

@@ -7833,3 +7833,31 @@ button,
 @media (max-width: 900px) {
   .reception-review-compact .reception-row-list { max-height: none; }
 }
+
+/* The dispatch board shares booking-ledger cells, but its only action is
+   assigning a caddie. Each course follows the same clock down the page. */
+.dispatch-ledger-days { display: grid; min-width: 0; gap: 20px; }
+.dispatch-ledger-days > .unassigned-day { min-width: 0; }
+.dispatch-ledger-scroll { max-width: 100%; max-height: max(260px, calc(100dvh - 250px)); overflow: auto; border-radius: var(--nui-radius-md); }
+.dispatch-ledger-scroll:focus-visible { outline: 2px solid hsl(var(--nui-primary)); outline-offset: 3px; }
+.dispatch-ledger {
+  --ledger-time-width: 76px;
+  --ledger-group-width: 190px;
+  --ledger-seat-width: 108px;
+  min-width: max-content;
+}
+.dispatch-ledger .ledger-column { overflow: visible; }
+.dispatch-ledger .ledger-column-head { display: flex; align-items: center; justify-content: space-between; position: sticky; top: 0; z-index: 3; min-height: 44px; padding: 6px 10px; background: hsl(var(--nui-muted)); }
+.dispatch-ledger .ledger-column-head h3 { margin: 0; font-size: 14px; font-weight: 700; }
+.dispatch-ledger .ledger-table thead th { top: 44px; z-index: 4; }
+.dispatch-ledger .ledger-table thead th:first-child { left: 0; z-index: 5; }
+.dispatch-ledger-row { height: 48px; }
+.dispatch-ledger .ledger-group-button { min-height: 47px; align-items: center; padding: 3px 8px; }
+.dispatch-ledger .ledger-table td,
+.dispatch-ledger .ledger-table tbody th { vertical-align: middle; }
+.dispatch-ledger-col-action { width: 148px; }
+.dispatch-ledger-action { padding: 4px 8px !important; vertical-align: middle !important; }
+.dispatch-ledger-time { display: block; padding: 5px 8px; font-family: var(--nui-font-mono); font-weight: 700; }
+.dispatch-ledger-empty { padding: 5px 8px !important; color: hsl(var(--nui-muted-foreground)); background: hsl(var(--nui-muted) / .18); }
+.dispatch-ledger-hint { margin: 0 0 12px; color: hsl(var(--nui-muted-foreground)); font-size: 12px; }
+.unassigned-view-switch svg { display: inline-block; width: 14px; height: 14px; margin-right: 5px; vertical-align: -2px; }

@@ -284,7 +284,7 @@ type DeadlineWarning = {
 type AutoAssignResult = {
   dryRun: boolean
   assigned: AutoAssignPlanItem[]
-  skipped: { reservationId: string; reason: string }[]
+  skipped: { reservationId: string; reason: string; scheduledAt?: string; unavailableCaddies?: Array<{ caddieProfileId: string; displayName: string; reasons: string[] }> }[]
   deadlineWarning?: DeadlineWarning | null
 }
 
@@ -1075,29 +1075,15 @@ function DispatchView({
         hidden={activeTab !== 'rounds'}
         className="space-y-4"
       >
-        <section className="space-y-3">
-          <div>
-            <h2 className="section-title">{t('caddies:dispatch.primaryTitle')}</h2>
-            <p className="mt-1 text-sm text-muted-foreground">
-              {t('caddies:dispatch.primaryDescription')}
-            </p>
-          </div>
-          <div className="grid items-start gap-4 lg:grid-cols-[minmax(0,1fr)_22rem]">
-            <UnassignedRoundsPanel
-              sheet={teeSheet}
-              assignments={horizonAssignments}
-              horizon={horizon}
-              onHorizonChange={setHorizon}
-              onChanged={onChanged}
-            />
-
-            <AutoAssignPanel
-              date={date}
-              onChanged={onChanged}
-              setFlash={setFlash}
-            />
-          </div>
-        </section>
+        <UnassignedRoundsPanel
+          sheet={teeSheet}
+          assignments={horizonAssignments}
+          horizon={horizon}
+          onHorizonChange={setHorizon}
+          onChanged={onChanged}
+          toolbar={<AutoAssignPanel rounds={teeSheet.data?.items ?? []} date={date}
+            onChanged={onChanged} setFlash={setFlash} />}
+        />
 
         <CollapsibleSection
           title={t('caddies:dispatch.assignedTitle', {
@@ -1546,20 +1532,24 @@ function ReinforcementSheet({
 
 export function AutoAssignPanel({
   date,
+  rounds = [],
   onChanged,
   setFlash,
 }: {
   date: string
+  rounds?: TeeSheetRow[]
   onChanged: () => void
   setFlash: (flash: Flash) => void
 }) {
   const { t } = useTranslation(['caddies', 'common'])
   const timezone = useTenantTimezone()
+  const [open, setOpen] = useState(false)
   const [plan, setPlan] = useState<AutoAssignResult | null>(null)
   const [busy, setBusy] = useState<'preview' | 'execute' | null>(null)
   const [error, setError] = useState<unknown>(null)
 
   useEffect(() => {
+    setOpen(false)
     setPlan(null)
     setError(null)
   }, [date])
@@ -1570,6 +1560,10 @@ export function AutoAssignPanel({
   }) ?? []
 
   async function run(dryRun: boolean) {
+    if (dryRun) {
+      setOpen(true)
+      setPlan(null)
+    }
     setBusy(dryRun ? 'preview' : 'execute')
     setError(null)
     try {
@@ -1579,6 +1573,8 @@ export function AutoAssignPanel({
       )
       setPlan(result)
       if (!dryRun) {
+        setOpen(false)
+        setPlan(null)
         onChanged()
         setFlash({
           tone: 'success',
@@ -1597,153 +1593,180 @@ export function AutoAssignPanel({
   }
 
   return (
-    <Panel
-      title={t('caddies:autoAssign.title')}
-      description={t('caddies:autoAssign.description')}
-      actions={<Sparkles className="size-5 text-primary" aria-hidden="true" />}
-    >
-      <div className="flex flex-col gap-2 sm:flex-row">
+    <div>
+      <div className="flex flex-wrap items-center gap-2">
         <Button
           type="button"
-          variant="secondary"
-          className="flex-1"
+          variant="primary"
+          className="w-fit"
           disabled={busy !== null || !date}
           onClick={() => void run(true)}
         >
           <Sparkles />
           {busy === 'preview' ? t('caddies:autoAssign.previewing') : t('caddies:autoAssign.preview')}
         </Button>
-        <Button
-          type="button"
-          variant="primary"
-          className="flex-1"
-          disabled={busy !== null || !plan || plan.assigned.length === 0}
-          onClick={() => {
-            const confirmations: string[] = []
-            if (plan?.deadlineWarning) {
-              confirmations.push(
-                t('caddies:autoAssign.deadlineWarning.confirmExecute', {
-                  names: plan.deadlineWarning.unsubmittedCaddieNames.join('、'),
-                }),
-              )
-            }
-            if (placementWarnings.length > 0) {
-              const placementItems = placementWarnings
-                .map(({ item, status }) => t('caddies:autoAssign.shiftPlacementWarning.item', {
-                  name: item.caddieDisplayName,
-                  status: t(`caddies:shiftPlacement.${status}`),
-                }))
-                .join('\n')
-              confirmations.push([
-                t('caddies:autoAssign.shiftPlacementWarning.title'),
-                t('caddies:autoAssign.shiftPlacementWarning.body'),
-                placementItems,
-                t('caddies:autoAssign.shiftPlacementWarning.confirm'),
-              ].join('\n\n'))
-            }
-            if (confirmations.length > 0 && !window.confirm(confirmations.join('\n\n'))) {
-              return
-            }
-            void run(false)
-          }}
-        >
-          <CheckCircle2 />
-          {busy === 'execute' ? t('caddies:autoAssign.executing') : t('caddies:autoAssign.execute')}
-        </Button>
       </div>
 
-      {error ? (
-        <div className="mt-3">
-          <Notice tone="danger" title={t('caddies:autoAssign.failed')}>
-            {errorMessage(error)}
-          </Notice>
-        </div>
-      ) : null}
+      <Dialog open={open} onOpenChange={next => { if (busy !== 'execute') setOpen(next) }}>
+        <DialogContent className="flex max-h-[calc(100dvh-2rem)] max-w-2xl flex-col overflow-hidden">
+          <DialogHeader>
+            <DialogTitle>{t('caddies:autoAssign.title')}</DialogTitle>
+            <DialogDescription>{t('caddies:autoAssign.description')}</DialogDescription>
+          </DialogHeader>
+          <div className="min-h-0 overflow-y-auto">
+            {busy === 'preview' ? <p role="status" className="py-6 text-sm text-muted-foreground">{t('caddies:autoAssign.previewing')}</p> : null}
+            {error ? (
+              <div className="mt-3">
+                <Notice tone="danger" title={t('caddies:autoAssign.failed')}>
+                  {errorMessage(error)}
+                </Notice>
+              </div>
+            ) : null}
 
-      {plan ? (
-        <div className="mt-4 space-y-3">
-          {plan.deadlineWarning ? (
-            <Notice
-              tone="warning"
-              title={t('caddies:autoAssign.deadlineWarning.title', {
-                deadline: plan.deadlineWarning.deadlineDate,
-              })}
-            >
-              <p>
-                {t('caddies:autoAssign.deadlineWarning.body', {
-                  names: plan.deadlineWarning.unsubmittedCaddieNames.join('、'),
-                })}
-              </p>
-            </Notice>
-          ) : null}
-          {placementWarnings.length > 0 ? (
-            <Notice
-              tone="warning"
-              title={t('caddies:autoAssign.shiftPlacementWarning.title')}
-            >
-              <p>{t('caddies:autoAssign.shiftPlacementWarning.body')}</p>
-              <ul className="mt-1 list-inside list-disc space-y-1">
-                {placementWarnings.map(({ item, status }) => (
-                  <li key={`${item.reservationId}-${item.caddieProfileId}`}>
-                    {t('caddies:autoAssign.shiftPlacementWarning.item', {
+            {plan ? (
+              <div className="mt-4 space-y-3">
+                {plan.deadlineWarning ? (
+                  <Notice
+                    tone="warning"
+                    title={t('caddies:autoAssign.deadlineWarning.title', {
+                      deadline: plan.deadlineWarning.deadlineDate,
+                    })}
+                  >
+                    <p>
+                      {t('caddies:autoAssign.deadlineWarning.body', {
+                        names: plan.deadlineWarning.unsubmittedCaddieNames.join('、'),
+                      })}
+                    </p>
+                  </Notice>
+                ) : null}
+                {placementWarnings.length > 0 ? (
+                  <Notice
+                    tone="warning"
+                    title={t('caddies:autoAssign.shiftPlacementWarning.title')}
+                  >
+                    <p>{t('caddies:autoAssign.shiftPlacementWarning.body')}</p>
+                    <ul className="mt-1 list-inside list-disc space-y-1">
+                      {placementWarnings.map(({ item, status }) => (
+                        <li key={`${item.reservationId}-${item.caddieProfileId}`}>
+                          {t('caddies:autoAssign.shiftPlacementWarning.item', {
+                            name: item.caddieDisplayName,
+                            status: t(`caddies:shiftPlacement.${status}`),
+                          })}
+                        </li>
+                      ))}
+                    </ul>
+                  </Notice>
+                ) : null}
+                {plan.assigned.length === 0 ? (
+                  <EmptyState
+                    title={t('caddies:autoAssign.empty.title')}
+                    description={t('caddies:autoAssign.empty.description')}
+                  />
+                ) : (
+                  <div className="divide-y divide-border rounded-md border border-border">
+                    {plan.assigned.map(item => (
+                      <div key={`${item.reservationId}-${item.caddieProfileId}`} className="bg-background px-3 py-2">
+                        <div className="flex flex-wrap items-center gap-x-3 gap-y-1">
+                          <time className="w-24 shrink-0 text-xs tabular-nums text-muted-foreground">
+                            {formatDateTime(item.scheduledAt, timezone)}
+                          </time>
+                          <span className="flex-1 text-sm font-medium text-foreground">{item.caddieDisplayName}</span>
+                          <div className="flex flex-wrap items-center gap-1">
+                            <Badge variant="accent">{t('caddies:autoAssign.candidate')}</Badge>
+                            {(() => {
+                              const placement = placementWarningStatus(item.shiftPlacementStatus)
+                              return placement ? (
+                                <Badge variant="warning">
+                                  {t(`caddies:shiftPlacement.${placement}`)}
+                                </Badge>
+                              ) : null
+                            })()}
+                          </div>
+                        </div>
+                        {item.rationale.length > 0 ? <RationaleText rationale={item.rationale} /> : null}
+                      </div>
+                    ))}
+                  </div>
+                )}
+                {plan.skipped.length > 0 ? (
+                  <Notice
+                    tone="warning"
+                    title={t('caddies:autoAssign.skipped', { n: String(plan.skipped.length) })}
+                  >
+                    <div className="space-y-3">
+                      {plan.skipped.map(item => {
+                        const round = rounds.find(round => round.id === item.reservationId)
+                        const candidates = [...(item.unavailableCaddies ?? [])].sort((a, b) =>
+                          (a.reasons.includes('other_course') ? 3 : a.reasons.includes('outside_shift') ? 2 : 0)
+                          - (b.reasons.includes('other_course') ? 3 : b.reasons.includes('outside_shift') ? 2 : 0))
+                        return <section key={item.reservationId} className="rounded-md border border-border p-2">
+                          <p className="font-medium">
+                            {round?.teeTime || item.scheduledAt ? formatDateTime(round?.teeTime ?? item.scheduledAt!, timezone) : item.reservationId}
+                            {round ? ` · ${round.courseName} · ${round.partyName || round.reservationNumber}` : ''}
+                          </p>
+                          <p className="text-xs">{rationaleText([item.reason])}</p>
+                          {candidates.length > 0 ? <details className="mt-2">
+                            <summary className="cursor-pointer text-sm font-medium">{t('caddies:autoAssign.unavailableDetails', { n: String(candidates.length) })}</summary>
+                            <div className="mt-2 max-h-60 overflow-y-auto divide-y divide-border">
+                              {candidates.map(candidate => <div key={candidate.caddieProfileId} className="flex flex-wrap items-center justify-between gap-2 py-1 text-xs">
+                                <CaddieLink caddieId={candidate.caddieProfileId} displayName={candidate.displayName} />
+                                <span>{candidate.reasons.map(reason => t(`caddies:autoAssign.unavailableReasons.${reason}` as 'caddies:autoAssign.unavailableReasons.busy', { defaultValue: reason })).join(' · ')}</span>
+                              </div>)}
+                            </div>
+                          </details> : <p className="mt-1 text-xs">{t('caddies:autoAssign.unavailableMissing')}</p>}
+                        </section>
+                      })}
+                    </div>
+                  </Notice>
+                ) : null}
+              </div>
+            ) : null}
+          </div>
+          <DialogFooter>
+            <Button type="button" variant="secondary" disabled={busy === 'execute'} onClick={() => setOpen(false)}>
+              {t('common:action.close')}
+            </Button>
+            <Button
+              type="button"
+              variant="primary"
+              className="w-fit"
+              disabled={busy !== null || !plan || plan.assigned.length === 0}
+              onClick={() => {
+                const confirmations: string[] = []
+                if (plan?.deadlineWarning) {
+                  confirmations.push(
+                    t('caddies:autoAssign.deadlineWarning.confirmExecute', {
+                      names: plan.deadlineWarning.unsubmittedCaddieNames.join('、'),
+                    }),
+                  )
+                }
+                if (placementWarnings.length > 0) {
+                  const placementItems = placementWarnings
+                    .map(({ item, status }) => t('caddies:autoAssign.shiftPlacementWarning.item', {
                       name: item.caddieDisplayName,
                       status: t(`caddies:shiftPlacement.${status}`),
-                    })}
-                  </li>
-                ))}
-              </ul>
-            </Notice>
-          ) : null}
-          {plan.assigned.length === 0 ? (
-            <EmptyState
-              title={t('caddies:autoAssign.empty.title')}
-              description={t('caddies:autoAssign.empty.description')}
-            />
-          ) : (
-            <div className="space-y-2">
-              {plan.assigned.map(item => (
-                <div key={`${item.reservationId}-${item.caddieProfileId}`} className="rounded-lg border border-border bg-background p-3">
-                  <div className="flex flex-wrap items-start justify-between gap-2">
-                    <div>
-                      <p className="font-medium text-foreground">{item.caddieDisplayName}</p>
-                      <p className="text-xs text-muted-foreground">
-                        {formatDateTime(item.scheduledAt, timezone)}
-                      </p>
-                    </div>
-                    <div className="flex flex-wrap items-center gap-2">
-                      <Badge variant="accent">{t('caddies:autoAssign.candidate')}</Badge>
-                      {(() => {
-                        const placement = placementWarningStatus(item.shiftPlacementStatus)
-                        return placement ? (
-                          <Badge variant="warning">
-                            {t(`caddies:shiftPlacement.${placement}`)}
-                          </Badge>
-                        ) : null
-                      })()}
-                    </div>
-                  </div>
-                  <RationaleText rationale={item.rationale} />
-                </div>
-              ))}
-            </div>
-          )}
-          {plan.skipped.length > 0 ? (
-            <Notice
-              tone="warning"
-              title={t('caddies:autoAssign.skipped', { n: String(plan.skipped.length) })}
+                    }))
+                    .join('\n')
+                  confirmations.push([
+                    t('caddies:autoAssign.shiftPlacementWarning.title'),
+                    t('caddies:autoAssign.shiftPlacementWarning.body'),
+                    placementItems,
+                    t('caddies:autoAssign.shiftPlacementWarning.confirm'),
+                  ].join('\n\n'))
+                }
+                if (confirmations.length > 0 && !window.confirm(confirmations.join('\n\n'))) {
+                  return
+                }
+                void run(false)
+              }}
             >
-              <ul className="list-inside list-disc space-y-1">
-                {plan.skipped.map(item => (
-                  <li key={item.reservationId}>
-                    {rationaleText([item.reason])}
-                  </li>
-                ))}
-              </ul>
-            </Notice>
-          ) : null}
-        </div>
-      ) : null}
-    </Panel>
+              <CheckCircle2 />
+              {busy === 'execute' ? t('caddies:autoAssign.executing') : t('caddies:autoAssign.execute')}
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+    </div>
   )
 }
 
