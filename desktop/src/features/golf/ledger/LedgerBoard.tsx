@@ -448,7 +448,7 @@ function SlotRows({
           }}
         >
           {index === 0 ? timeCell : null}
-          <GroupCell
+          <LedgerGroupCell
             item={item}
             isSelected={selectedReservationId === item.id}
             shiftsConfirmed={shiftsConfirmed}
@@ -456,7 +456,7 @@ function SlotRows({
             onSelect={() => onSelectReservation(item.id)}
           />
           {seatCells(item, seatColumns).map((cell, seatIndex) => (
-            <SeatCellView key={seatIndex} cell={cell} />
+            <LedgerSeatCell key={seatIndex} cell={cell} />
           ))}
         </tr>
       ))}
@@ -513,7 +513,7 @@ function SlotEmptyLabel({
   )
 }
 
-function GroupCell({
+export function LedgerGroupCell({
   item,
   isSelected,
   shiftsConfirmed,
@@ -583,7 +583,7 @@ function remarkSummary(
   return parts.join(' · ')
 }
 
-function SeatCellView({ cell }: { cell: SeatCell }) {
+export function LedgerSeatCell({ cell }: { cell: SeatCell }) {
   const { t } = useTranslation(['ledger'])
   if (cell.kind === 'empty') return <td className="ledger-cell-seat is-outside" />
   if (cell.kind === 'unnamed') {

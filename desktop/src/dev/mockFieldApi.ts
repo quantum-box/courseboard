@@ -1,3 +1,4 @@
+import { MOCK_FIXTURE_DATE } from './mockFixture'
 /**
  * Development auth (`VITE_COURSEBOARD_AUTH_MODE=development`) only stubs the
  * session. Feature screens still call Field API through the Vite proxy, which
@@ -60,7 +61,7 @@ const TENANT_ID = () =>
  * affordance in the timeline has to send the operator to this day; a second
  * copy of the date in the page drifts the moment these fixtures move.
  */
-export const MOCK_FIXTURE_DATE = '2026-07-18'
+export { MOCK_FIXTURE_DATE } from './mockFixture'
 
 const NOW = `${MOCK_FIXTURE_DATE}T09:00:00+09:00`
 const TODAY = MOCK_FIXTURE_DATE
@@ -331,44 +332,23 @@ let mockReservationPolicy: Record<string, unknown> = {
   updatedAt: NOW,
 }
 
+// Course names and hole counts follow the clubs' official course guides.
+// Operating hours and intervals below are local demonstration settings.
 const mockCourses = [
-  {
-    id: 'course_east',
-    name: '東コース',
-    shortName: '東',
-    holeCount: 18,
-    timezone: 'Asia/Tokyo',
-    businessHoursJson: { open: '07:00', close: '17:00' },
-    startIntervalMinutes: 8,
-    isActive: true,
-    createdAt: NOW,
-    updatedAt: NOW,
-  },
-  {
-    id: 'course_west',
-    name: '西コース',
-    shortName: '西',
-    holeCount: 18,
-    timezone: 'Asia/Tokyo',
-    businessHoursJson: { open: '07:00', close: '17:00' },
-    startIntervalMinutes: 10,
-    isActive: true,
-    createdAt: NOW,
-    updatedAt: NOW,
-  },
-  {
-    id: 'course_hill',
-    name: '羊ケ丘コース',
-    shortName: '羊ケ丘',
-    holeCount: 18,
-    timezone: 'Asia/Tokyo',
-    businessHoursJson: { open: '07:00', close: '17:00' },
-    startIntervalMinutes: 10,
-    isActive: true,
-    createdAt: NOW,
-    updatedAt: NOW,
-  },
-]
+  { id: 'course_soranuma', name: '真駒内CC 空沼 OUT', shortName: '空沼OUT', holeCount: 9 },
+  { id: 'course_soranuma_in', name: '真駒内CC 空沼 IN', shortName: '空沼IN', holeCount: 9 },
+  { id: 'course_moiwa', name: '真駒内CC 藻岩 OUT', shortName: '藻岩OUT', holeCount: 9 },
+  { id: 'course_moiwa_in', name: '真駒内CC 藻岩 IN', shortName: '藻岩IN', holeCount: 9 },
+  { id: 'course_east', name: '滝のCC 東コース', shortName: '滝の東', holeCount: 9 },
+  { id: 'course_center', name: '滝のCC 中コース', shortName: '滝の中', holeCount: 9 },
+  { id: 'course_west', name: '滝のCC 西コース', shortName: '滝の西', holeCount: 9 },
+  { id: 'course_hill', name: '羊ヶ丘CC OUT', shortName: '羊ヶ丘OUT', holeCount: 9 },
+  { id: 'course_hill_in', name: '羊ヶ丘CC IN', shortName: '羊ヶ丘IN', holeCount: 9 },
+].map(course => ({
+  ...course, timezone: 'Asia/Tokyo',
+  businessHoursJson: { open: '07:00', close: '17:00' },
+  startIntervalMinutes: 8, isActive: true, createdAt: NOW, updatedAt: NOW,
+}))
 
 /** The club's own bookings for the month around the fixture day. */
 const generatedReservations = generateReservations(MOCK_FIXTURE_DATE, mockCourses)
@@ -448,46 +428,27 @@ const mockProducts: Array<{
   createdAt: string
   updatedAt: string
 }> = [
-  {
-    id: 'product_caddie_18',
-    tenantId: 'courseboard_id',
-    extensionKey: 'golf_course',
-    reservationServiceId: 'svc:caddie-18',
-    displayName: 'キャディ付き18ホール',
-    golfCourseId: 'course_east',
-    playType: 'caddie',
-    holeCount: 18,
-    expectedDurationMinutes: 270,
-    createdAt: NOW,
-    updatedAt: NOW,
-  },
-  {
-    id: 'product_caddie_east_pm',
-    tenantId: 'courseboard_id',
-    extensionKey: 'golf_course',
-    reservationServiceId: 'svc:caddie-18-pm',
-    displayName: '東 午後スループレー',
-    golfCourseId: 'course_east',
-    playType: 'caddie',
-    holeCount: 18,
-    expectedDurationMinutes: 240,
-    createdAt: NOW,
-    updatedAt: NOW,
-  },
-  {
-    id: 'product_self_18',
-    tenantId: 'courseboard_id',
-    extensionKey: 'golf_course',
-    reservationServiceId: 'svc:self-18',
-    displayName: null,
-    golfCourseId: null,
-    playType: 'self',
-    holeCount: 18,
-    expectedDurationMinutes: 240,
-    createdAt: NOW,
-    updatedAt: NOW,
-  },
-]
+  { key: 'soranuma', name: '真駒内CC 空沼', courses: ['course_soranuma', 'course_soranuma_in'] },
+  { key: 'moiwa', name: '真駒内CC 藻岩', courses: ['course_moiwa', 'course_moiwa_in'] },
+  { key: 'takino', name: '滝のCC', courses: ['course_east', 'course_center', 'course_west'] },
+  { key: 'hitsujigaoka', name: '羊ヶ丘CC', courses: ['course_hill', 'course_hill_in'] },
+].flatMap(club => [
+  { key: 'caddie-18', label: '18H キャディ付き', type: 'caddie', holes: 18, minutes: 270 },
+  { key: 'self-18', label: '18H セルフ', type: 'self', holes: 18, minutes: 240 },
+  { key: 'early-self', label: '早朝18Hスルー・セルフ', type: 'self', holes: 18, minutes: 240 },
+  { key: 'caddie-18-pm', label: '午後18Hスルー・キャディ付き', type: 'caddie', holes: 18, minutes: 240 },
+  { key: 'self-9', label: '午後ハーフ9H・セルフ', type: 'self', holes: 9, minutes: 120 },
+  ...(club.key === 'takino' ? [{ key: 'caddie-27', label: '27H キャディ付き', type: 'caddie', holes: 27, minutes: 390 }] : []),
+].map(plan => ({
+  id: `product_${club.key}_${plan.key}`,
+  tenantId: 'courseboard_id', extensionKey: 'golf_course',
+  reservationServiceId: club.key === 'takino' && ['caddie-18', 'self-18', 'caddie-18-pm'].includes(plan.key)
+    ? `svc:${plan.key}` : `svc:${club.key}-${plan.key}`,
+  displayName: `${club.name} ${plan.label}`, golfCourseIds: club.courses,
+  golfCourseId: club.courses.length === 1 ? club.courses[0]! : null,
+  playType: plan.type, holeCount: plan.holes, expectedDurationMinutes: plan.minutes,
+  createdAt: NOW, updatedAt: NOW,
+})))
 
 /**
  * How far ahead the club sells, as the golf extension config would hold it.
@@ -553,13 +514,12 @@ const mockSchedulesByCourse: Record<string, Array<{
   endTime: string
   capacity: number
   slotIntervalMinutes: number
-}>> = {
-  course_east: [
-    { id: 'rule_east_mon_am', weekday: 1, startTime: '07:00', endTime: '12:00', capacity: 1, slotIntervalMinutes: 8 },
-    { id: 'rule_east_mon_pm', weekday: 1, startTime: '12:00', endTime: '15:00', capacity: 1, slotIntervalMinutes: 8 },
-  ],
-  course_west: [],
-}
+}>> = Object.fromEntries(mockCourses.map(course => [course.id,
+  Array.from({ length: 7 }, (_, weekday) => ({
+    id: `rule_${course.id}_${weekday}`, weekday, startTime: '07:00', endTime: '14:00',
+    capacity: 1, slotIntervalMinutes: course.startIntervalMinutes,
+  })),
+]))
 
 const mockSlotsByService: Record<string, Array<{
   id: string
@@ -893,7 +853,7 @@ function splitMockPolicyIds(policyIds: string[]): { role: string | null; customP
  * which is the opposite of what the API does. sessionStorage, so a new tab is
  * still a clean day.
  */
-const MOCK_WRITE_STORAGE_KEY = 'courseboard.mock.ledgerWrites'
+const MOCK_WRITE_STORAGE_KEY = `courseboard.mock.ledgerWrites.${MOCK_FIXTURE_DATE}.sapporo-staffed`
 
 function loadMockWrites<T>(key: string, fallback: T): T {
   try {
@@ -915,7 +875,7 @@ function saveMockWrites(key: string, value: unknown) {
 mockReservationReportEntries = loadMockWrites('reservationReportEntries', [])
 
 /** The club's column order, as arranged during the session. */
-const mockCourseOrder: string[] = loadMockWrites<string[]>('courseOrder', [])
+const mockCourseOrder: string[] = loadMockWrites<string[]>('courseOrder', mockCourses.map(course => course.id))
 
 /** The booking form's visitor categories, as the settings screen arranges them. */
 const mockPlayerTagOptions: string[] = loadMockWrites<string[]>('playerTagOptions', ['共通', '優待', 'WEB'])
@@ -1470,15 +1430,13 @@ const initialMockTeeReservations = [
   // day board holds a dozen groups, and nothing on these screens is read the
   // way it is read at sixty.
   ...generatedReservations,
-].map(item => ({
-  ...item,
-  reservationServiceId: item.playType === 'caddie' ? 'svc:caddie-18' : 'svc:self-18',
-  displayName: item.id === 'res_mock_3'
-    ? null
-    : item.playType === 'caddie'
-      ? 'キャディ付き18ホール'
-      : 'セルフ18ホール',
-})) as MockTeeReservation[]
+].map(item => {
+  const course = mockCourses.find(course => course.id === item.golfCourseId)!
+  const product = mockProducts.find(product => product.playType === item.playType
+    && product.holeCount === 18 && productCourseIds(product).includes(item.golfCourseId))!
+  return { ...item, courseName: course.name, reservationServiceId: product.reservationServiceId,
+    displayName: product.displayName }
+}) as MockTeeReservation[]
 
 /** Reservations created or cancelled at the desk, kept across reloads in this tab. */
 const mockTeeReservations = loadMockWrites<MockTeeReservation[]>(
@@ -1517,7 +1475,7 @@ const mockStreakAssignments = ['13', '14', '15', '16', '17', '18', '19'].map(day
   metadataJson: null,
 }))
 
-const mockAssignments = [
+const mockAssignments = loadMockWrites('caddieAssignments', [
   ...mockStreakAssignments,
   {
     id: 'assign_mock_1',
@@ -1646,7 +1604,7 @@ const mockAssignments = [
     generatedReservations,
     generatedRoster.caddies.filter(caddie => caddie.active).map(caddie => caddie.id),
   ),
-]
+])
 
 type MockInvoice = {
   id: string
@@ -2460,31 +2418,58 @@ type MockShift = {
   updatedAt: string | null
 }
 
-const mockShifts: MockShift[] = loadMockWrites<MockShift[]>('caddieShifts', [])
+const mockShifts: MockShift[] = loadMockWrites<MockShift[]>('caddieShifts',
+  mockCaddies.flatMap((caddie, index) => {
+    const month = MOCK_FIXTURE_DATE.slice(0, 7)
+    const last = new Date(Number(month.slice(0, 4)), Number(month.slice(5, 7)), 0).getDate()
+    return datesBetween(`${month}-01`, `${month}-${last}`).map((date, day) => {
+      // Stagger two days off per week across each course's team.
+      const isWorking = caddie.active && (day + Math.floor(index / mockCourses.length)) % 7 < 5
+      return { caddieProfileId: caddie.id, date,
+        golfCourseId: isWorking ? mainCourseOf(caddie.id) : null, isWorking,
+        span: 'full_day', roundsCapacity: isWorking ? caddie.maxRoundsPerDay : 0,
+        origin: 'generated', note: null, updatedBy: null, updatedAt: NOW }
+    })
+  }),
+)
 
-/** Half the roster is based on each course, and can cover the other. */
+/** Each team covers one start course and can support the same club. */
 function mockMemberships(profileId: string) {
   const index = Math.max(0, mockCaddies.findIndex(caddie => caddie.id === profileId))
-  const main = index % 2 === 0 ? 'course_east' : 'course_west'
-  const sub = main === 'course_east' ? 'course_west' : 'course_east'
-  return [
-    {
-      id: `membership_${profileId}_${main}`,
-      caddieProfileId: profileId,
-      golfCourseId: main,
-      isPrimary: true,
-    },
-    {
-      id: `membership_${profileId}_${sub}`,
-      caddieProfileId: profileId,
-      golfCourseId: sub,
-      isPrimary: false,
-    },
-  ]
+  const main = mockCourses[index % mockCourses.length]!
+  const club = main.name.split(' ')[0]
+  return mockCourses.filter(course => course.name.split(' ')[0] === club).map(course => ({
+    id: `membership_${profileId}_${course.id}`, caddieProfileId: profileId,
+    golfCourseId: course.id, isPrimary: course.id === main.id,
+  }))
 }
 
 function mainCourseOf(profileId: string): string | null {
   return mockMemberships(profileId).find(entry => entry.isPrimary)?.golfCourseId ?? null
+}
+
+// Seed existing round assignments against the same shifts the operator sees.
+// User-saved allocations are left intact on subsequent reloads.
+if (!loadMockWrites<unknown>('caddieAssignments', null)) {
+  const assignedToday = new Map<string, Array<{ start: number; end: number }>>()
+  const seeded = [...mockAssignments].sort((a, b) => a.scheduledAt.localeCompare(b.scheduledAt))
+  mockAssignments.splice(0)
+  for (const assignment of seeded) {
+    const round = mockTeeReservations.find(item => item.id === assignment.reservationId)
+    if (!round || !round.teeTime.startsWith(MOCK_FIXTURE_DATE.slice(0, 7))) continue
+    const start = Date.parse(round.teeTime)
+    const end = start + round.durationMinutes * 60_000
+    const date = round.teeTime.slice(0, 10)
+    const shift = mockShifts.find(shift => {
+      if (shift.date !== date || !shift.isWorking || shift.golfCourseId !== round.golfCourseId) return false
+      const occupied = assignedToday.get(`${shift.caddieProfileId}:${date}`) ?? []
+      return occupied.length < shift.roundsCapacity && occupied.every(item => item.end <= start || item.start >= end)
+    })
+    if (!shift) continue
+    const key = `${shift.caddieProfileId}:${date}`
+    assignedToday.set(key, [...(assignedToday.get(key) ?? []), { start, end }])
+    mockAssignments.push({ ...assignment, caddieProfileId: shift.caddieProfileId })
+  }
 }
 
 function shiftKey(caddieProfileId: string, date: string) {
@@ -2834,6 +2819,8 @@ function resolveGet(path: string): Json | null | undefined {
   const pathname = normalizeMockPath(rawPathname)
   const url = new URL(path, 'http://mock.local')
 
+  if (rawPathname === '/v1/course/tenant-timezone') return { timezone: 'Asia/Tokyo' }
+
   if (pathname === '/v1/erp/extensions/status') return extensionStatus()
 
   if (pathname === '/v1/course/booking-horizon') {
@@ -3177,7 +3164,7 @@ function resolveGet(path: string): Json | null | undefined {
     // The fixture generates some availability row for every caddie in almost
     // every month; picking a fixed one to omit keeps the "who hasn't filed"
     // notice demonstrable without depending on that generator's spread.
-    return items(mockCaddies.slice(0, 1).map(profile => ({
+    return items((submissionsMatch[1] === MOCK_FIXTURE_DATE.slice(0, 7) ? [] : mockCaddies.slice(0, 1)).map(profile => ({
       caddieProfileId: profile.id,
       displayName: profile.displayName,
     })))
@@ -3222,6 +3209,13 @@ function resolveGet(path: string): Json | null | undefined {
       for (const date of datesBetween(from, to)) {
         const day = Number(date.slice(8, 10))
         mockCaddies.forEach((profile, index) => {
+          const confirmed = mockShifts.find(shift => shift.caddieProfileId === profile.id && shift.date === date)
+          if (confirmed) {
+            results.push({ id: `avail_${profile.id}_${date}`, caddieProfileId: profile.id, date,
+              status: confirmed.isWorking ? 'available' : 'unavailable',
+              twoRoundRequest: confirmed.roundsCapacity === 2, healthNote: null, updatedAt: NOW })
+            return
+          }
           // Two marked days per caddie per week, staggered by roster position.
           const marked = (day + index) % 7 === 0 || (day + index * 3) % 11 === 0
           // Everyone else filed nothing, except a third of the two-round
@@ -5245,6 +5239,37 @@ function resolveMutation(path: string, init?: RequestInit): MockFieldResult<Json
     return hit(null)
   }
 
+  if (pathname === '/v1/erp/extensions/golf-course/caddie-assignments' && method === 'POST') {
+    const reservationId = String(body?.reservationId ?? '')
+    const caddieProfileId = String(body?.caddieProfileId ?? '')
+    const reservation = mockTeeReservations.find(item => item.id === reservationId)
+    const caddie = mockCaddies.find(item => item.id === caddieProfileId && item.active)
+    if (!reservation || !caddie) return error(404, 'Reservation or caddie was not found')
+    if (mockAssignments.some(item => item.reservationId === reservationId
+      && ['assigned', 'in_progress', 'completed'].includes(mockAssignmentCanonicalStatus(item.status)))) {
+      return error(409, 'This group already has a caddie')
+    }
+    const created = {
+      id: `assign_local_${Date.now()}_${mockAssignments.length}`,
+      caddieProfileId,
+      reservationId,
+      roundReference: reservation.reservationNumber,
+      scheduledAt: reservation.teeTime,
+      durationMinutes: reservation.durationMinutes,
+      status: 'assigned',
+      assignmentRole: 'primary',
+      feeAmount: caddie.baseFeeAmount,
+      feeCurrency: caddie.currency,
+      recommendationScore: null,
+      nominatedBy: null,
+      notes: null,
+      metadataJson: null,
+    }
+    mockAssignments.push(created)
+    saveMockWrites('caddieAssignments', mockAssignments)
+    return hit(created)
+  }
+
   const assignmentMatch = pathname.match(
     /^\/v1\/erp\/extensions\/golf-course\/caddie-assignments\/([^/]+)$/,
   )
@@ -5255,6 +5280,7 @@ function resolveMutation(path: string, init?: RequestInit): MockFieldResult<Json
     const current = mockAssignments[index]!
     const updated = { ...current, ...body, id: current.id }
     mockAssignments[index] = updated as typeof current
+    saveMockWrites('caddieAssignments', mockAssignments)
     return hit(updated)
   }
 
@@ -5279,40 +5305,63 @@ function resolveMutation(path: string, init?: RequestInit): MockFieldResult<Json
   }
 
   if (pathname === '/v1/erp/extensions/golf-course/caddie-auto-assignments' && method === 'POST') {
-    return hit({
-      dryRun: Boolean(body?.dryRun),
-      assigned: [
-        {
-          reservationId: 'res_mock_4',
-          scheduledAt: `${TODAY}T08:00:00+09:00`,
-          caddieProfileId: 'caddie_mika',
-          caddieDisplayName: '田中 美香',
-          rationale: ['on_duty'],
-          shiftPlacementStatus: 'unconfirmed',
-        },
-        {
-          reservationId: 'res_mock_8',
-          scheduledAt: `${TODAY}T09:30:00+09:00`,
-          caddieProfileId: 'caddie_hiro',
-          caddieDisplayName: '中村 浩',
-          rationale: ['on_duty'],
-          shiftPlacementStatus: 'unplaced',
-        },
-        {
-          reservationId: 'res_mock_11',
-          scheduledAt: `${TODAY}T13:00:00+09:00`,
-          caddieProfileId: 'caddie_aya',
-          caddieDisplayName: '佐藤 彩',
-          rationale: ['on_duty'],
-          shiftPlacementStatus: 'on_course',
-        },
-      ],
-      skipped: [],
-      deadlineWarning: {
-        deadlineDate: `${TODAY.slice(0, 7)}-20`,
-        unsubmittedCaddieNames: ['田中 美香'],
-      },
-    })
+    const date = String(body?.date ?? TODAY)
+    const dryRun = Boolean(body?.dryRun)
+    const active = mockAssignments.filter(item => item.scheduledAt.slice(0, 10) === date
+      && ['assigned', 'in_progress', 'completed'].includes(mockAssignmentCanonicalStatus(item.status)))
+    const pending = mockTeeReservations.filter(item => item.teeTime.slice(0, 10) === date
+      && item.playType === 'caddie' && !['cancelled', 'canceled', 'no_show'].includes(item.status)
+      && !active.some(assignment => assignment.reservationId === item.id))
+      .sort((left, right) => left.teeTime.localeCompare(right.teeTime))
+    const planned: Array<{ reservationId: string; scheduledAt: string; durationMinutes: number;
+      caddieProfileId: string; caddieDisplayName: string; rationale: string[] }> = []
+    const skipped: Array<{ reservationId: string; reason: string; scheduledAt: string; unavailableCaddies: Array<{ caddieProfileId: string; displayName: string; reasons: string[] }> }> = []
+    const dayShifts = new Map(mockShifts.filter(shift => shift.date === date).map(shift => [shift.caddieProfileId, shift]))
+    for (const round of pending) {
+      const occupied = [...active, ...planned]
+      const daily = (id: string) => occupied.filter(item => item.caddieProfileId === id
+        && item.scheduledAt.slice(0, 10) === date)
+      const start = Date.parse(round.teeTime)
+      const end = start + round.durationMinutes * 60_000
+      const caddie = mockCaddies.filter(item => item.active
+        && ((shift) => shift?.isWorking && shift.golfCourseId === round.golfCourseId
+          && daily(item.id).length < shift.roundsCapacity)(dayShifts.get(item.id))
+        && daily(item.id).length < item.maxRoundsPerDay
+        && !occupied.some(assignment => assignment.caddieProfileId === item.id
+          && Date.parse(assignment.scheduledAt) < end
+          && Date.parse(assignment.scheduledAt) + (('durationMinutes' in assignment ? assignment.durationMinutes : 270) ?? 270) * 60_000 > start))
+        .sort((left, right) => daily(left.id).length - daily(right.id).length)[0]
+      if (!caddie) {
+        skipped.push({ reservationId: round.id, scheduledAt: round.teeTime,
+          reason: mockCaddies.filter(item => item.active).every(item => daily(item.id).length >= item.maxRoundsPerDay)
+            ? 'all_caddies_at_daily_limit' : 'no_caddie_available',
+          unavailableCaddies: mockCaddies.filter(item => item.active).map(item => {
+            const shift = dayShifts.get(item.id)
+            const reasons: string[] = []
+            if (!shift?.isWorking) reasons.push('outside_shift')
+            if (shift?.isWorking && shift.golfCourseId !== round.golfCourseId) reasons.push('other_course')
+            if (shift?.isWorking && daily(item.id).length >= shift.roundsCapacity) reasons.push('daily_limit')
+            if (occupied.some(assignment => assignment.caddieProfileId === item.id
+              && Date.parse(assignment.scheduledAt) < end
+              && Date.parse(assignment.scheduledAt) + (('durationMinutes' in assignment ? assignment.durationMinutes : 270) ?? 270) * 60_000 > start)) reasons.push('busy')
+            return { caddieProfileId: item.id, displayName: item.displayName, reasons }
+          }),
+        })
+        continue
+      }
+      planned.push({ reservationId: round.id, scheduledAt: round.teeTime,
+        durationMinutes: round.durationMinutes, caddieProfileId: caddie.id,
+        caddieDisplayName: caddie.displayName, rationale: [] })
+    }
+    if (!dryRun) {
+      for (const item of planned) {
+        const created = resolveMockFieldApiJson('/v1/course/caddie-assignments', {
+          method: 'POST', body: JSON.stringify(item),
+        })
+        if (created.kind !== 'hit') return created
+      }
+    }
+    return hit({ dryRun, assigned: planned, skipped })
   }
 
   if (pathname === '/v1/erp/extensions/golf-course/daily-budgets' && method === 'POST') {

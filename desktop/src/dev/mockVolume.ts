@@ -84,6 +84,7 @@ export type GeneratedReservation = {
   playType: 'caddie' | 'self'
   partySize: number
   partyName: string
+  party: { players: Array<{ name: string }> }
   status: string
   holes: number
 }
@@ -108,7 +109,7 @@ export type GeneratedAssignment = {
 /** How big the generated club is. */
 export const VOLUME = {
   /** Caddies on top of the hand-written five. */
-  caddies: 35,
+  caddies: 240,
   /** Days of tee sheet before the fixture day. */
   daysBefore: 7,
   /** Days of tee sheet after it. Covers the fortnight the panel can look ahead. */
@@ -184,11 +185,18 @@ export function shiftDate(from: string, days: number): string {
 
 /** Every day the generated board covers, in order. */
 export function generatedDates(fixtureDate: string): string[] {
-  const dates: string[] = []
-  for (let offset = -VOLUME.daysBefore; offset <= VOLUME.daysAfter; offset += 1) {
-    dates.push(shiftDate(fixtureDate, offset))
+  const monthStart = `${fixtureDate.slice(0, 7)}-01`
+  const lastDay = new Date(`${monthStart}T00:00:00Z`)
+  lastDay.setUTCMonth(lastDay.getUTCMonth() + 1)
+  lastDay.setUTCDate(0)
+  const dates = new Set<string>()
+  for (let day = 1; day <= lastDay.getUTCDate(); day += 1) {
+    dates.add(shiftDate(monthStart, day - 1))
   }
-  return dates
+  for (let offset = -VOLUME.daysBefore; offset <= VOLUME.daysAfter; offset += 1) {
+    dates.add(shiftDate(fixtureDate, offset))
+  }
+  return [...dates].sort()
 }
 
 /** `07:00` + n intervals, as `HH:MM`. */
@@ -243,6 +251,11 @@ export function generateReservations(
           playType: caddieAttached ? 'caddie' : 'self',
           partySize,
           partyName: `${prefix}${suffix}`,
+          party: {
+            players: Array.from({ length: partySize }, (_, player) => ({
+              name: `${FAMILY_NAMES[(sequence * 3 + player) % FAMILY_NAMES.length]} ${GIVEN_NAMES[(sequence + player * 7) % GIVEN_NAMES.length]}`,
+            })),
+          },
           status: 'confirmed',
           holes: 18,
         })
@@ -284,7 +297,7 @@ export function generateAssignments(
     )
     // Settled through tomorrow, then thinning out: by a fortnight ahead only
     // about a third of the groups have somebody on them.
-    const staffed = daysAhead <= 1 ? 0.97 : Math.max(0.25, 0.9 - daysAhead * 0.05)
+    const staffed = daysAhead < 0 ? 0.97 : Math.max(0.2, 0.55 - daysAhead * 0.02)
     if (random() > staffed) continue
 
     // Somebody who is not already full for that day.

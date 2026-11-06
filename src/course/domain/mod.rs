@@ -75,10 +75,10 @@ pub use caddie_fee_alignment::{
 };
 pub use caddie_ops::{
     compute_caddie_supply, AttendancePeriodSnapshot, AttendanceSnapshot, AttendanceSnapshotReport,
-    AutoAssignPlanItem, AutoAssignResult, AutoAssignSkippedItem, AvailabilityQuery,
-    AvailabilityStatus, CaddieAssignmentQuery, CaddieAvailability, CaddieCourseMembership,
-    CaddieDayCapacity, CaddiePatch, CaddieRating, CaddieRecommendation, CaddieSupply,
-    DeadlineWarning, PayrollPeriod, PayrollRow, PayrollSummary, RecommendationQuery,
+    AutoAssignPlanItem, AutoAssignResult, AutoAssignSkippedItem, AutoAssignUnavailableCaddie,
+    AvailabilityQuery, AvailabilityStatus, CaddieAssignmentQuery, CaddieAvailability,
+    CaddieCourseMembership, CaddieDayCapacity, CaddiePatch, CaddieRating, CaddieRecommendation,
+    CaddieSupply, DeadlineWarning, PayrollPeriod, PayrollRow, PayrollSummary, RecommendationQuery,
     ReplaceCaddieMemberships, UpsertCaddie, UpsertCaddieAssignment, UpsertCaddieAvailability,
 };
 pub use caddie_plan::{

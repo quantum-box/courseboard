@@ -170,7 +170,7 @@ describe('mockFieldApi', () => {
     vi.stubEnv('VITE_COURSEBOARD_AUTH_MODE', 'development')
     vi.stubEnv('VITE_COURSEBOARD_MOCK_DATA', 'true')
     const sheet = resolveMockFieldApiJson(
-      '/v1/course/tee-sheet?date=2026-07-18',
+      '/v1/course/tee-sheet?date=2026-11-06',
     )
     expect(sheet.kind).toBe('hit')
     if (sheet.kind !== 'hit') return
@@ -376,7 +376,7 @@ describe('mockFieldApi', () => {
     vi.stubEnv('VITE_COURSEBOARD_AUTH_MODE', 'development')
     vi.stubEnv('VITE_COURSEBOARD_MOCK_DATA', 'true')
 
-    const before = resolveMockFieldApiJson('/v1/course/tee-ledger?date=2026-07-18')
+    const before = resolveMockFieldApiJson('/v1/course/tee-ledger?date=2026-11-06')
     expect(before.kind).toBe('hit')
     if (before.kind !== 'hit') return
     const beforeBody = before.data as {
@@ -388,7 +388,8 @@ describe('mockFieldApi', () => {
     }
     const eastBefore = beforeBody.columns.find(column => column.golfCourseId === 'course_east')
     expect(eastBefore?.resourceId).toBe('res_east')
-    expect(eastBefore?.slots.find(slot => slot.teeTime === '07:40')?.bookedGroups).toBe(0)
+    const freeTime = eastBefore!.slots.find(slot => slot.bookedGroups === 0)!.teeTime
+    expect(freeTime).toBeTruthy()
 
     // prepaymentPolicy is deliberately absent here: the real CourseBoard
     // usecase adds "none" to its outbound Field request.
@@ -398,8 +399,8 @@ describe('mockFieldApi', () => {
         golfCourseId: 'course_east',
         resourceId: 'res_east',
         reservationServiceId: 'svc:caddie-18',
-        date: '2026-07-18',
-        teeTime: '07:40',
+        date: '2026-11-06',
+        teeTime: freeTime,
         durationMinutes: 270,
         quantity: 4,
         customerName: '  オフライン予約  ',
@@ -409,15 +410,15 @@ describe('mockFieldApi', () => {
     if (created.kind !== 'hit') return
     const reservationId = (created.data as { id: string }).id
 
-    const afterCreate = resolveMockFieldApiJson('/v1/course/tee-ledger?date=2026-07-18')
+    const afterCreate = resolveMockFieldApiJson('/v1/course/tee-ledger?date=2026-11-06')
     expect(afterCreate.kind).toBe('hit')
     if (afterCreate.kind !== 'hit') return
     const createdSlot = (afterCreate.data as typeof beforeBody).columns
       .find(column => column.golfCourseId === 'course_east')
-      ?.slots.find(slot => slot.teeTime === '07:40')
+      ?.slots.find(slot => slot.teeTime === freeTime)
     expect(createdSlot?.bookedGroups).toBe(1)
 
-    const sheet = resolveMockFieldApiJson('/v1/course/tee-sheet?date=2026-07-18')
+    const sheet = resolveMockFieldApiJson('/v1/course/tee-sheet?date=2026-11-06')
     expect(sheet.kind).toBe('hit')
     if (sheet.kind !== 'hit') return
     const createdReservation = (sheet.data as {
@@ -435,12 +436,12 @@ describe('mockFieldApi', () => {
     )
     expect(cancelled).toEqual({ kind: 'hit', data: null })
 
-    const afterCancel = resolveMockFieldApiJson('/v1/course/tee-ledger?date=2026-07-18')
+    const afterCancel = resolveMockFieldApiJson('/v1/course/tee-ledger?date=2026-11-06')
     expect(afterCancel.kind).toBe('hit')
     if (afterCancel.kind !== 'hit') return
     const cancelledSlot = (afterCancel.data as typeof beforeBody).columns
       .find(column => column.golfCourseId === 'course_east')
-      ?.slots.find(slot => slot.teeTime === '07:40')
+      ?.slots.find(slot => slot.teeTime === freeTime)
     expect(cancelledSlot?.bookedGroups).toBe(0)
   })
 
@@ -450,7 +451,7 @@ describe('mockFieldApi', () => {
     const request = {
       golfCourseId: 'course_east',
       reservationServiceId: 'svc:caddie-18',
-      date: '2026-07-18',
+      date: '2026-11-06',
       teeTime: '08:00',
       durationMinutes: 270,
       quantity: 4,

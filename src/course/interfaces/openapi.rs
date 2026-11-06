@@ -315,6 +315,7 @@ impl Modify for SecurityAddon {
             http_ops::AutoAssignRequest,
             http_ops::AutoAssignPlanItemDto,
             http_ops::AutoAssignSkippedDto,
+            http_ops::AutoAssignUnavailableCaddieDto,
             http_ops::AutoAssignResultDto,
             http_ops::DeadlineWarningDto,
             http_ops::CaddieShiftDto,

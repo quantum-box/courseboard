@@ -20,8 +20,8 @@ use chrono_tz::Tz;
 
 use super::{
     rank_caddies, AttendanceState, AutoAssignPlanItem, AutoAssignResult, AutoAssignSkippedItem,
-    AvailabilityStatus, CaddieShift, CaddieSkillLevel, CourseId, RankingCandidate, RankingOptions,
-    ReservationId,
+    AutoAssignUnavailableCaddie, AvailabilityStatus, CaddieShift, CaddieSkillLevel, CourseId,
+    RankingCandidate, RankingOptions, ReservationId,
 };
 
 /// How long a round occupies a caddie when the booking does not say.
@@ -297,7 +297,7 @@ pub fn plan_caddie_assignments(
             // Nobody on this course at all is a different problem from a busy
             // course, and it is fixed somewhere else — say so.
             let nobody_stands_here = !pool.iter().any(|caddie| caddie.stands_on(round));
-            skipped.push(AutoAssignSkippedItem::new(
+            let mut item = AutoAssignSkippedItem::new(
                 round.reservation_id.clone(),
                 if stopped_only_by_the_limit {
                     skip_reason::ALL_AT_DAILY_LIMIT
@@ -306,7 +306,32 @@ pub fn plan_caddie_assignments(
                 } else {
                     skip_reason::NO_CADDIE_AVAILABLE
                 },
-            ));
+            );
+            item.scheduled_at = Some(round.starts_at);
+            item.unavailable_caddies = pool
+                .iter()
+                .map(|caddie| {
+                    let mut reasons = Vec::new();
+                    if !caddie.stands_on(round) {
+                        reasons.push("other_course".to_string());
+                    }
+                    if !caddie.shift_covers(round, options.timezone) {
+                        reasons.push("outside_shift".to_string());
+                    }
+                    if !caddie.has_capacity() {
+                        reasons.push("daily_limit".to_string());
+                    }
+                    if !caddie.is_free_for(round) {
+                        reasons.push("busy".to_string());
+                    }
+                    AutoAssignUnavailableCaddie {
+                        caddie_id: caddie.caddie_id.clone(),
+                        display_name: caddie.display_name.clone(),
+                        reasons,
+                    }
+                })
+                .collect();
+            skipped.push(item);
             continue;
         }
 
@@ -588,6 +613,14 @@ mod tests {
 
         assert!(plan.assigned().is_empty());
         assert_eq!(plan.skipped()[0].reason(), skip_reason::NO_CADDIE_AVAILABLE);
+        let detail = &plan.skipped()[0].unavailable_caddies[0];
+        assert_eq!(detail.caddie_id, "cad_off");
+        assert_eq!(detail.display_name, "Off");
+        assert_eq!(detail.reasons, vec!["outside_shift"]);
+        assert_eq!(
+            plan.skipped()[0].scheduled_at,
+            Some(round("rsv_1", 7, 4).starts_at)
+        );
     }
 
     #[test]

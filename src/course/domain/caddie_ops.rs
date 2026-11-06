@@ -1024,11 +1024,20 @@ impl AutoAssignPlanItem {
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Getters)]
+pub struct AutoAssignUnavailableCaddie {
+    pub caddie_id: String,
+    pub display_name: String,
+    pub reasons: Vec<String>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Getters)]
 pub struct AutoAssignSkippedItem {
     #[getter(skip)]
     reservation_id: ReservationId,
     #[getter(skip)]
     reason: String,
+    pub scheduled_at: Option<DateTime<Utc>>,
+    pub unavailable_caddies: Vec<AutoAssignUnavailableCaddie>,
 }
 
 impl AutoAssignSkippedItem {
@@ -1044,6 +1053,8 @@ impl AutoAssignSkippedItem {
         Self {
             reservation_id: reservation_id.into(),
             reason: reason.into(),
+            scheduled_at: None,
+            unavailable_caddies: Vec::new(),
         }
     }
 }
