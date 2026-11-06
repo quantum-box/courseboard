@@ -19,10 +19,12 @@ use super::{
 
 /// Field's generic OCR entity the start ledger is read as.
 ///
-/// A key of its own rather than the reservation-report reader's: that reader
-/// forces its own table schema, and this sheet needs ours. Field guards it with
-/// the same action as writing a booking, which is what a read feeds.
-pub const START_LEDGER_OCR_ENTITY_KEY: &str = "courseboardStartLedger";
+/// Field's domain kind for reading reservations, not a CourseBoard-named one:
+/// the schema travels with each job, so the sheet still gets our columns. Field
+/// guards it with the same action as writing a booking, which is what a read
+/// feeds, and reads it only through jobs (no `/draft`). A job keeps the key it
+/// was created with for every later step.
+pub const START_LEDGER_OCR_ENTITY_KEY: &str = "reservation";
 pub const START_LEDGER_DATE_KEY: &str = "date";
 pub const START_LEDGER_PARTIES_KEY: &str = "parties";
 

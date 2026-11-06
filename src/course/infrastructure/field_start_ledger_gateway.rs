@@ -279,7 +279,7 @@ mod tests {
     #[tokio::test]
     async fn create_sends_the_ledger_schema_under_its_own_entity_without_reception_metering() {
         let app = Router::new().route(
-            "/v1/field/ocr/courseboardStartLedger/jobs",
+            "/v1/field/ocr/reservation/jobs",
             post(|Json(body): Json<serde_json::Value>| async move {
                 assert!(body.get("sourceApp").is_none());
                 assert_eq!(body["schema"][1]["key"], "parties");
