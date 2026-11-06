@@ -89,6 +89,15 @@ export function sendCancellationFee<T = unknown>(invoiceId: string, body: SendCa
   })
 }
 
+/** Voids an unpaid fee. A retry with the same key and reason replays the same void. */
+export function voidCancellationFee<T = unknown>(invoiceId: string, body: { idempotencyKey: string; reason: string }) {
+  return fieldApiJson<T>(cancellationFeePath(invoiceId, '/void'), {
+    method: 'POST',
+    headers: { 'Idempotency-Key': body.idempotencyKey },
+    body: JSON.stringify({ reason: body.reason }),
+  })
+}
+
 /** The dedicated API requires UUID-shaped keys so an accidental arbitrary value cannot become an invoice number. */
 export function newCancellationFeeIdempotencyKey() {
   const key = crypto.randomUUID().toLowerCase()

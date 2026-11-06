@@ -1814,3 +1814,48 @@ describe('the dedicated cancellation fee form', () => {
     resolveThird(invoice())
   })
 })
+
+describe('voiding a cancellation fee', () => {
+  it('voids a draft after confirmation with an idempotency key and shows it as void', async () => {
+    const confirm = vi.spyOn(window, 'confirm').mockReturnValue(true)
+    api.field.mockImplementation(async (path: string) => {
+      if (path === '/v1/cancellation-fees/inv_1/void') {
+        return { invoice: invoice({ status: 'Void' }) }
+      }
+      return invoice({ status: 'Draft' })
+    })
+    renderDetailPage()
+    fireEvent.click(await screen.findByRole('button', { name: /取り消す/ }))
+
+    await waitFor(() => expect(screen.queryByRole('button', { name: /取り消す/ })).toBeNull())
+    expect(confirm).toHaveBeenCalledTimes(1)
+    const call = api.field.mock.calls.find(([path]) => path === '/v1/cancellation-fees/inv_1/void')
+    expect(call?.[1]?.method).toBe('POST')
+    expect(new Headers(call?.[1]?.headers).get('Idempotency-Key')).toMatch(/^[0-9a-f-]{36}$/)
+    expect(JSON.parse(String(call?.[1]?.body)).reason).toBeTruthy()
+    confirm.mockRestore()
+  })
+
+  it('does nothing when the confirmation is declined', async () => {
+    const confirm = vi.spyOn(window, 'confirm').mockReturnValue(false)
+    api.field.mockResolvedValue(invoice({ status: 'Draft' }))
+    renderDetailPage()
+    fireEvent.click(await screen.findByRole('button', { name: /取り消す/ }))
+    expect(api.field.mock.calls.some(([path]) => String(path).endsWith('/void'))).toBe(false)
+    confirm.mockRestore()
+  })
+
+  it('offers no void for a paid fee or without Manage', async () => {
+    api.field.mockResolvedValue(invoice({ status: 'Paid' }))
+    renderDetailPage()
+    await screen.findByText('INV-1')
+    expect(screen.queryByRole('button', { name: /取り消す/ })).toBeNull()
+    cleanup()
+
+    access.manage = false
+    api.field.mockResolvedValue(invoice({ status: 'Draft' }))
+    renderDetailPage()
+    await screen.findByText('INV-1')
+    expect(screen.queryByRole('button', { name: /取り消す/ })).toBeNull()
+  })
+})

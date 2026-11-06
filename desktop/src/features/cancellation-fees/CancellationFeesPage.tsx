@@ -9,6 +9,7 @@ import {
   Plus,
   Save,
   Send,
+  XCircle,
 } from 'lucide-react'
 import { useCallback, useEffect, useMemo, useRef, useState, type FormEvent } from 'react'
 import { useTranslation } from 'react-i18next'
@@ -50,6 +51,7 @@ import {
   listCancellationFees,
   newCancellationFeeIdempotencyKey,
   sendCancellationFee,
+  voidCancellationFee,
   updateCancellationFee,
 } from './cancellation-fee-api'
 import {
@@ -582,6 +584,11 @@ type InvoiceData = {
 }
 
 const INVOICE_STATUSES: InvoiceStatus[] = ['Draft', 'Sent', 'SendFailed', 'Paid', 'Overdue', 'Void']
+
+/** A paid fee is refunded, not voided; a void one is already closed. */
+export function canVoid(invoice: Pick<InvoiceData, 'status'>) {
+  return invoice.status !== 'Paid' && invoice.status !== 'Void'
+}
 
 /**
  * Paid is an accounting fact, not an ordinary operator-editable invoice
@@ -2144,6 +2151,8 @@ function CancellationFeeDetailContent({ invoiceId }: { invoiceId: string }) {
     scopeGenerationRef.current += 1
   }, [])
   const [fulfilling, setFulfilling] = useState(false)
+  const [voiding, setVoiding] = useState(false)
+  const voidKey = useRef<string | null>(null)
   const initialDeliveryOperation = loadDeliveryOperation(invoiceId, detailScope)
   const [deliveryOperation, setDeliveryOperation] = useState<DeliveryOperation | null>(
     initialDeliveryOperation,
@@ -2285,6 +2294,33 @@ function CancellationFeeDetailContent({ invoiceId }: { invoiceId: string }) {
     }
   }
 
+  async function voidFee() {
+    const current = resource.data
+    if (!canManage || !current || !canVoid(current) || voiding) return
+    if (!window.confirm(t('cancellationFees:detail.void.confirm'))) return
+    // One key per attempt on this page: a retry after an unknown result
+    // replays the same void instead of starting another.
+    voidKey.current ??= newCancellationFeeIdempotencyKey()
+    setVoiding(true)
+    try {
+      const result = await voidCancellationFee<{ invoice: InvoiceData }>(invoiceId, {
+        idempotencyKey: voidKey.current,
+        reason: t('cancellationFees:detail.void.reason'),
+      })
+      resource.setData(result.invoice)
+      voidKey.current = null
+      setNotice({ tone: 'success', message: t('cancellationFees:detail.void.done') })
+      resource.refresh()
+    } catch (reason) {
+      setNotice({
+        tone: 'danger',
+        message: reason instanceof Error ? reason.message : t('cancellationFees:detail.void.failed'),
+      })
+    } finally {
+      setVoiding(false)
+    }
+  }
+
   async function openPaymentLink(url: string) {
     try {
       await openExternal(url)
@@ -2344,6 +2380,17 @@ function CancellationFeeDetailContent({ invoiceId }: { invoiceId: string }) {
             <Button type="button" onClick={() => navigate('cancellation-fees')}>
               <ArrowLeft /> {t('cancellationFees:new.backToList')}
             </Button>
+            {canManage && canVoid(storedInvoice) ? (
+              <Button
+                type="button"
+                variant="destructive"
+                disabled={voiding || fulfilling}
+                onClick={() => void voidFee()}
+              >
+                <XCircle />
+                {voiding ? t('cancellationFees:detail.void.working') : t('cancellationFees:detail.void.action')}
+              </Button>
+            ) : null}
           </div>
         )}
       />
