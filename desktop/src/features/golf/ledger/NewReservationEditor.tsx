@@ -19,6 +19,9 @@ import {
   toReservationPlayers,
   type DraftReservationPlayer,
 } from './newReservationPlayers'
+import { PartyRemarksFields } from './PartyRemarksFields'
+import { emptyRemarksDraft, isRemarksDraftEmpty, toRemarks, type RemarksDraft } from './partyRemarks'
+import type { PartyDetails } from './models'
 import { PlanPicker } from './PlanPicker'
 import { PlayerTagInput } from './PlayerTagInput'
 
@@ -39,6 +42,12 @@ export type CreatedBooking = {
   reservationId: string
   names: UnregisteredName[]
   players: DraftReservationPlayer[]
+  /**
+   * The rest of the group detail as saved. The ledger question writes the
+   * roster back to link players, and that write replaces the whole party, so
+   * it has to carry these too or it would erase them.
+   */
+  party: Omit<PartyDetails, 'players'>
 }
 
 export function NewReservationEditor({
@@ -72,6 +81,7 @@ export function NewReservationEditor({
   const [groupNumber, setGroupNumber] = useState('')
   const [planId, setPlanId] = useState('')
   const [players, setPlayers] = useState<DraftReservationPlayer[]>(() => reservationPlayerRows(4))
+  const [remarks, setRemarks] = useState<RemarksDraft>(emptyRemarksDraft)
   const [saving, setSaving] = useState(false)
   const [confirmingDiscard, setConfirmingDiscard] = useState(false)
 
@@ -88,6 +98,7 @@ export function NewReservationEditor({
     setOrganizer('')
     setGroupNumber('')
     setPlayers(reservationPlayerRows(4))
+    setRemarks(emptyRemarksDraft)
     setConfirmingDiscard(false)
   }, [target])
 
@@ -121,6 +132,7 @@ export function NewReservationEditor({
     || competitionName.trim().length > 0
     || organizer.trim().length > 0
     || groupNumber.trim().length > 0
+    || !isRemarksDraftEmpty(remarks)
     || players.some(player =>
       Boolean(player.name.trim() || player.tag.trim() || player.memberNumber.trim()),
     )
@@ -158,6 +170,14 @@ export function NewReservationEditor({
     const plan = selectedPlan
     if (!target.resourceId) return
     setSaving(true)
+    const party: Omit<PartyDetails, 'players'> = {
+      competitionName: competitionName.trim() || null,
+      organizer: organizer.trim() || null,
+      groupNumber: Number.isFinite(parsedGroupNumber) && parsedGroupNumber > 0
+        ? parsedGroupNumber
+        : null,
+      remarks: toRemarks(remarks),
+    }
     try {
       const created = await courseboardApiJson<{ id: string; warnings?: string[] }>('/v1/course/reservations', {
         method: 'POST',
@@ -172,11 +192,7 @@ export function NewReservationEditor({
           quantity: parsedQuantity,
           customerName: customerName.trim(),
           customerId,
-          competitionName: competitionName.trim() || null,
-          organizer: organizer.trim() || null,
-          groupNumber: Number.isFinite(parsedGroupNumber) && parsedGroupNumber > 0
-            ? parsedGroupNumber
-            : null,
+          ...party,
           players: namedPlayers,
         }),
       })
@@ -210,6 +226,7 @@ export function NewReservationEditor({
           reservationId: created.id,
           names: unregisteredNames({ name: customerName, customerId }, players),
           players,
+          party,
         }
         : undefined)
     } catch (error) {
@@ -295,6 +312,11 @@ export function NewReservationEditor({
             />
           </Field>
         </FormGrid>
+
+        <section aria-label={t('ledger:remarks.title')}>
+          <h3>{t('ledger:remarks.title')}</h3>
+          <PartyRemarksFields value={remarks} onChange={setRemarks} />
+        </section>
 
         {/* Every booking is sold under a plan, so the choice is on the sheet
             rather than behind a dropdown: opening a menu to reach a field the

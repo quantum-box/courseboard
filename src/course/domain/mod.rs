@@ -183,7 +183,10 @@ pub use membership_play_window::{
     PlayWindowBreach, PlayableDays,
 };
 pub use membership_pricing::{MemberDiscount, MembershipDiscount, MembershipDiscounts};
-pub use party::{PartyDetails, PartyPlayer, MAX_PARTY_PLAYERS, PARTY_CUSTOM_FIELD_KEY};
+pub use party::{
+    PartyDetails, PartyPlayer, PartyRemarks, PartySettlement, MAX_PARTY_PLAYERS,
+    PARTY_CUSTOM_FIELD_KEY,
+};
 pub use payroll::{
     payroll_csv, summarize_payroll_in_timezone, AttendanceDay, PayrollCandidate, WorkedMinutes,
 };

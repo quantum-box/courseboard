@@ -14,6 +14,8 @@ import { DiscardGuard } from './DiscardGuard'
 import { MAX_PARTY_PLAYERS, MAX_SEAT_COLUMNS } from './ledgerLayout'
 import type { PartyDetails, PartyPlayer } from './models'
 import { resizeReservationPlayerRows } from './newReservationPlayers'
+import { PartyRemarksFields } from './PartyRemarksFields'
+import { toRemarks, toRemarksDraft, type RemarksDraft } from './partyRemarks'
 import { PlanPicker } from './PlanPicker'
 import { PlayerTagInput } from './PlayerTagInput'
 import { ReservationCheckins } from './ReservationCheckins'
@@ -98,6 +100,7 @@ export function PartyEditor({
   const [organizer, setOrganizer] = useState('')
   const [groupNumber, setGroupNumber] = useState('')
   const [players, setPlayers] = useState<DraftPlayer[]>([])
+  const [remarks, setRemarks] = useState<RemarksDraft>(() => toRemarksDraft())
   const [planId, setPlanId] = useState('')
   const [saving, setSaving] = useState(false)
   const [confirmingDiscard, setConfirmingDiscard] = useState(false)
@@ -122,6 +125,7 @@ export function PartyEditor({
         ? String(reservation.party.groupNumber)
         : ''
     const draft = toDraft(reservation.party, reservation.partySize)
+    const remarksDraft = toRemarksDraft(reservation.party?.remarks)
     setCustomerName(booked)
     setCustomerId(identity)
     setQuantity(seats)
@@ -129,8 +133,9 @@ export function PartyEditor({
     setOrganizer(host)
     setGroupNumber(number)
     setPlayers(draft)
+    setRemarks(remarksDraft)
     setPlanId(reservation.reservationServiceId ?? '')
-    setOpened(JSON.stringify([booked, identity, seats, competition, host, number, draft]))
+    setOpened(JSON.stringify([booked, identity, seats, competition, host, number, draft, remarksDraft]))
     setConfirmingDiscard(false)
   }, [reservation])
 
@@ -173,6 +178,7 @@ export function PartyEditor({
       organizer,
       groupNumber,
       players,
+      remarks,
     ]) !== opened
   const canSave = customerName.trim().length > 0 && validQuantity && !saving
   const requestClose = () => {
@@ -230,6 +236,7 @@ export function PartyEditor({
               ? parsedGroupNumber
               : null,
             players: named,
+            remarks: toRemarks(remarks),
           }),
         },
       )
@@ -316,6 +323,11 @@ export function PartyEditor({
             />
           </Field>
         </FormGrid>
+
+        <section aria-label={t('ledger:remarks.title')}>
+          <h3>{t('ledger:remarks.title')}</h3>
+          <PartyRemarksFields value={remarks} onChange={setRemarks} />
+        </section>
 
         {/* A round booked as self that turns up wanting a caddie is changed
             here rather than cancelled and rebooked. */}

@@ -239,3 +239,31 @@ describe('LedgerBoard caddie supply header', () => {
     )
   })
 })
+
+describe('LedgerBoard group remarks', () => {
+  it('reads the start-ledger remarks under the group name', () => {
+    renderBoard({
+      item: reservation({
+        party: { players: [], remarks: { meal: '各自注文', scoreTally: true, settlement: 'individual' } },
+      }),
+      shiftsConfirmed: false,
+      assignments: { kind: 'loaded', value: { items: [] } },
+    })
+    expect(screen.getByText(i18next.t('ledger:cell.remarkMeal', { value: '各自注文' }), { exact: false })).toBeTruthy()
+    expect(screen.getByText(i18next.t('ledger:cell.remarkSettlement', {
+      value: i18next.t('ledger:remarks.settlementIndividual'),
+    }), { exact: false })).toBeTruthy()
+  })
+
+  it('shows only the first line of a free note in the cell', () => {
+    renderBoard({
+      item: reservation({
+        party: { players: [], remarks: { note: '早めに到着\nカート2台希望' } },
+      }),
+      shiftsConfirmed: false,
+      assignments: { kind: 'loaded', value: { items: [] } },
+    })
+    expect(screen.getByText('早めに到着')).toBeTruthy()
+    expect(screen.queryByText('カート2台希望', { exact: false })).toBeNull()
+  })
+})

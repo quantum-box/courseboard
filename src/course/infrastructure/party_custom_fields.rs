@@ -9,7 +9,8 @@
 use serde_json::{json, Map, Value};
 
 use crate::course::domain::{
-    CourseError, CustomerId, PartyDetails, PartyPlayer, PARTY_CUSTOM_FIELD_KEY,
+    CourseError, CustomerId, PartyDetails, PartyPlayer, PartyRemarks, PartySettlement,
+    PARTY_CUSTOM_FIELD_KEY,
 };
 
 /// Group detail held in `customFieldsJson`, or an empty party when the
@@ -42,7 +43,29 @@ pub fn read_party(custom_fields: Option<&Value>) -> PartyDetails {
             .filter(|value| *value > 0),
         players,
     )
+    .map(|party| party.with_remarks(read_remarks(node.get("remarks"))))
     .unwrap_or_default()
+}
+
+/// Remarks read leniently, field by field: an unknown settlement word written
+/// by a newer client must not also cost the group its meal note.
+fn read_remarks(node: Option<&Value>) -> PartyRemarks {
+    let Some(object) = node.and_then(Value::as_object) else {
+        return PartyRemarks::default();
+    };
+    let settlement = object
+        .get("settlement")
+        .and_then(Value::as_str)
+        .and_then(PartySettlement::parse);
+    let score_tally = object.get("scoreTally").and_then(Value::as_bool);
+    let meal = optional_text(object, "meal");
+    let note = optional_text(object, "note");
+    // Only an over-long text can be refused; drop just that one and keep the rest.
+    PartyRemarks::try_new(meal.clone(), score_tally, settlement, note.clone())
+        .or_else(|_| PartyRemarks::try_new(None, score_tally, settlement, note))
+        .or_else(|_| PartyRemarks::try_new(meal, score_tally, settlement, None))
+        .or_else(|_| PartyRemarks::try_new(None, score_tally, settlement, None))
+        .unwrap_or_default()
 }
 
 fn read_player(entry: &Value) -> Option<PartyPlayer> {
@@ -104,6 +127,23 @@ fn party_to_json(party: &PartyDetails) -> Value {
             Value::Array(party.players().iter().map(player_to_json).collect()),
         );
     }
+    let remarks = party.remarks();
+    if !remarks.is_empty() {
+        let mut entry = Map::new();
+        if let Some(value) = remarks.meal() {
+            entry.insert("meal".into(), json!(value));
+        }
+        if let Some(value) = remarks.score_tally() {
+            entry.insert("scoreTally".into(), json!(value));
+        }
+        if let Some(value) = remarks.settlement() {
+            entry.insert("settlement".into(), json!(value.as_str()));
+        }
+        if let Some(value) = remarks.note() {
+            entry.insert("note".into(), json!(value));
+        }
+        node.insert("remarks".into(), Value::Object(entry));
+    }
     Value::Object(node)
 }
 
@@ -135,6 +175,15 @@ pub struct PartyPlayerInput {
     pub customer_id: Option<String>,
 }
 
+/// The remarks as the request body carried them.
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+pub struct PartyRemarksInput {
+    pub meal: Option<String>,
+    pub score_tally: Option<bool>,
+    pub settlement: Option<String>,
+    pub note: Option<String>,
+}
+
 /// Build a party from an untrusted request body.
 ///
 /// Unlike `read_party`, bad input here is the caller's mistake and is refused:
@@ -145,7 +194,16 @@ pub fn party_from_request(
     organizer: Option<String>,
     group_number: Option<i32>,
     players: Vec<PartyPlayerInput>,
+    remarks: PartyRemarksInput,
 ) -> Result<PartyDetails, CourseError> {
+    let settlement = match remarks.settlement.as_deref().map(str::trim) {
+        None | Some("") => None,
+        Some(value) => Some(PartySettlement::parse(value).ok_or(CourseError::BadRequest(
+            "settlement must be individual or together",
+        ))?),
+    };
+    let remarks =
+        PartyRemarks::try_new(remarks.meal, remarks.score_tally, settlement, remarks.note)?;
     let players = players
         .into_iter()
         .map(|player| {
@@ -157,7 +215,10 @@ pub fn party_from_request(
             )
         })
         .collect::<Result<Vec<_>, _>>()?;
-    PartyDetails::try_new(competition_name, organizer, group_number, players)
+    Ok(
+        PartyDetails::try_new(competition_name, organizer, group_number, players)?
+            .with_remarks(remarks),
+    )
 }
 
 #[cfg(test)]
@@ -187,6 +248,12 @@ mod tests {
                     ..named("木澤 岳志")
                 },
             ],
+            PartyRemarksInput {
+                meal: Some("各自注文".into()),
+                score_tally: Some(true),
+                settlement: Some("individual".into()),
+                note: Some("早めに到着".into()),
+            },
         )
         .unwrap()
     }
@@ -260,7 +327,80 @@ mod tests {
 
     #[test]
     fn an_operator_typing_a_blank_name_is_told_rather_than_silently_ignored() {
-        let result = party_from_request(None, None, None, vec![named("   ")]);
+        let result = party_from_request(
+            None,
+            None,
+            None,
+            vec![named("   ")],
+            PartyRemarksInput::default(),
+        );
+        assert!(result.is_err());
+    }
+
+    #[test]
+    fn remarks_survive_a_round_trip_through_custom_fields() {
+        let merged = merge_party(None, &party());
+        assert_eq!(
+            merged[PARTY_CUSTOM_FIELD_KEY]["remarks"],
+            json!({
+                "meal": "各自注文",
+                "scoreTally": true,
+                "settlement": "individual",
+                "note": "早めに到着"
+            })
+        );
+        let remarks = read_party(Some(&merged)).remarks().clone();
+        assert_eq!(remarks.meal(), Some("各自注文"));
+        assert_eq!(remarks.note(), Some("早めに到着"));
+        assert_eq!(remarks.settlement(), Some(PartySettlement::Individual));
+    }
+
+    #[test]
+    fn an_unknown_stored_settlement_reads_as_unset_and_keeps_the_rest() {
+        let stored = json!({
+            PARTY_CUSTOM_FIELD_KEY: { "remarks": { "meal": "弁当", "settlement": "card" } }
+        });
+        let remarks = read_party(Some(&stored)).remarks().clone();
+        assert_eq!(remarks.meal(), Some("弁当"));
+        assert_eq!(remarks.settlement(), None);
+    }
+
+    #[test]
+    fn an_over_long_stored_note_is_dropped_without_losing_the_meal() {
+        let stored = json!({
+            PARTY_CUSTOM_FIELD_KEY: { "remarks": { "meal": "弁当", "note": "あ".repeat(501) } }
+        });
+        let remarks = read_party(Some(&stored)).remarks().clone();
+        assert_eq!(remarks.meal(), Some("弁当"));
+        assert_eq!(remarks.note(), None);
+    }
+
+    #[test]
+    fn a_requested_note_over_500_characters_is_refused() {
+        let too_long = PartyRemarksInput {
+            note: Some("あ".repeat(501)),
+            ..PartyRemarksInput::default()
+        };
+        assert!(party_from_request(None, None, None, Vec::new(), too_long).is_err());
+        let at_limit = PartyRemarksInput {
+            note: Some("あ".repeat(500)),
+            ..PartyRemarksInput::default()
+        };
+        assert!(party_from_request(None, None, None, Vec::new(), at_limit).is_ok());
+    }
+
+    #[test]
+    fn an_unknown_requested_settlement_is_refused() {
+        let result = party_from_request(
+            None,
+            None,
+            None,
+            Vec::new(),
+            PartyRemarksInput {
+                settlement: Some("card".into()),
+                ..PartyRemarksInput::default()
+            },
+        );
         assert!(result.is_err());
     }
 
@@ -304,6 +444,7 @@ mod tests {
                 customer_id: Some("   ".into()),
                 ..named("増田 公陽")
             }],
+            PartyRemarksInput::default(),
         )
         .unwrap();
         assert_eq!(party.players()[0].customer_id(), None);

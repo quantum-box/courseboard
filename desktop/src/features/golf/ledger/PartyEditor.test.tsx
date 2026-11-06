@@ -138,6 +138,35 @@ describe('the ledger booking sheet', () => {
     ).toEqual(['/v1/course/reservations/rsv-1/party'])
   })
 
+  it('opens with the remarks already on the booking and saves them as typed', async () => {
+    api.json.mockResolvedValue({ players: [] })
+    const props = renderEditor({
+      reservation: {
+        ...reservation,
+        party: { ...reservation.party!, remarks: { meal: '各自注文', scoreTally: true } },
+      },
+    })
+
+    expect(input(i18next.t('ledger:remarks.meal')).value).toBe('各自注文')
+    expect(input(i18next.t('ledger:remarks.scoreTally')).value).toBe('yes')
+    fireEvent.change(input(i18next.t('ledger:remarks.settlement')), {
+      target: { value: 'individual' },
+    })
+    fireEvent.change(input(i18next.t('ledger:remarks.note')), {
+      target: { value: '  早めに到着  ' },
+    })
+    fireEvent.click(screen.getByText(i18next.t('ledger:party.save')))
+
+    await waitFor(() => expect(props.onClose).toHaveBeenCalled())
+    const party = api.json.mock.calls.find(call => call[0] === '/v1/course/reservations/rsv-1/party')!
+    expect(JSON.parse(party[1].body).remarks).toEqual({
+      meal: '各自注文',
+      scoreTally: true,
+      settlement: 'individual',
+      note: '早めに到着',
+    })
+  })
+
   it('refuses to save a booking with no name on it', () => {
     renderEditor()
 

@@ -4396,6 +4396,9 @@ function resolveMutation(path: string, init?: RequestInit): MockFieldResult<Json
       ...(body?.organizer ? { organizer: String(body.organizer) } : {}),
       ...(typeof body?.groupNumber === 'number' ? { groupNumber: body.groupNumber } : {}),
       players: Array.isArray(body?.players) ? body.players : [],
+      ...(body?.remarks && typeof body.remarks === 'object' && Object.keys(body.remarks).length > 0
+        ? { remarks: body.remarks }
+        : {}),
     }
     const created: MockTeeReservation = {
       id: `res_mock_${sequence}`,
@@ -4859,6 +4862,9 @@ function resolveMutation(path: string, init?: RequestInit): MockFieldResult<Json
       ...(body?.organizer ? { organizer: String(body.organizer) } : {}),
       ...(typeof body?.groupNumber === 'number' ? { groupNumber: body.groupNumber } : {}),
       players: Array.isArray(body?.players) ? body.players : [],
+      ...(body?.remarks && typeof body.remarks === 'object' && Object.keys(body.remarks).length > 0
+        ? { remarks: body.remarks }
+        : {}),
     }
     ;(reservation as Record<string, unknown>).party = party
     mockParties[reservation.id] = party
