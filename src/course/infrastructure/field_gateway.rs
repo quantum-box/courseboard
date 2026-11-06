@@ -430,6 +430,9 @@ fn new_reservation_body(input: &NewReservation, creating: bool) -> Value {
     if let Some(resource_id) = input.reservation_resource_id.as_ref() {
         body["resourceId"] = json!(resource_id.as_str());
     }
+    if let Some(notes) = input.notes.as_deref() {
+        body["notes"] = json!(notes);
+    }
     if creating {
         if let Some(prepayment_policy) = input.prepayment_policy.as_deref() {
             body["prepaymentPolicy"] = json!(prepayment_policy);
@@ -2445,6 +2448,7 @@ mod tests {
             )
             .unwrap(),
             prepayment_policy: Some("none".into()),
+            notes: None,
             seed_key: None,
         }
     }

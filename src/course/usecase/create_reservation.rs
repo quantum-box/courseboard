@@ -43,6 +43,8 @@ pub struct CreateReservationInput {
     /// for want of a ledger entry is a tee time nobody sold.
     pub customer_id: Option<CustomerId>,
     pub party: PartyDetails,
+    /// Free-text instructions kept on the booking itself (Field's `notes`).
+    pub notes: Option<String>,
 }
 
 /// A booking that was written, and anything the desk should know about it.
@@ -170,6 +172,7 @@ impl CreateReservationUseCase {
             customer_id: input.customer_id,
             golf_course_id: input.golf_course_id,
             party: input.party,
+            notes: input.notes,
             // A phone booking is paid at the course. Field therefore converts
             // its hold to reserved inventory in the create transaction instead
             // of leaving a checkout-dependent hold behind.
@@ -1123,6 +1126,7 @@ mod tests {
             customer_name: "予約者".to_string(),
             customer_id: None,
             party: PartyDetails::default(),
+            notes: None,
         }
     }
 

@@ -249,7 +249,9 @@ export function routeActionRequirement(route: string): RouteActionRequirement | 
   if (route === 'golf/data-imports' || route.startsWith('golf/data-imports/')) {
     return requirement(FIELD_ACTIONS.listBridgeDefinitions)
   }
-  if (route === 'golf/reservation-report-import') {
+  // Same screen gate as the report import it hangs off; booking itself is
+  // refused by the API without ManageReservations.
+  if (route === 'golf/reservation-report-import' || route === 'golf/reservation-report-import/start-ledger') {
     return allRequirements(
       FIELD_ACTIONS.listReservationReports,
       FIELD_ACTIONS.listCourses,

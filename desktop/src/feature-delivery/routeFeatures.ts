@@ -74,6 +74,7 @@ export const ROUTE_FEATURES: Readonly<Record<string, FeatureKey>> = Object.freez
   'golf/settlement': 'courseboard.settlement',
   'golf/simulator': 'courseboard.fee_simulator',
   'golf/reservation-report-import': 'courseboard.reservation_report_import',
+  'golf/reservation-report-import/start-ledger': 'courseboard.reservation_report_import',
   'golf/data-imports/courseboardReservationReports/documents': 'courseboard.reservation_report_import',
   'golf/data-imports/courseboardReservationReports/documents/:jobId': 'courseboard.reservation_report_import',
   'golf/data-imports': 'courseboard.data_imports',

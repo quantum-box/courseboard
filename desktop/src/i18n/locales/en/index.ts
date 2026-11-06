@@ -25,6 +25,7 @@ import { settlement } from './settlement'
 import { shifts } from './shifts'
 import { simulator } from './simulator'
 import { staff } from './staff'
+import { startLedgerImport } from './startLedgerImport'
 import { timeline } from './timeline'
 
 export const en = {
@@ -55,5 +56,6 @@ export const en = {
   shifts,
   simulator,
   staff,
+  startLedgerImport,
   timeline,
 }

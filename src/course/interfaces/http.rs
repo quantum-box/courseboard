@@ -1005,6 +1005,7 @@ pub async fn create_reservation(
                 customer_name: request.customer_name,
                 customer_id: CustomerId::from_optional(request.customer_id),
                 party,
+                notes: None,
             },
         )
         .await

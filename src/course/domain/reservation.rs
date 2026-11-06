@@ -243,6 +243,9 @@ pub struct NewReservation {
     pub customer_id: Option<CustomerId>,
     pub golf_course_id: CourseId,
     pub party: PartyDetails,
+    /// Free text kept on the booking itself, for what has no field of its own
+    /// (a start ledger's memo column, for one).
+    pub notes: Option<String>,
     /// Explicit per-booking payment policy when the booking channel owns it.
     /// Desk bookings use `none`; seeds leave it to the tenant policy.
     pub prepayment_policy: Option<String>,

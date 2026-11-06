@@ -314,6 +314,36 @@ const ROUTES: &[(&str, &str, RouteAuthorization)] = &[
     ),
     (
         "*",
+        "/v1/course/reservations/start-ledger/jobs",
+        RouteAuthorization::UpstreamEnforced,
+    ),
+    (
+        "*",
+        "/v1/course/reservations/start-ledger/jobs/:job_id",
+        RouteAuthorization::UpstreamEnforced,
+    ),
+    (
+        "*",
+        "/v1/course/reservations/start-ledger/jobs/:job_id/confirm",
+        RouteAuthorization::UpstreamEnforced,
+    ),
+    (
+        "*",
+        "/v1/course/reservations/start-ledger/jobs/:job_id/advance",
+        RouteAuthorization::UpstreamEnforced,
+    ),
+    (
+        "*",
+        "/v1/course/reservations/start-ledger/context",
+        RouteAuthorization::UpstreamEnforced,
+    ),
+    (
+        "*",
+        "/v1/course/reservations/start-ledger/import",
+        RouteAuthorization::UpstreamEnforced,
+    ),
+    (
+        "*",
         "/v1/course/reservations",
         RouteAuthorization::UpstreamEnforced,
     ),

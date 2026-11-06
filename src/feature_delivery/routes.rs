@@ -172,6 +172,13 @@ const ROUTE_RULES: &[(&str, &str, FeatureRoute)] = &[
         "/v1/course/tee-ledger",
         Feature("courseboard.tee_sheet"),
     ),
+    // Reading the booking system's start ledger into bookings is the same
+    // product as taking its reservation report onto the board.
+    (
+        "*",
+        "/v1/course/reservations/start-ledger",
+        Feature("courseboard.reservation_report_import"),
+    ),
     (
         "*",
         "/v1/course/reservations",

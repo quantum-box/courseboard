@@ -16,6 +16,7 @@ import {
 } from './features/cancellation-fees/CancellationFeesPage'
 import { CommonImportsPage } from './features/golf/common-imports/CommonImportsPage'
 import { ReservationDocumentPage } from './features/golf/common-imports/ReservationDocumentPage'
+import { StartLedgerImportPage } from './features/golf/start-ledger-import/StartLedgerImportPage'
 import { BudgetsPage } from './features/golf/BudgetsPage'
 import { CaddiesPage } from './features/golf/CaddiesPage'
 import { CourseSchedulePage } from './features/golf/CourseSchedulePage'
@@ -140,6 +141,11 @@ function RouteContent({ route }: { route: string }) {
     return <ReservationProductsPage serviceId={segment || undefined} />
   }
   if (route === 'golf/ledger') return <LedgerPage />
+  if (route === 'golf/reservation-report-import/start-ledger') {
+    if (reportImportGate === 'loading') return <LoadingState />
+    if (reportImportGate === 'hidden') return <NotFoundPage />
+    return <StartLedgerImportPage />
+  }
   if (route === 'golf/reservation-report-import') {
     // Until the tenant's flag says otherwise the screen does not exist: a direct
     // link answers the same way an unknown route does, rather than showing an

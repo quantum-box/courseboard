@@ -301,7 +301,7 @@ impl FieldCustomerReceptionGateway {
 }
 
 // An advance includes PDF rendering and provider inference, unlike confirm.
-fn reception_job_step_timeout(step: &str) -> Duration {
+pub(super) fn reception_job_step_timeout(step: &str) -> Duration {
     Duration::from_secs(if step == "advance" { 90 } else { 15 })
 }
 
@@ -310,49 +310,49 @@ fn reception_job_step_timeout(step: &str) -> Duration {
 /// same `map_draft` turns it into rows for the desk.
 #[derive(Debug, Deserialize)]
 #[serde(rename_all = "camelCase")]
-struct FieldOcrJobResponse {
-    id: String,
+pub(super) struct FieldOcrJobResponse {
+    pub(super) id: String,
     #[serde(default)]
-    sources: Vec<FieldOcrJobSource>,
+    pub(super) sources: Vec<FieldOcrJobSource>,
     #[serde(default)]
-    source_app: Option<String>,
-    status: String,
+    pub(super) source_app: Option<String>,
+    pub(super) status: String,
     #[serde(default)]
-    completed_units: u32,
+    pub(super) completed_units: u32,
     #[serde(default)]
-    total_units: Option<u32>,
+    pub(super) total_units: Option<u32>,
     #[serde(default)]
-    draft: FieldGenericOcrDraft,
+    pub(super) draft: FieldGenericOcrDraft,
     #[serde(default)]
-    failure_code: Option<String>,
+    pub(super) failure_code: Option<String>,
     #[serde(default)]
-    expires_at: Option<chrono::DateTime<chrono::Utc>>,
+    pub(super) expires_at: Option<chrono::DateTime<chrono::Utc>>,
 }
 
 #[derive(Debug, Deserialize)]
 #[serde(rename_all = "camelCase")]
-struct FieldOcrJobSource {
-    content_type: String,
-    size: u64,
+pub(super) struct FieldOcrJobSource {
+    pub(super) content_type: String,
+    pub(super) size: u64,
     #[serde(default)]
-    sha256: Option<String>,
+    pub(super) sha256: Option<String>,
 }
 
 #[derive(Debug, Deserialize)]
 #[serde(rename_all = "camelCase")]
-struct FieldCreateOcrJobResponse {
+pub(super) struct FieldCreateOcrJobResponse {
     #[serde(flatten)]
-    job: FieldOcrJobResponse,
+    pub(super) job: FieldOcrJobResponse,
     #[serde(default)]
-    uploads: Vec<FieldOcrJobUpload>,
+    pub(super) uploads: Vec<FieldOcrJobUpload>,
 }
 
 #[derive(Debug, Deserialize)]
 #[serde(rename_all = "camelCase")]
-struct FieldOcrJobUpload {
-    storage_key: String,
-    upload_url: String,
-    expires_at: String,
+pub(super) struct FieldOcrJobUpload {
+    pub(super) storage_key: String,
+    pub(super) upload_url: String,
+    pub(super) expires_at: String,
 }
 
 /// Persisted failures remain job responses. HTTP throttling and a failed job
@@ -690,7 +690,7 @@ fn duplicate_analysis_warning(key: &str) -> String {
 /// class is all that has to survive. Nor is the provider's own body ever
 /// available to carry — Field does not copy it, because it can echo the
 /// document that was read.
-fn reader_failure(failure: &FieldStatusFailure<'_>) -> Option<CourseError> {
+pub(super) fn reader_failure(failure: &FieldStatusFailure<'_>) -> Option<CourseError> {
     ReceptionReaderFailure::classify(failure.status.as_u16(), failure.code.as_deref())
         .map(CourseError::ReceptionReaderFailed)
 }
@@ -704,11 +704,11 @@ fn reader_failure(failure: &FieldStatusFailure<'_>) -> Option<CourseError> {
 /// decoding failure, and a stricter type would turn it into a 424.
 #[derive(Debug, Default, Deserialize)]
 #[serde(rename_all = "camelCase")]
-struct FieldGenericOcrDraft {
+pub(super) struct FieldGenericOcrDraft {
     #[serde(default)]
-    fields: BTreeMap<String, serde_json::Value>,
+    pub(super) fields: BTreeMap<String, serde_json::Value>,
     #[serde(default)]
-    warnings: Vec<String>,
+    pub(super) warnings: Vec<String>,
 }
 
 fn map_draft(
