@@ -59,6 +59,7 @@ export const startLedgerImport = {
     "course": "Choose a course.",
     "teeTime": "Enter the tee time as HH:MM.",
     "name": "Enter the representative's name.",
+    "caddieNoPlan": "The original has a caddie, but with no plan selected this group is booked as self-play. Choose a caddie plan.",
     "caddieMismatch": "The original says “{{printed}}”, but the chosen plan is {{plan}}. Check the plan.",
     "booked": "This tee time is already booked ({{name}}). It will be skipped.",
     "repeated": "Another group has the same course and time. Only the first is booked."

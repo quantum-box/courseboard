@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest'
 import type { StartLedgerContext, StartLedgerPartyDraft, StartLedgerRead } from './api'
-import { blocking, buildReview, chunks, competitionFrom, matchCourse, matchPlan, isDone, partiesToImport, pendingParties, reviewIssues, toImportParty } from './review'
+import { blocking, buildReview, chunks, competitionFrom, matchCourse, doneGroups, matchPlan, isDone, partiesToImport, restoreDone, pendingParties, reviewIssues, toImportParty } from './review'
 
 const context: StartLedgerContext = {
   courses: [{ id: 'out', name: '空沼 OUT' }, { id: 'in', name: '空沼IN' }],
@@ -52,6 +52,12 @@ describe('review', () => {
     expect(parties[1]!.remarks).toEqual({ meal: '各自注文', scoreTally: 'yes', settlement: 'individual', note: '' })
   })
 
+  it('warns when a caddie group has no plan, since that books self-play', () => {
+    const unplanned = { ...parties[0]!, planId: '' }
+    expect(reviewIssues(unplanned, parties, context).caddieMismatch).toBe(true)
+    expect(reviewIssues({ ...parties[2]!, planId: '' }, parties, context).caddieMismatch).toBe(false)
+  })
+
   it('warns when the sheet says caddie and the plan is self-play', () => {
     expect(reviewIssues(parties[0]!, parties, context).caddieMismatch).toBe(false)
     expect(reviewIssues(parties[1]!, parties, context).caddieMismatch).toBe(true)
@@ -76,6 +82,15 @@ describe('review', () => {
     expect(pendingParties(checked, context).map(party => party.key)).toEqual(['1'])
     const done = checked.map(party => party.key === '0' ? { ...party, result: { outcome: 'created' as const, reservationId: 'r-9' } } : party)
     expect(partiesToImport(done)).toEqual([])
+  })
+
+  it('restores booked groups at the course and time they were booked', () => {
+    const booked = parties.map(party => party.key === '0' ? { ...party, teeTime: '08:52', checked: true, result: { outcome: 'created' as const, reservationId: 'r-1' } } : party)
+    const done = doneGroups(booked)
+    expect(Object.keys(done)).toEqual(['0'])
+    const restored = restoreDone(parties, done)
+    expect(restored[0]).toMatchObject({ teeTime: '08:52', result: { outcome: 'created' } })
+    expect(partiesToImport(restored.map(party => ({ ...party, checked: true }))).map(party => party.key)).not.toContain('0')
   })
 
   it('keeps a failed group pending and sendable again', () => {

@@ -103,7 +103,19 @@ export async function importStartLedgerParties(date: string, parties: StartLedge
 }
 
 /** Pick up the read this desk was working on after a reload. */
-export type StartLedgerOperation = { idempotencyKey: string; jobId?: string }
+export type StartLedgerOperation = {
+  idempotencyKey: string
+  jobId?: string
+  /** The booking date the desk confirmed, which may differ from the printed one. */
+  date?: string
+  /**
+   * Groups already in the ledger, keyed by review row, with the course and time
+   * they were booked at. A recovered read must not offer them again under the
+   * printed time, which the server's duplicate check would not recognise.
+   */
+  done?: Record<string, StartLedgerDoneGroup>
+}
+export type StartLedgerDoneGroup = { courseId: string; teeTime: string; result: StartLedgerImportResult }
 export function operationKey(tenant: string, platform: string, actor: string) { return `courseboard.start-ledger-operation:${tenant}:${platform}:${actor}` }
 export function readOperation(key: string): StartLedgerOperation | null {
   try {
@@ -112,8 +124,22 @@ export function readOperation(key: string): StartLedgerOperation | null {
     const value: unknown = JSON.parse(raw)
     if (!value || typeof value !== 'object' || !('idempotencyKey' in value) || typeof value.idempotencyKey !== 'string' || !value.idempotencyKey || value.idempotencyKey.length > 128) return null
     const jobId = 'jobId' in value && typeof value.jobId === 'string' ? value.jobId : undefined
-    return { idempotencyKey: value.idempotencyKey, ...(jobId ? { jobId } : {}) }
+    const date = 'date' in value && typeof value.date === 'string' && /^\d{4}-\d{2}-\d{2}$/u.test(value.date) ? value.date : undefined
+    const done = 'done' in value ? readDone(value.done) : undefined
+    return { idempotencyKey: value.idempotencyKey, ...(jobId ? { jobId } : {}), ...(date ? { date } : {}), ...(done ? { done } : {}) }
   } catch { return null }
+}
+function readDone(value: unknown): Record<string, StartLedgerDoneGroup> | undefined {
+  if (!value || typeof value !== 'object') return undefined
+  const done: Record<string, StartLedgerDoneGroup> = {}
+  for (const [key, group] of Object.entries(value)) {
+    if (!group || typeof group !== 'object') continue
+    const { courseId, teeTime, result } = group as Record<string, unknown>
+    const outcome = result && typeof result === 'object' ? (result as Record<string, unknown>).outcome : undefined
+    if (typeof courseId !== 'string' || typeof teeTime !== 'string' || (outcome !== 'created' && outcome !== 'already_booked')) continue
+    done[key] = { courseId, teeTime, result: result as StartLedgerImportResult }
+  }
+  return Object.keys(done).length ? done : undefined
 }
 export function writeOperation(key: string, operation: StartLedgerOperation | null) {
   try { if (operation) localStorage.setItem(key, JSON.stringify(operation)); else localStorage.removeItem(key) } catch { /* Resume is a convenience; the read itself is kept by Field. */ }

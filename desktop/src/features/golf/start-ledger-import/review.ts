@@ -1,5 +1,5 @@
 import { toRemarks, toRemarksDraft, type RemarksDraft } from '../ledger/partyRemarks'
-import type { StartLedgerContext, StartLedgerImportParty, StartLedgerImportResult, StartLedgerPartyDraft, StartLedgerRead } from './api'
+import type { StartLedgerContext, StartLedgerDoneGroup, StartLedgerImportParty, StartLedgerImportResult, StartLedgerPartyDraft, StartLedgerRead } from './api'
 
 /** The paper ledger draws four players per group. */
 export const PLAYER_SLOTS = 4
@@ -110,7 +110,8 @@ export function reviewIssues(party: ReviewParty, all: readonly ReviewParty[], co
     course: !party.courseId,
     teeTime: !TIME.test(party.teeTime),
     name: !party.customerName.trim(),
-    caddieMismatch: !!plan && !!style && plan.requiresCaddie !== (style === 'caddie'),
+    // No plan books self-play, so a caddie group without one loses its caddie too.
+    caddieMismatch: !!style && (plan?.requiresCaddie ?? false) !== (style === 'caddie'),
     booked: context.booked.find(item => item.golfCourseId === party.courseId && item.teeTime === party.teeTime),
     repeated: all.some(other => other.key !== party.key && !other.excluded && other.courseId === party.courseId && other.teeTime === party.teeTime),
   }
@@ -129,6 +130,22 @@ export function pendingParties(parties: readonly ReviewParty[], context: StartLe
 /** The group is in the ledger, by this import or an earlier booking. */
 export function isDone(party: ReviewParty) {
   return party.result?.outcome === 'created' || party.result?.outcome === 'already_booked'
+}
+
+/** Put back the groups a previous visit already booked, at the course and time they were booked. */
+export function restoreDone(parties: readonly ReviewParty[], done: Record<string, StartLedgerDoneGroup> | undefined): ReviewParty[] {
+  if (!done) return [...parties]
+  return parties.map(party => {
+    const group = done[party.key]
+    return group ? { ...party, courseId: group.courseId, teeTime: group.teeTime, result: group.result, checked: true, excluded: false } : party
+  })
+}
+
+/** The bookings to remember so a recovered read does not offer them again. */
+export function doneGroups(parties: readonly ReviewParty[]): Record<string, StartLedgerDoneGroup> {
+  return Object.fromEntries(parties.flatMap(party => isDone(party) && party.result
+    ? [[party.key, { courseId: party.courseId, teeTime: party.teeTime, result: party.result }]]
+    : []))
 }
 
 /** Groups to send: checked, not excluded, not already done. */

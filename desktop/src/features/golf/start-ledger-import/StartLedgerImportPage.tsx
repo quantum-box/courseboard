@@ -13,7 +13,7 @@ import {
   START_LEDGER_LIMITS, stepStartLedgerJob, TERMINAL_STATUSES, uploadStartLedgerPdfs, writeOperation,
   type StartLedgerContext, type StartLedgerRead,
 } from './api'
-import { blocking, buildReview, chunks, isDone, partiesToImport, pendingParties, rematch, reviewIssues, soldOn, toImportParty, type ReviewParty } from './review'
+import { blocking, buildReview, chunks, doneGroups, isDone, restoreDone, partiesToImport, pendingParties, rematch, reviewIssues, soldOn, toImportParty, type ReviewParty } from './review'
 import '../common-imports/document-import.css'
 
 const PAGE_SIZE = 20
@@ -49,12 +49,14 @@ export function StartLedgerImportPage() {
   }
 
   async function review(next: StartLedgerRead, signal: AbortSignal) {
-    const day = next.date ?? ''
+    // A recovered read comes back as the desk left it: confirmed date and booked groups.
+    const saved = readOperation(storageKey)
+    const day = saved?.date ?? next.date ?? ''
     setDate(day)
-    if (!day) { setParties(buildReview(next, { courses: [], plans: [], booked: [] })); return }
+    if (!day) { setParties(restoreDone(buildReview(next, { courses: [], plans: [], booked: [] }), saved?.done)); return }
     const loaded = await getStartLedgerContext(day, signal)
     signal.throwIfAborted()
-    setContext(loaded); setParties(buildReview(next, loaded)); setPage(0)
+    setContext(loaded); setParties(restoreDone(buildReview(next, loaded), saved?.done)); setPage(0)
   }
 
   async function apply(next: StartLedgerRead, signal: AbortSignal) {
@@ -117,6 +119,8 @@ export function StartLedgerImportPage() {
   async function changeDate(value: string, signal: AbortSignal) {
     setDate(value)
     if (!/^\d{4}-\d{2}-\d{2}$/u.test(value)) return
+    const saved = readOperation(storageKey)
+    if (saved) writeOperation(storageKey, { ...saved, date: value })
     const loaded = await getStartLedgerContext(value, signal)
     signal.throwIfAborted()
     setContext(loaded)
@@ -138,7 +142,11 @@ export function StartLedgerImportPage() {
         const results = await importStartLedgerParties(date, batch.map(toImportParty), signal)
         signal.throwIfAborted()
         batch.forEach((item, index) => outcomes.set(item.key, results[index]))
+        const settled = parties.map(party => outcomes.has(party.key) ? { ...party, result: outcomes.get(party.key) } : party)
         setParties(previous => previous.map(party => outcomes.has(party.key) ? { ...party, result: outcomes.get(party.key) } : party))
+        // Remember each batch's bookings at once, so a reload mid-import cannot offer them again.
+        const saved = readOperation(storageKey)
+        if (saved) writeOperation(storageKey, { ...saved, date, done: doneGroups(settled) })
       }
     } finally {
       clearResourceCache('tee-ledger')
@@ -209,7 +217,8 @@ export function StartLedgerImportPage() {
                 {issues.course && <Notice tone="warning">{t('issue.course')}</Notice>}
                 {issues.teeTime && <Notice tone="warning">{t('issue.teeTime')}</Notice>}
                 {issues.name && <Notice tone="warning">{t('issue.name')}</Notice>}
-                {issues.caddieMismatch && <Notice tone="warning">{t('issue.caddieMismatch', { printed: party.source.playStyleText ?? styleLabel(party.source.playStyle), plan: styleLabel(plan?.requiresCaddie ? 'caddie' : 'self') })}</Notice>}
+                {issues.caddieMismatch && !plan && <Notice tone="warning">{t('issue.caddieNoPlan')}</Notice>}
+                {issues.caddieMismatch && plan && <Notice tone="warning">{t('issue.caddieMismatch', { printed: party.source.playStyleText ?? styleLabel(party.source.playStyle), plan: styleLabel(plan?.requiresCaddie ? 'caddie' : 'self') })}</Notice>}
                 {issues.booked && !party.result && <Notice tone="warning">{t('issue.booked', { name: issues.booked.customerName ?? '' })}</Notice>}
                 {issues.repeated && <Notice tone="warning">{t('issue.repeated')}</Notice>}
                 <FormGrid columns={3}>
