@@ -152,6 +152,9 @@ describe('the ledger booking sheet', () => {
     fireEvent.change(input(i18next.t('ledger:remarks.settlement')), {
       target: { value: 'individual' },
     })
+    fireEvent.change(input(i18next.t('ledger:remarks.note')), {
+      target: { value: '  早めに到着  ' },
+    })
     fireEvent.click(screen.getByText(i18next.t('ledger:party.save')))
 
     await waitFor(() => expect(props.onClose).toHaveBeenCalled())
@@ -160,6 +163,7 @@ describe('the ledger booking sheet', () => {
       meal: '各自注文',
       scoreTally: true,
       settlement: 'individual',
+      note: '早めに到着',
     })
   })
 

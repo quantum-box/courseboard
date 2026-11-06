@@ -165,18 +165,27 @@ pub struct PartyRemarks {
     /// Whether the competition's scores are tallied by the course.
     score_tally: Option<bool>,
     settlement: Option<PartySettlement>,
+    /// Anything else the desk wants the day to know (`早めに到着`, `カート2台希望`, …).
+    /// Longer than the other texts: it is the one place left for whatever the
+    /// three fixed lines cannot say.
+    note: Option<String>,
 }
+
+/// Room for a few sentences, not a letter.
+pub const MAX_PARTY_NOTE_LENGTH: usize = 500;
 
 impl PartyRemarks {
     pub fn try_new(
         meal: Option<String>,
         score_tally: Option<bool>,
         settlement: Option<PartySettlement>,
+        note: Option<String>,
     ) -> Result<Self, CourseError> {
         Ok(Self {
             meal: normalize_optional(meal)?,
             score_tally,
             settlement,
+            note: normalize_note(note)?,
         })
     }
 
@@ -192,8 +201,15 @@ impl PartyRemarks {
         self.settlement
     }
 
+    pub fn note(&self) -> Option<&str> {
+        self.note.as_deref()
+    }
+
     pub fn is_empty(&self) -> bool {
-        self.meal.is_none() && self.score_tally.is_none() && self.settlement.is_none()
+        self.meal.is_none()
+            && self.score_tally.is_none()
+            && self.settlement.is_none()
+            && self.note.is_none()
     }
 
     /// Read the `【食】… 【集計】… 【精算】…` lines a start ledger prints under a
@@ -358,6 +374,20 @@ fn normalize_required(value: String, label: &'static str) -> Result<String, Cour
 /// The editor sends empty strings for fields the operator cleared; keeping them
 /// would write `""` into the reservation and make `is_empty` answer false for a
 /// group nobody has touched.
+fn normalize_note(value: Option<String>) -> Result<Option<String>, CourseError> {
+    let Some(value) = value else { return Ok(None) };
+    let trimmed = value.trim();
+    if trimmed.is_empty() {
+        return Ok(None);
+    }
+    if trimmed.chars().count() > MAX_PARTY_NOTE_LENGTH {
+        return Err(CourseError::BadRequest(
+            "note must be at most 500 characters",
+        ));
+    }
+    Ok(Some(trimmed.to_string()))
+}
+
 fn normalize_optional(value: Option<String>) -> Result<Option<String>, CourseError> {
     let Some(value) = value else { return Ok(None) };
     let trimmed = value.trim();
@@ -462,7 +492,8 @@ mod tests {
 
     #[test]
     fn a_group_with_only_remarks_is_not_an_empty_group() {
-        let remarks = PartyRemarks::try_new(None, None, Some(PartySettlement::Together)).unwrap();
+        let remarks =
+            PartyRemarks::try_new(None, None, Some(PartySettlement::Together), None).unwrap();
         let details = PartyDetails::default().with_remarks(remarks);
         assert!(!details.is_empty());
     }

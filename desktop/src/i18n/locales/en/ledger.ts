@@ -280,5 +280,8 @@ export const ledger = {
     settlementIndividual: 'Individual',
     settlementTogether: 'Together',
     unset: 'Not set',
+    note: 'Other notes',
+    notePlaceholder: 'e.g. arriving early, two carts',
+    noteHint: '{{typed}} / {{max}} characters',
   },
 } as const

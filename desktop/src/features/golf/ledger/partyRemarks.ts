@@ -8,9 +8,13 @@ export type RemarksDraft = {
   meal: string
   scoreTally: '' | 'yes' | 'no'
   settlement: '' | PartySettlement
+  note: string
 }
 
-export const emptyRemarksDraft: RemarksDraft = { meal: '', scoreTally: '', settlement: '' }
+/** Matches the server's limit, so the sheet stops the typing instead of the save failing. */
+export const MAX_REMARKS_NOTE_LENGTH = 500
+
+export const emptyRemarksDraft: RemarksDraft = { meal: '', scoreTally: '', settlement: '', note: '' }
 
 export function toRemarksDraft(remarks?: PartyRemarks | null): RemarksDraft {
   return {
@@ -19,6 +23,7 @@ export function toRemarksDraft(remarks?: PartyRemarks | null): RemarksDraft {
     settlement: remarks?.settlement === 'individual' || remarks?.settlement === 'together'
       ? remarks.settlement
       : '',
+    note: remarks?.note ?? '',
   }
 }
 
@@ -28,9 +33,10 @@ export function toRemarks(draft: RemarksDraft): PartyRemarks {
     ...(draft.meal.trim() ? { meal: draft.meal.trim() } : {}),
     ...(draft.scoreTally ? { scoreTally: draft.scoreTally === 'yes' } : {}),
     ...(draft.settlement ? { settlement: draft.settlement } : {}),
+    ...(draft.note.trim() ? { note: draft.note.trim() } : {}),
   }
 }
 
 export function isRemarksDraftEmpty(draft: RemarksDraft): boolean {
-  return !draft.meal.trim() && !draft.scoreTally && !draft.settlement
+  return !draft.meal.trim() && !draft.scoreTally && !draft.settlement && !draft.note.trim()
 }

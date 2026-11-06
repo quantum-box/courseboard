@@ -276,5 +276,8 @@ export const ledger = {
     settlementIndividual: 'ひとりずつ',
     settlementTogether: 'まとめて',
     unset: 'きめていない',
+    note: 'そのほか',
+    notePlaceholder: 'たとえば）はやめに つく、カートを 2台',
+    noteHint: '{{typed}} / {{max}}文字',
   },
 } as const

@@ -58,9 +58,13 @@ fn read_remarks(node: Option<&Value>) -> PartyRemarks {
         .and_then(Value::as_str)
         .and_then(PartySettlement::parse);
     let score_tally = object.get("scoreTally").and_then(Value::as_bool);
-    PartyRemarks::try_new(optional_text(object, "meal"), score_tally, settlement)
-        // Only an over-long meal note can be refused; keep the other two.
-        .or_else(|_| PartyRemarks::try_new(None, score_tally, settlement))
+    let meal = optional_text(object, "meal");
+    let note = optional_text(object, "note");
+    // Only an over-long text can be refused; drop just that one and keep the rest.
+    PartyRemarks::try_new(meal.clone(), score_tally, settlement, note.clone())
+        .or_else(|_| PartyRemarks::try_new(None, score_tally, settlement, note))
+        .or_else(|_| PartyRemarks::try_new(meal, score_tally, settlement, None))
+        .or_else(|_| PartyRemarks::try_new(None, score_tally, settlement, None))
         .unwrap_or_default()
 }
 
@@ -135,6 +139,9 @@ fn party_to_json(party: &PartyDetails) -> Value {
         if let Some(value) = remarks.settlement() {
             entry.insert("settlement".into(), json!(value.as_str()));
         }
+        if let Some(value) = remarks.note() {
+            entry.insert("note".into(), json!(value));
+        }
         node.insert("remarks".into(), Value::Object(entry));
     }
     Value::Object(node)
@@ -174,6 +181,7 @@ pub struct PartyRemarksInput {
     pub meal: Option<String>,
     pub score_tally: Option<bool>,
     pub settlement: Option<String>,
+    pub note: Option<String>,
 }
 
 /// Build a party from an untrusted request body.
@@ -194,7 +202,8 @@ pub fn party_from_request(
             "settlement must be individual or together",
         ))?),
     };
-    let remarks = PartyRemarks::try_new(remarks.meal, remarks.score_tally, settlement)?;
+    let remarks =
+        PartyRemarks::try_new(remarks.meal, remarks.score_tally, settlement, remarks.note)?;
     let players = players
         .into_iter()
         .map(|player| {
@@ -243,6 +252,7 @@ mod tests {
                 meal: Some("各自注文".into()),
                 score_tally: Some(true),
                 settlement: Some("individual".into()),
+                note: Some("早めに到着".into()),
             },
         )
         .unwrap()
@@ -332,10 +342,16 @@ mod tests {
         let merged = merge_party(None, &party());
         assert_eq!(
             merged[PARTY_CUSTOM_FIELD_KEY]["remarks"],
-            json!({ "meal": "各自注文", "scoreTally": true, "settlement": "individual" })
+            json!({
+                "meal": "各自注文",
+                "scoreTally": true,
+                "settlement": "individual",
+                "note": "早めに到着"
+            })
         );
         let remarks = read_party(Some(&merged)).remarks().clone();
         assert_eq!(remarks.meal(), Some("各自注文"));
+        assert_eq!(remarks.note(), Some("早めに到着"));
         assert_eq!(remarks.settlement(), Some(PartySettlement::Individual));
     }
 
@@ -347,6 +363,30 @@ mod tests {
         let remarks = read_party(Some(&stored)).remarks().clone();
         assert_eq!(remarks.meal(), Some("弁当"));
         assert_eq!(remarks.settlement(), None);
+    }
+
+    #[test]
+    fn an_over_long_stored_note_is_dropped_without_losing_the_meal() {
+        let stored = json!({
+            PARTY_CUSTOM_FIELD_KEY: { "remarks": { "meal": "弁当", "note": "あ".repeat(501) } }
+        });
+        let remarks = read_party(Some(&stored)).remarks().clone();
+        assert_eq!(remarks.meal(), Some("弁当"));
+        assert_eq!(remarks.note(), None);
+    }
+
+    #[test]
+    fn a_requested_note_over_500_characters_is_refused() {
+        let too_long = PartyRemarksInput {
+            note: Some("あ".repeat(501)),
+            ..PartyRemarksInput::default()
+        };
+        assert!(party_from_request(None, None, None, Vec::new(), too_long).is_err());
+        let at_limit = PartyRemarksInput {
+            note: Some("あ".repeat(500)),
+            ..PartyRemarksInput::default()
+        };
+        assert!(party_from_request(None, None, None, Vec::new(), at_limit).is_ok());
     }
 
     #[test]
