@@ -171,6 +171,11 @@ const ROUTE_RULES: &[(&str, &str, FeatureRoute)] = &[
     ),
     (
         "*",
+        "/v1/course/insights/layout",
+        Feature("courseboard.tee_sheet"),
+    ),
+    (
+        "*",
         "/v1/course/tee-ledger",
         Feature("courseboard.tee_sheet"),
     ),
