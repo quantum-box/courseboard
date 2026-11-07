@@ -164,4 +164,28 @@ describe('unassigned booking ledger', () => {
     expect(screen.getByRole('button', { name: /山田 美穂/ })).toBeTruthy()
   })
 
+  it.each(['ledger', 'list'])('changes an assigned caddie from the %s and keeps the booking', async view => {
+    const target = round('booked', { teeTime: '2026-11-07T00:30:00+09:00' })
+    function Harness() {
+      const [caddieProfileId, setCaddie] = useState('old-caddie')
+      return <UnassignedRoundsPanel
+        sheet={{ data: { items: [target] }, loading: false, error: null, refresh: vi.fn() }}
+        profiles={[{ id: 'old-caddie', displayName: '高橋 裕子' }, { id: 'caddie-1', displayName: '山田 美穂' }]}
+        assignments={[{ id: 'assignment-1', reservationId: 'booked', status: 'assigned', caddieProfileId, scheduledAt: target.teeTime }]}
+        horizon={14} onHorizonChange={vi.fn()} onChanged={() => setCaddie('caddie-1')} />
+    }
+    render(<I18nextProvider i18n={i18next}><Harness /></I18nextProvider>)
+    if (view === 'list') fireEvent.click(screen.getByRole('button', { name: '一覧表示' }))
+    fireEvent.click(screen.getByRole('button', { name: '00:30 高橋 裕子 の担当を変更' }))
+    await screen.findByRole('option', { name: '山田 美穂' })
+    fireEvent.change(screen.getByRole('combobox', { name: /担当キャディ/ }), { target: { value: 'caddie-1' } })
+    fireEvent.click(screen.getByRole('button', { name: '付け替える' }))
+    await screen.findByRole('button', { name: '00:30 山田 美穂 の担当を変更' })
+    expect(screen.getByText(view === 'ledger' ? '秋の親睦杯 1組' : '佐藤 太郎')).toBeTruthy()
+    const call = api.json.mock.calls.find(([path]) => path === '/v1/course/caddie-assignments/assignment-1/reassignment')
+    expect(call?.[1]?.method).toBe('PUT')
+    expect(JSON.parse(String(call?.[1]?.body))).toEqual({ date: '2026-11-07', caddieProfileId: 'caddie-1', reservationId: 'booked', scheduledAt: target.teeTime })
+    expect(api.json.mock.calls.some(([path]) => path === '/v1/course/caddie-assignments')).toBe(false)
+  })
+
 })

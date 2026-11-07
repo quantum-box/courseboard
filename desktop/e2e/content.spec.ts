@@ -314,6 +314,28 @@ test.describe('キャディ名簿', () => {
     await expect(page.locator('.dispatch-assigned-caddies').first()).toBeVisible()
   })
 
+  test('配置済みの担当を台帳から変更しても組を残す', async ({ page }) => {
+    await page.goto(`/golf/caddies/dispatch?date=${D}`)
+    const ledger = page.getByRole('region', { name: 'キャディ配置の予約台帳' })
+    const change = ledger.getByRole('button', { name: /の担当を変更$/ }).first()
+    await expect(change).toBeVisible()
+    const rowIndex = await change.evaluate(element => Array.from(element.closest('.dispatch-ledger')!.querySelectorAll('tbody tr')).indexOf(element.closest('tr')!))
+    const row = ledger.locator('tbody tr').nth(rowIndex)
+    const group = await row.locator('.ledger-group-button').textContent()
+    const count = await ledger.locator('tr.is-booked').count()
+    await change.click()
+    const dialog = page.getByRole('dialog', { name: '担当を付け替える' })
+    const picker = dialog.getByRole('combobox', { name: /担当キャディ/ })
+    await expect.poll(() => picker.locator('option').count()).toBeGreaterThan(1)
+    const newName = (await picker.locator('option').nth(1).innerText()).split(' · ')[0]!
+    await picker.selectOption({ index: 1 })
+    await dialog.getByRole('button', { name: '付け替える', exact: true }).click()
+    await expect(dialog).toBeHidden()
+    await expect(row.locator('.dispatch-assigned-caddies')).toContainText(newName)
+    await expect(row.locator('.ledger-group-button')).toHaveText(group ?? '')
+    await expect(ledger.locator('tr.is-booked')).toHaveCount(count)
+  })
+
   test('台帳から自動配置を開き、未配置の理由を確認して閉じる', async ({ page }) => {
     await page.goto(`/golf/caddies/dispatch?date=${D}`)
     await expect(page.getByRole('region', { name: 'キャディ配置の予約台帳' })).toBeVisible()

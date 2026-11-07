@@ -1,5 +1,5 @@
 import { Button } from '@tachyon-sdk/native-ui'
-import { UserPlus } from 'lucide-react'
+import { UserPlus, Shuffle } from 'lucide-react'
 import { Fragment, useMemo } from 'react'
 import { useTranslation } from 'react-i18next'
 
@@ -28,12 +28,14 @@ export function UnassignedRoundsLedger({
   assignedCaddies,
   selectedId,
   onSelect,
+  onChangeCaddie,
 }: {
   rounds: TeeSheetRow[]
   courseOrder: string[]
-  assignedCaddies: Map<string, { id: string; name: string }[]>
+  assignedCaddies: Map<string, { id: string; name: string; assignmentId?: string }[]>
   selectedId: string | null
   onSelect: (round: TeeSheetRow) => void
+  onChangeCaddie: (round: TeeSheetRow, assignmentId: string) => void
 }) {
   const { t } = useTranslation(['caddies', 'ledger'])
   const courses = useMemo(() => {
@@ -100,7 +102,7 @@ export function UnassignedRoundsLedger({
                             className={`ledger-row dispatch-ledger-row${round ? ' is-booked' : ''}${selectedId === round?.id ? ' is-selected' : ''}`}
                             onClick={round ? event => {
                               if ((event.target as HTMLElement).closest('button, a')) return
-                              if (!assignedCaddies.has(round.id)) onSelect(round)
+                              onSelect(round)
                             } : undefined}
                           >
                             {index === 0 ? (
@@ -111,15 +113,18 @@ export function UnassignedRoundsLedger({
                             {round ? (
                               <>
                                 <LedgerGroupCell item={reservationForLedger(round)} isSelected={selectedId === round.id}
-                                  shiftsConfirmed unassignedIds={unassignedIds} onSelect={() => { if (!assignedCaddies.has(round.id)) onSelect(round) }} />
+                                  shiftsConfirmed unassignedIds={unassignedIds} onSelect={() => { onSelect(round) }} />
                                 {seatCells(reservationForLedger(round), course.seats).map((cell, seat) => (
                                   <LedgerSeatCell key={seat} cell={cell} />
                                 ))}
                                 <td className="dispatch-ledger-action">
                                   {assignedCaddies.has(round.id) ? <div className="dispatch-assigned-caddies">
-                                    {assignedCaddies.get(round.id)?.map((caddie, index) => caddie.id
-                                      ? <CaddieLink key={`${caddie.id}-${index}`} caddieId={caddie.id} displayName={caddie.name} />
-                                      : <span key={index}>{caddie.name}</span>)}
+                                    {assignedCaddies.get(round.id)?.map((caddie, index) => <div key={`${caddie.id}-${index}`} className="flex items-center gap-1">
+                                      <CaddieLink caddieId={caddie.id} displayName={caddie.name} />
+                                      {caddie.assignmentId ? <Button type="button" variant="ghost" size="sm"
+                                        aria-label={t('caddies:unassigned.changeCaddie', { name: caddie.name, time })}
+                                        onClick={() => onChangeCaddie(round, caddie.assignmentId!)}><Shuffle aria-hidden="true" /></Button> : null}
+                                    </div>)}
                                   </div> : <Button type="button" variant="secondary" size="sm"
                                     aria-label={t('caddies:unassigned.assignRound', { time, name: round.partyName || round.reservationNumber })}
                                     onClick={() => onSelect(round)}>

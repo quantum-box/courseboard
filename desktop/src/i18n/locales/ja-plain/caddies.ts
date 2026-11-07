@@ -732,6 +732,7 @@ export const caddies: DeepPartial<typeof source> = {
     },
   },
   unassigned: {
+    changeCaddie: '{{time}} {{name}} の担当を変更',
     clubFilter: 'ゴルフ場で切り替え',
     assigned: '配置済み',
     noBookings: { title: 'キャディ付きの予約がありません', description: '選んだ期間には、キャディ付きの予約がありません。' },

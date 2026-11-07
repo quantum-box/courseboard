@@ -749,6 +749,7 @@ export const caddies: DeepPartial<typeof source> = {
     },
   },
   unassigned: {
+    changeCaddie: 'Change {{name}} at {{time}}',
     clubFilter: 'Golf club',
     assigned: 'Assigned',
     noBookings: { title: 'No caddie bookings', description: 'There are no caddie bookings in the selected period.' },
