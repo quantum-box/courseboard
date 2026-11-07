@@ -29,6 +29,8 @@
     "tauri:ios:build": "tauri ios build"
   },
   "dependencies": {
+    "@json-render/core": "0.22.0",
+    "@json-render/react": "0.22.0",
     "@noble/hashes": "2.0.1",
     "@pdf-lib/fontkit": "^1.1.1",
     "@stripe/react-stripe-js": "^6.6.0",
@@ -48,7 +50,8 @@
     "react-markdown": "10.1.0",
     "remark-gfm": "4.0.1",
     "tesseract.js": "^6.0.1",
-    "three": "^0.169.0"
+    "three": "^0.169.0",
+    "zod": "4.4.3"
   },
   "devDependencies": {
     "@playwright/test": "^1.62.1",

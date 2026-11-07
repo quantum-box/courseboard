@@ -16,6 +16,7 @@ pub mod feature_delivery;
 pub mod feature_flags;
 pub mod field_api;
 pub mod field_proxy;
+pub mod insights;
 pub mod migrations;
 pub mod profile_proxy;
 pub mod smart_assign;
@@ -1524,6 +1525,13 @@ pub fn build_router(state: AppState) -> Router {
             get(course::interfaces::http_commercial::export_monthly_settlement_csv).route_layer(
                 middleware::from_fn_with_state(state.clone(), require_valid_token),
             ),
+        )
+        .route(
+            "/v1/course/insights/layout",
+            post(insights::layout).route_layer(middleware::from_fn_with_state(
+                state.clone(),
+                require_valid_token,
+            )),
         )
         .route(
             "/v1/course/simulator/calculate",

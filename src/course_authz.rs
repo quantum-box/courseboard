@@ -116,6 +116,13 @@ const ROUTES: &[(&str, &str, RouteAuthorization)] = &[
         "/v1/course/simulator/calculate",
         RouteAuthorization::Action(CALCULATE_FEES),
     ),
+    // PoC: lays out an answer over tee-sheet counts, so it is for whoever may
+    // read the tee sheet.
+    (
+        "POST",
+        "/v1/course/insights/layout",
+        RouteAuthorization::Action(actions::LIST_TEE_SHEET),
+    ),
     (
         "POST",
         "/v1/course/simulator/simulate/range",
@@ -2016,6 +2023,7 @@ mod tests {
             ("GET", "/v1/field/client-capabilities"),
             ("POST", "/v1/course/feature-flags/evaluate"),
             ("GET", "/v1/course/tee-sheet"),
+            ("POST", "/v1/course/insights/layout"),
             ("GET", "/v1/course/tee-ledger"),
             ("POST", "/v1/course/reservations"),
             ("PATCH", "/v1/course/reservations/res_1"),
