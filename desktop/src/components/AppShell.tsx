@@ -45,6 +45,7 @@ import {
   CircleDollarSign,
   CircleHelp,
   ClipboardCheck,
+  ClipboardList,
   CreditCard,
   FolderTree,
   FileSpreadsheet,
@@ -89,7 +90,7 @@ import { useHiddenRoutes } from '../feature-flags/gated-routes'
 import { settingsMaster } from '../features/settings/masters'
 import { i18next, LOCALES, LOCALE_LABELS, currentLocale, setLocale } from '../i18n'
 import { PageReloadProvider, usePageReload } from '../lib/pageReload'
-import { navigate, navigateFromClick } from '../lib/router'
+import { currentRoute, currentRouteSearchParams, navigate, navigateFromClick } from '../lib/router'
 import { isPageRefreshShortcut } from '../lib/shortcuts'
 import { showToast } from '../lib/toast'
 import { CourseBoardBrand } from './CourseBoardBrand'
@@ -109,6 +110,7 @@ export type NavigationRoute =
   | 'course-map'
   | 'golf/caddies'
   | 'golf/caddies/dispatch'
+  | 'golf/caddies/duties'
   | 'golf/caddies/attendance'
   | 'golf/caddies/shifts'
   | 'golf/caddies/payroll'
@@ -166,6 +168,7 @@ export const navigationSections: NavigationSection[] = [
       // board is a view of the same people, not a separate destination.
       { route: 'golf/caddies', icon: Users },
       { route: 'golf/caddies/dispatch', icon: ClipboardCheck },
+      { route: 'golf/caddies/duties', icon: ClipboardList },
       { route: 'golf/caddies/shifts', icon: CalendarDays },
       { route: 'golf/caddies/payroll', icon: CircleDollarSign },
     ],
@@ -306,6 +309,11 @@ function navigationItemAllowed(route: string, capabilities: EffectiveCapabilitie
 }
 
 function navigationTarget(item: NavigationItem, capabilities: EffectiveCapabilities) {
+  const dispatchPages = ['golf/caddies/dispatch', 'golf/caddies/duties']
+  const date = currentRouteSearchParams().get('date')
+  if (date && dispatchPages.includes(currentRoute()) && dispatchPages.includes(item.route)) {
+    return `${item.route}?date=${encodeURIComponent(date)}`
+  }
   if (item.route === 'cancellation-fees'
     && !capabilityRouteAllowed(item.route, capabilities)
     && capabilityRouteAllowed('cancellation-fees/new', capabilities)) {
@@ -317,7 +325,7 @@ function navigationTarget(item: NavigationItem, capabilities: EffectiveCapabilit
 // `attendance` is intentionally absent: it renders as a tab inside the
 // roster screen, so its route counts as the roster route for nav/title
 // purposes (see CADDIE_SUBVIEWS usage below).
-const CADDIE_SUBVIEWS = new Set(['dispatch', 'shifts', 'payroll'])
+const CADDIE_SUBVIEWS = new Set(['dispatch', 'duties', 'shifts', 'payroll'])
 
 function caddieRouteSegment(route: string) {
   if (!route.startsWith('golf/caddies/')) return null

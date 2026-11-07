@@ -3,6 +3,29 @@ import type { agent as source } from '../ja/agent'
 
 export const agent: DeepPartial<typeof source> = {
   chat: {
+
+  "activityRunning": "Working…",
+  "activityDone": "Activity ({{count}} completed)",
+  "activityErrors": "Activity ({{count}}, review needed)",
+  "operations": {
+    "read": "Reading {{resource}}",
+    "create": "Creating {{resource}}",
+    "update": "Updating {{resource}}",
+    "remove": "Deleting {{resource}}"
+  },
+  "resources": {
+    "reservations": "reservations",
+    "customers": "customers",
+    "settlement": "monthly totals",
+    "products": "play products",
+    "courses": "courses",
+    "caddies": "caddies",
+    "assignments": "caddie assignments",
+    "shifts": "shifts",
+    "budgets": "sales targets",
+    "information": "information"
+  }
+,
   breakdown: {
   "title": "Reservations by course — {{date}}",
   "source": "Course names and figures are displayed directly from the reservation ledger.",
@@ -44,7 +67,6 @@ export const agent: DeepPartial<typeof source> = {
   "send": "Send",
   "stop": "Stop",
   "awaiting": "Waiting for your confirmation",
-  "hint": "Review changes before they are applied.",
   "tooLong": "Your request is too long. Shorten it and try again.",
   "interrupted": "Stopped. Changes already applied have not been undone. Check the relevant screen and start a new conversation to continue.",
   "forbidden": "Agent access or AI availability could not be confirmed. Contact your administrator.",

@@ -35,11 +35,11 @@ function profile() {
   }
 }
 
-function renderPage() {
+function renderPage(initialView: 'dispatch' | 'duties' = 'dispatch') {
   return render(
     <I18nextProvider i18n={i18next}>
       <PageReloadProvider>
-        <CaddiesPage initialView="dispatch" />
+        <CaddiesPage initialView={initialView} />
       </PageReloadProvider>
     </I18nextProvider>,
   )
@@ -103,58 +103,25 @@ describe('CaddiesPage dispatch tabs', () => {
     vi.restoreAllMocks()
   })
 
-  it('starts on the unassigned workflow with secondary information collapsed', async () => {
+  it('shows the round ledger as a page without the dispatch tabs', async () => {
     renderPage()
-
-    const roundTab = await screen.findByRole('tab', { name: /ラウンド配置/ })
-    const dutyTab = screen.getByRole('tab', { name: /別業務/ })
-    const dateInput = screen.getByLabelText('対象の日')
-    expect(roundTab.getAttribute('aria-selected')).toBe('true')
-    expect(dutyTab.getAttribute('aria-selected')).toBe('false')
-    expect(roundTab.className).toContain('bg-primary')
-    expect(dutyTab.className).toContain('bg-background')
-    expect(roundTab.compareDocumentPosition(dateInput) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy()
-
-    expect(screen.queryByRole('heading', { name: '未配置を解消する' })).toBeNull()
     expect(await screen.findByRole('heading', { name: '組ごとのキャディ配置' })).toBeTruthy()
+    expect(screen.queryByRole('tab', { name: /ラウンド配置|別業務/ })).toBeNull()
     expect(screen.getByRole('button', { name: 'キャディを自動配置' })).toBeTruthy()
-    const assigned = document.querySelector('details.collapsible-section')
-    expect(assigned).toBeTruthy()
-    expect(assigned?.hasAttribute('open')).toBe(false)
     expect(screen.queryByRole('heading', { name: '別業務' })).toBeNull()
+    expect(document.querySelector('details.collapsible-section')?.hasAttribute('open')).toBe(false)
   })
 
-  it('switches to non-round work while keeping the operation date', async () => {
-    renderPage()
-
-    const dateInput = await screen.findByLabelText('対象の日') as HTMLInputElement
-    expect(dateInput.value).toBe(OPERATION_DATE)
-
-    fireEvent.click(await screen.findByRole('tab', { name: /別業務/ }))
-    await waitFor(() => {
-      expect(screen.getByRole('tab', { name: /別業務/ }).getAttribute('aria-selected')).toBe('true')
-    })
-
-    expect(screen.getByRole('heading', { name: '別業務' })).toBeTruthy()
-    expect(screen.queryByRole('heading', { name: /未配置/ })).toBeNull()
-    expect(screen.queryByRole('heading', { name: /自動.*配置/ })).toBeNull()
-    expect(screen.queryByRole('heading', { name: 'この日の割当' })).toBeNull()
+  it('opens duties directly and loads the selected month without the round ledger', async () => {
+    window.history.replaceState({}, '', `/golf/caddies/duties?date=${OPERATION_DATE}`)
+    renderPage('duties')
+    expect(await screen.findByRole('heading', { name: '別業務' })).toBeTruthy()
     expect((screen.getByLabelText('対象の日') as HTMLInputElement).value).toBe(OPERATION_DATE)
-    expect(new URL(window.location.href).searchParams.get('date')).toBe(OPERATION_DATE)
-    expect(new URL(window.location.href).searchParams.get('tab')).toBe('duties')
-  })
-
-  it('keeps keyboard navigation and the URL tab state in sync', async () => {
-    renderPage()
-
-    const roundTab = await screen.findByRole('tab', { name: /ラウンド配置/ })
-    fireEvent.keyDown(roundTab, { key: 'ArrowRight' })
-
-    await waitFor(() => {
-      expect(screen.getByRole('tab', { name: /別業務/ }).getAttribute('aria-selected')).toBe('true')
-      expect(new URL(window.location.href).searchParams.get('tab')).toBe('duties')
-    })
-    expect(screen.getByRole('tab', { name: /別業務/ }).getAttribute('tabindex')).toBe('0')
-    expect(roundTab.getAttribute('tabindex')).toBe('-1')
+    expect(screen.queryByRole('tab')).toBeNull()
+    expect(screen.queryByRole('button', { name: 'キャディを自動配置' })).toBeNull()
+    expect(api.json.mock.calls.some(([path]) => path.startsWith('/v1/course/tee-sheet'))).toBe(false)
+    expect(api.json.mock.calls.some(([path]) => path.includes('caddie-assignments?from=2026-08-01&to=2026-08-31'))).toBe(true)
+    fireEvent.change(screen.getByLabelText('対象の日'), { target: { value: '2026-09-01' } })
+    await waitFor(() => expect(api.json.mock.calls.some(([path]) => path.includes('caddie-duty-assignments?from=2026-09-01&to=2026-09-01'))).toBe(true))
   })
 })

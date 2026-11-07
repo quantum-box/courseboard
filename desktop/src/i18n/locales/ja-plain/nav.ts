@@ -51,6 +51,10 @@ export const nav: DeepPartial<typeof source> = {
       label: 'キャディの担当決め',
       description: 'だれがどの組につくかを決めます',
     },
+    'golf/caddies/duties': {
+      label: 'キャディの別業務',
+      description: 'コース整備や練習場などの担当を決める',
+    },
     'golf/caddies/attendance': {
       label: '出勤の記録',
       description: '出勤・退勤の記録と、その日の実績',

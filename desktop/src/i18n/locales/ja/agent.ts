@@ -1,5 +1,28 @@
 export const agent = {
   chat: {
+
+  "activityRunning": "作業中…",
+  "activityDone": "作業履歴（{{count}}件完了）",
+  "activityErrors": "作業履歴（{{count}}件・要確認）",
+  "operations": {
+    "read": "{{resource}}を確認しています",
+    "create": "{{resource}}を登録しています",
+    "update": "{{resource}}を更新しています",
+    "remove": "{{resource}}を削除しています"
+  },
+  "resources": {
+    "reservations": "予約",
+    "customers": "顧客情報",
+    "settlement": "月次集計",
+    "products": "プレー商品",
+    "courses": "コース",
+    "caddies": "キャディ情報",
+    "assignments": "キャディの配置",
+    "shifts": "シフト",
+    "budgets": "売上目標",
+    "information": "情報"
+  }
+,
   breakdown: {
   "title": "{{date}}のコース別予約内訳",
   "source": "予約台帳から取得した名称・数値をそのまま表示しています。",
@@ -41,7 +64,6 @@ export const agent = {
   "send": "送信",
   "stop": "中断",
   "awaiting": "変更の確認を待っています",
-  "hint": "データの更新前に、内容を確認できます。",
   "tooLong": "依頼文が長すぎます。短くして送信してください。",
   "interrupted": "処理を中断しました。実行済みの変更は取り消されません。必要に応じて対象の画面で確認し、新しい会話から再開してください。",
   "forbidden": "エージェントを利用する権限またはAIの利用設定を確認できませんでした。管理者に確認してください。",

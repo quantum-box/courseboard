@@ -336,6 +336,22 @@ test.describe('キャディ名簿', () => {
     await expect(ledger.locator('tr.is-booked')).toHaveCount(count)
   })
 
+  test('別業務を別ページで開き、日付を引き継いで台帳へ戻る', async ({ page }) => {
+    await page.goto(`/golf/caddies/dispatch?tab=duties&date=${D}`)
+    await expect(page).toHaveURL(new RegExp(`/golf/caddies/duties\\?date=${D}`))
+    await expect(page.getByRole('heading', { name: '別業務', exact: true })).toBeVisible()
+    await expect(page.getByRole('tablist', { name: '配置の種類' })).toHaveCount(0)
+    const sidebar = page.locator('.courseboard-sidebar').first()
+    await sidebar.getByRole('button', { name: 'キャディの配置', exact: true }).click()
+    await expect(page.getByRole('region', { name: 'キャディ配置の予約台帳' })).toBeVisible()
+    await expect(page.getByLabel('対象の日')).toHaveValue(D)
+    await sidebar.getByRole('button', { name: 'キャディの別業務', exact: true }).click()
+    await expect(page.getByRole('heading', { name: '別業務', exact: true })).toBeVisible()
+    await expect(page.getByLabel('対象の日')).toHaveValue(D)
+    await page.reload()
+    await expect(page.getByRole('heading', { name: '別業務', exact: true })).toBeVisible()
+  })
+
   test('台帳から自動配置を開き、未配置の理由を確認して閉じる', async ({ page }) => {
     await page.goto(`/golf/caddies/dispatch?date=${D}`)
     await expect(page.getByRole('region', { name: 'キャディ配置の予約台帳' })).toBeVisible()

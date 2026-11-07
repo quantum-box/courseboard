@@ -120,6 +120,7 @@ const NON_FEE_STARTUP_ROUTES = [
   'golf/courses',
   'golf/caddies',
   'golf/caddies/dispatch',
+  'golf/caddies/duties',
   'golf/caddies/shifts',
   'golf/caddies/payroll',
   'staff',
@@ -212,6 +213,9 @@ export function routeActionRequirement(route: string): RouteActionRequirement | 
       FIELD_ACTIONS.listCaddieAvailability,
       FIELD_ACTIONS.listCourses,
     )
+  }
+  if (route === 'golf/caddies/duties') {
+    return allRequirements(FIELD_ACTIONS.listCaddies, FIELD_ACTIONS.listCaddieAssignments)
   }
   if (route === 'golf/caddies/dispatch') {
     return allRequirements(

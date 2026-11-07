@@ -6,7 +6,11 @@ import { afterEach, expect, it, vi } from 'vitest'
 import { i18next } from './i18n'
 import App from './App'
 const state = vi.hoisted(() => ({ gate: 'hidden', route: 'golf/data-imports/courseboardReservationReports/documents' }))
-vi.mock('./lib/router', () => ({ useRoute: () => state.route, navigate: vi.fn() }))
+vi.mock('./lib/router', async importOriginal => ({
+  ...await importOriginal<typeof import('./lib/router')>(),
+  useRoute: () => state.route,
+  navigate: vi.fn(),
+}))
 vi.mock('./feature-flags/gated-routes', () => ({ useRouteGate: () => state.gate }))
 vi.mock('./feature-flags/FeatureFlags', () => ({ FeatureFlagProvider: ({ children }: { children: ReactNode }) => children }))
 vi.mock('./feature-delivery/FeatureDelivery', () => ({

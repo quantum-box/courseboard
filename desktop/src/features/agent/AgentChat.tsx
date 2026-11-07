@@ -9,11 +9,12 @@ import { ApiError, today } from '../../api'
 import { useTenantTimezone } from '../../context/TenantTimezoneProvider'
 import { getReservationStatus, reservationStatusForModel, type ReservationStatus } from './reservation-status'
 import { ReservationStatusCard } from './ReservationStatusCard'
+import { operationLabel } from './operation-label'
 import { Notice } from '../../components/Page'
 import { agentSessionClient, callFieldTool, demoEvents, describeOperation, executeOperation, isAgentDemo, loadCatalog, searchOperations, toolArgs, type Catalog, type FieldContext, type Operation, type ToolArgs } from './chat-api'
 import './agent.css'
 
-type Entry = { id: string; role: 'user' | 'assistant' | 'activity' | 'reservation'; text: string; reservation?: ReservationStatus; state?: 'running' | 'ok' | 'error' }
+type Entry = { id: string; role: 'user' | 'assistant' | 'activity' | 'reservation'; text: string; reservation?: ReservationStatus; state?: 'running' | 'ok' | 'error'; turnId?: string }
 type Pending = { operation: Pick<Operation, 'method' | 'path' | 'summary'>; args: ToolArgs; decide: (allow: boolean) => void }
 
 export function AgentChat() {
@@ -22,6 +23,7 @@ export function AgentChat() {
   const [draft, setDraft] = useState('')
   const [entries, setEntries] = useState<Entry[]>([])
   const [busy, setBusy] = useState(false)
+  const [activeTurnId, setActiveTurnId] = useState<string | null>(null)
   const [error, setError] = useState('')
   const [needsNew, setNeedsNew] = useState(false)
   const [pending, setPending] = useState<Pending | null>(null)
@@ -60,12 +62,15 @@ export function AgentChat() {
     running.current = controller
     const timeout = window.setTimeout(() => controller.abort(), 10 * 60_000)
     const signal = controller.signal
+    const turnId = crypto.randomUUID()
+    setActiveTurnId(turnId)
     setBusy(true); setError(''); setDraft('')
-    setEntries(current => [...current, { id: crypto.randomUUID(), role: 'user', text }])
+    setEntries(current => [...current, { id: turnId, role: 'user', text }])
     let hasReservationResult = false
     let hasOtherBusinessExecution = false
     const generated = new Map<string, Entry>()
     const append = (entry: Entry) => {
+      entry = { ...entry, turnId }
       if (entry.role === 'assistant') generated.set(entry.id, entry)
       if (!signal.aborted && (entry.role !== 'assistant' || !hasReservationResult)) setEntries(current => [...current, entry])
     }
@@ -73,7 +78,7 @@ export function AgentChat() {
       hasReservationResult = true
       if (!signal.aborted) setEntries(current => [
         ...current.filter(entry => !generated.has(entry.id)),
-        { id: crypto.randomUUID(), role: 'reservation', text: '', reservation: status },
+        { id: crypto.randomUUID(), role: 'reservation', text: '', reservation: status, turnId },
       ])
       return reservationStatusForModel(status)
     }
@@ -148,7 +153,7 @@ export function AgentChat() {
               } else if (name === 'courseboard_execute_operation') {
                 if (!args.operationId || !described.has(args.operationId)) throw new Error('Describe the operation before executing')
                 const operation = describeOperation(catalog, args.operationId).operation
-                update(activity, { text: operation.summary || operation.description || t('chat.working') })
+                update(activity, { text: operationLabel(operation, t) })
                 if (operation.method !== 'GET' && !await confirm(operation, args, signal)) {
                   result = { cancelled: true, message: 'The user declined this change. Do not execute or retry it.' }
                   update(activity, { text: t('chat.declined') })
@@ -165,7 +170,7 @@ export function AgentChat() {
             if (name === 'field_execute_operation') {
               const operation = args.operationId ? fieldContext.described?.[args.operationId] : null
               if (!operation) throw new Error('Describe the operation before executing')
-              update(activity, { text: operation.summary || t('chat.working') })
+              update(activity, { text: operationLabel(operation, t) })
               if (operation.method !== 'GET' && !await confirm(operation, args, signal)) {
                 await sdk.submitToolResult(activeSession!, { tool_id: toolId, is_error: true, result: 'The user declined this change. Do not execute or retry it.' }, signal)
                 update(activity, { text: t('chat.declined'), state: 'ok' })
@@ -177,9 +182,10 @@ export function AgentChat() {
             const answer = await callFieldTool(activeSession!, toolId, name, args, fieldContext, signal)
             fieldContext = answer.context
             failed = answer.event.state === 'error'
-            update(activity, { text: answer.event.operation && typeof answer.event.operation === 'object'
-              ? String((answer.event.operation as { summary?: string }).summary || t('chat.working'))
-              : name === 'field_search_operations' ? t('chat.searching') : t('chat.describing') })
+            update(activity, { text: name === 'field_search_operations' ? t('chat.searching')
+              : name === 'field_describe_operation' ? t('chat.describing')
+                : operationLabel({ ...fieldContext.described?.[args.operationId ?? ''],
+                  ...(answer.event.operation as Partial<Operation> | undefined) }, t) })
           } else {
             throw new Error('Unsupported tool')
           }
@@ -208,8 +214,16 @@ export function AgentChat() {
     } finally {
       clearTimeout(timeout)
       if (running.current === controller) running.current = null
-      setPending(null); setBusy(false)
+      setPending(null); setBusy(false); setActiveTurnId(null)
     }
+  }
+
+  const activities = new Map<string, Entry[]>()
+  for (const entry of entries) {
+    if (entry.role !== 'activity' || !entry.turnId) continue
+    const group = activities.get(entry.turnId) ?? []
+    group.push(entry)
+    activities.set(entry.turnId, group)
   }
 
   return <section className="agent-chat" aria-label={t('chat.title')}>
@@ -225,11 +239,13 @@ export function AgentChat() {
       {entries.map(entry => entry.role === 'reservation' && entry.reservation
         ? <ReservationStatusCard key={entry.id} status={entry.reservation} />
         : entry.role === 'activity'
-        ? <p className="agent-activity" key={entry.id} data-state={entry.state}>{entry.state === 'running' ? '…' : entry.state === 'error' ? '!' : '✓'} {entry.text}</p>
+        ? activities.get(entry.turnId ?? '')?.[0]?.id === entry.id
+          ? <ActivityLog key={entry.id} entries={activities.get(entry.turnId!)!} running={activeTurnId === entry.turnId} />
+          : null
         : <article key={entry.id} className={`agent-message agent-message-${entry.role}`}><strong>{t(entry.role === 'user' ? 'chat.you' : 'chat.assistant')}</strong><div className="agent-markdown"><Markdown remarkPlugins={[remarkGfm]} components={{ a: ({ children, href }) => <a href={href} target="_blank" rel="noopener noreferrer">{children}</a>, img: ({ alt }) => <span>{alt}</span> }}>{entry.text}</Markdown></div></article>)}
       {pending ? <div className="agent-confirm" role="region" aria-label={t('chat.confirmTitle')}>
         <h2>{t('chat.confirmTitle')}</h2>
-        <p>{pending.args.confirmation || pending.operation.summary || t('chat.change')}</p>
+        <p>{pending.args.confirmation || operationLabel(pending.operation, t)}</p>
         <p>{t('chat.confirmDescription')}</p>
         <dl>{confirmationFields(pending.args).map(([key, value], index) => <div key={`${key}:${index}`}><dt>{t(`chat.fields.${key}`, { defaultValue: key })}</dt><dd>{value}</dd></div>)}</dl>
         <div><Button variant="primary" onClick={() => pending.decide(true)}>{t('chat.approve')}</Button><Button onClick={() => pending.decide(false)}>{t('chat.reject')}</Button></div>
@@ -238,13 +254,47 @@ export function AgentChat() {
     </div>
     {error ? <Notice tone="danger">{error}</Notice> : null}
     <form className="agent-composer" onSubmit={event => void send(event)}>
-      <label htmlFor="agent-prompt">{t('chat.prompt')}</label>
-      <textarea ref={composer} id="agent-prompt" value={draft} onChange={event => setDraft(event.target.value)} disabled={busy || needsNew} rows={3} placeholder={t('chat.placeholder')} />
-      <div><span>{busy ? pending ? t('chat.awaiting') : t('chat.working') : t('chat.hint')}</span>
-        {busy ? <Button type="button" onClick={() => running.current?.abort()}><Square aria-hidden="true" />{t('chat.stop')}</Button> : <Button type="submit" variant="primary" disabled={!draft.trim() || needsNew}><Send aria-hidden="true" />{t('chat.send')}</Button>}
+      <label className="sr-only" htmlFor="agent-prompt">{t('chat.prompt')}</label>
+      <div className="agent-composer-input">
+        <textarea
+          ref={composer}
+          id="agent-prompt"
+          value={draft}
+          onChange={event => setDraft(event.target.value)}
+          onKeyDown={event => {
+            if (event.key === 'Enter' && (event.metaKey || event.ctrlKey)
+              && !event.nativeEvent.isComposing && event.nativeEvent.keyCode !== 229) {
+              event.preventDefault()
+              event.currentTarget.form?.requestSubmit()
+            }
+          }}
+          aria-keyshortcuts="Meta+Enter Control+Enter"
+          disabled={busy || needsNew}
+          rows={3}
+          placeholder={t('chat.placeholder')}
+        />
+        <div className="agent-composer-actions">
+          {busy ? <Button type="button" onClick={() => running.current?.abort()}><Square aria-hidden="true" />{t('chat.stop')}</Button>
+            : <Button type="submit" variant="primary" disabled={!draft.trim() || needsNew}><Send aria-hidden="true" />{t('chat.send')}</Button>}
+        </div>
       </div>
     </form>
   </section>
+}
+
+function ActivityLog({ entries, running }: { entries: Entry[]; running: boolean }) {
+  const { t } = useTranslation('agent')
+  const [expanded, setExpanded] = useState(running)
+  useEffect(() => setExpanded(running), [running])
+  const hasError = entries.some(entry => entry.state === 'error')
+  return <details className="agent-activity-log" open={expanded}
+    onToggle={event => setExpanded(event.currentTarget.open)}>
+    <summary>{running ? t('chat.activityRunning')
+      : t(hasError ? 'chat.activityErrors' : 'chat.activityDone', { count: entries.length })}</summary>
+    <ul>{entries.map(entry => <li className="agent-activity" key={entry.id} data-state={entry.state}>
+      <span aria-hidden="true">{entry.state === 'running' ? '…' : entry.state === 'error' ? '!' : '✓'}</span> {entry.text}
+    </li>)}</ul>
+  </details>
 }
 
 /** Show actual submitted values as plain text; model-generated confirmation copy cannot hide them. */
