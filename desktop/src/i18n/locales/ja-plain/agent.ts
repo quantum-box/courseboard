@@ -3,6 +3,9 @@ import type { agent as source } from '../ja/agent'
 
 export const agent: DeepPartial<typeof source> = {
   chat: {
+  reservationTotals: '予約台帳 {{date}}：{{groups}}組・{{players}}名',
+  reservationIncomplete: '予約台帳の一部を取得できませんでした。全件の数は確定できません。',
+  reservationStatus: '予約台帳の予約数と人数を調べています',
   "title": "Courseboard エージェント",
   "description": "予約やお客様の情報、売上について、普段の言葉で頼めます。",
   "new": "新しい会話",

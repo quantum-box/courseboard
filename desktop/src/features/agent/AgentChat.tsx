@@ -6,6 +6,8 @@ import Markdown from 'react-markdown'
 import remarkGfm from 'remark-gfm'
 import { toolResultText } from '@tachyon-sdk/agent'
 import { ApiError, today } from '../../api'
+import { useTenantTimezone } from '../../context/TenantTimezoneProvider'
+import { getReservationStatus } from './reservation-status'
 import { Notice } from '../../components/Page'
 import { agentSessionClient, callFieldTool, demoEvents, describeOperation, executeOperation, isAgentDemo, loadCatalog, searchOperations, toolArgs, type Catalog, type FieldContext, type Operation, type ToolArgs } from './chat-api'
 import './agent.css'
@@ -15,6 +17,7 @@ type Pending = { operation: Pick<Operation, 'method' | 'path' | 'summary'>; args
 
 export function AgentChat() {
   const { t, i18n } = useTranslation('agent')
+  const timezone = useTenantTimezone()
   const [draft, setDraft] = useState('')
   const [entries, setEntries] = useState<Entry[]>([])
   const [busy, setBusy] = useState(false)
@@ -74,7 +77,8 @@ export function AgentChat() {
       const activeSession = session.current
       const events = demo ? demoEvents(signal) : sdk.execute(activeSession!, {
         task: text,
-        page: `CourseBoard /agent; date=${today()}; language=${i18n.language}`,
+        reservation_status: true,
+        page: `CourseBoard /agent; date=${today(timezone)}; timezone=${timezone}; language=${i18n.language}`,
       }, signal)
       for await (const event of events) {
         signal.throwIfAborted()
@@ -104,27 +108,36 @@ export function AgentChat() {
         try {
           const args = toolArgs(event.args)
           if (name.startsWith('courseboard_')) {
-            catalog ??= await loadCatalog(signal)
-            if (name === 'courseboard_search_operations') {
-              if (typeof args.query !== 'string') throw new Error('Search query required')
-              result = searchOperations(catalog, args.query)
-              update(activity, { text: t('chat.searching') })
-            } else if (name === 'courseboard_describe_operation') {
-              if (!args.operationId) throw new Error('Operation required')
-              result = describeOperation(catalog, args.operationId)
-              described.add(args.operationId)
-              update(activity, { text: t('chat.describing') })
-            } else if (name === 'courseboard_execute_operation') {
-              if (!args.operationId || !described.has(args.operationId)) throw new Error('Describe the operation before executing')
-              const operation = describeOperation(catalog, args.operationId).operation
-              update(activity, { text: operation.summary || operation.description || t('chat.working') })
-              if (operation.method !== 'GET' && !await confirm(operation, args, signal)) {
-                result = { cancelled: true, message: 'The user declined this change. Do not execute or retry it.' }
-                update(activity, { text: t('chat.declined') })
-              } else {
-                result = await executeOperation(operation, args, signal)
-              }
-            } else throw new Error('Unknown CourseBoard tool')
+            if (name === 'courseboard_get_reservation_status') {
+              update(activity, { text: t('chat.reservationStatus') })
+              const status = await getReservationStatus(args, signal, today(timezone))
+              result = status
+              update(activity, { text: status.reservationTotals
+                ? t('chat.reservationTotals', { date: status.date, groups: status.reservationTotals.groups, players: status.reservationTotals.players })
+                : t('chat.reservationIncomplete') })
+            } else {
+              catalog ??= await loadCatalog(signal)
+              if (name === 'courseboard_search_operations') {
+                if (typeof args.query !== 'string') throw new Error('Search query required')
+                result = searchOperations(catalog, args.query)
+                update(activity, { text: t('chat.searching') })
+              } else if (name === 'courseboard_describe_operation') {
+                if (!args.operationId) throw new Error('Operation required')
+                result = describeOperation(catalog, args.operationId)
+                described.add(args.operationId)
+                update(activity, { text: t('chat.describing') })
+              } else if (name === 'courseboard_execute_operation') {
+                if (!args.operationId || !described.has(args.operationId)) throw new Error('Describe the operation before executing')
+                const operation = describeOperation(catalog, args.operationId).operation
+                update(activity, { text: operation.summary || operation.description || t('chat.working') })
+                if (operation.method !== 'GET' && !await confirm(operation, args, signal)) {
+                  result = { cancelled: true, message: 'The user declined this change. Do not execute or retry it.' }
+                  update(activity, { text: t('chat.declined') })
+                } else {
+                  result = await executeOperation(operation, args, signal)
+                }
+              } else throw new Error('Unknown CourseBoard tool')
+            }
             await sdk.submitToolResult(activeSession!, { tool_id: toolId, is_error: false, result: toolResultText(result ?? { ok: true }, 48_000, 'Result is incomplete. Narrow the query or fetch all pages before computing totals.') }, signal)
           } else if (['field_search_operations', 'field_describe_operation', 'field_execute_operation'].includes(name)) {
             if (name === 'field_execute_operation') {

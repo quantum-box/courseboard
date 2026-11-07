@@ -1,5 +1,8 @@
 export const agent = {
   chat: {
+  reservationTotals: '予約台帳 {{date}}：{{groups}}組・{{players}}名',
+  reservationIncomplete: '予約台帳を完全には取得できませんでした',
+  reservationStatus: '予約台帳から予約状況を確認しています',
   "title": "Courseboard エージェント",
   "description": "予約・顧客・集計について、自然な言葉で依頼できます。",
   "new": "新しい会話",

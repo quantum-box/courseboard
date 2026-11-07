@@ -2,6 +2,8 @@ import { TachyonAgentSessionClient, type AgentSessionEvent } from '@tachyon-sdk/
 import { courseboardApiJson, courseboardApiStream, operatorApiBaseUrl } from '../../api'
 import { isMockFieldDataEnabled } from '../../dev/mockFieldApi'
 import { i18next } from '../../i18n'
+import { reservationStatusFromLedger } from './reservation-status'
+import type { TeeLedgerResponse } from '../golf/ledger/models'
 
 const ROOT = '/v1/course/agent'
 /** Lambda buffers SSE; production uses the same edge-transport pattern as Field. */
@@ -10,7 +12,7 @@ export function agentStreamBaseUrl(base = operatorApiBaseUrl(), stream = import.
 }
 export type Operation = { operationId: string; method: string; path: string; summary?: string | null; description?: string | null; parameters?: { name: string; in: string; required?: boolean; schema?: unknown }[] | null; requestBody?: unknown }
 export type Catalog = { operations: Operation[]; schemas: Record<string, unknown> }
-export type ToolArgs = { operationId?: string; query?: Record<string, unknown> | string; pathParams?: Record<string, unknown>; body?: unknown; confirmation?: string }
+export type ToolArgs = { date?: string; golfCourseIds?: string[]; operationId?: string; query?: Record<string, unknown> | string; pathParams?: Record<string, unknown>; body?: unknown; confirmation?: string }
 export type FieldContext = { described?: Record<string, { method: string; path: string; summary?: string }>; [key: string]: unknown }
 
 export function agentSessionClient() {
@@ -37,8 +39,11 @@ export function toolArgs(raw: unknown): ToolArgs {
 }
 export function searchOperations(catalog: Catalog, query: string) {
   const words = query.toLowerCase().split(/\s+/).filter(Boolean)
-  const scored = catalog.operations.map(op => {
-    const text = `${op.operationId} ${op.path} ${op.summary ?? ''} ${op.description ?? ''}`.toLowerCase()
+  const explicitlyImported = /import|取り込|取込|report[- ]entries/i.test(query)
+  const scored = catalog.operations.filter(op => explicitlyImported || op.path !== '/v1/course/reservation-report-entries').map(op => {
+    const purpose = ['/v1/course/tee-ledger', '/v1/course/tee-sheet'].includes(op.path)
+      ? 'reservation reservations booking bookings daily status 予約 予約状況 予約台帳' : ''
+    const text = `${purpose} ${op.operationId} ${op.path} ${op.summary ?? ''} ${op.description ?? ''}`.toLowerCase()
     return { op, score: words.filter(word => text.includes(word)).length }
   }).filter(item => item.score || !words.length).sort((a, b) => b.score - a.score)
   return { operations: scored.slice(0, 20).map(({ op }) => ({ operationId: op.operationId, method: op.method, path: op.path, summary: op.summary ?? op.description })), matched: scored.length }
@@ -85,7 +90,16 @@ export function operationRequest(operation: Operation, args: ToolArgs) {
 }
 export async function executeOperation(operation: Operation, args: ToolArgs, signal: AbortSignal) {
   const request = operationRequest(operation, args)
-  return courseboardApiJson(request.path, { ...request.init, signal })
+  const result = await courseboardApiJson(request.path, { ...request.init, signal })
+  if (operation.method === 'GET' && operation.path === '/v1/course/tee-ledger') {
+    const query = new URL(request.path, 'https://courseboard.invalid').searchParams
+    const courseIds = [query.get('golfCourseIds'), query.get('golfCourseId')].filter(Boolean).flatMap(ids => ids!.split(','))
+    return reservationStatusFromLedger(result as TeeLedgerResponse, query.get('date') ?? '', courseIds)
+  }
+  if (operation.path === '/v1/course/reservation-report-entries') {
+    return { source: operation.path, scope: 'imported reservation report rows only', authoritativeForReservationCounts: false, guidance: 'Empty imported report rows do not mean zero live reservations. Use courseboard_get_reservation_status for reservation counts.', data: result }
+  }
+  return result
 }
 export async function callFieldTool(session: string, tool_id: string, tool_name: string, args: ToolArgs, context: FieldContext, signal: AbortSignal) {
   return courseboardApiJson<{ context: FieldContext; event: AgentSessionEvent }>(`${ROOT}/sessions/${encodeURIComponent(session)}/tool-call`, {
