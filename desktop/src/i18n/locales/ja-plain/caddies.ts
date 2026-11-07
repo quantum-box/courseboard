@@ -130,7 +130,26 @@ export const caddies: DeepPartial<typeof source> = {
     },
     note: '午前に出られる人 {{morning}}人 · 午後に出られる人 {{afternoon}}人',
   },
+  releaseDay: {
+    open: 'この日の割り当てを解除',
+    title: '{{date}}の割り当てを解除',
+    description: 'まだ始まっていない{{n}}件を、担当なしに戻します。予約とシフトは残ります。',
+    failed: '{{n}}件を解除できませんでした。もう一度試せます。',
+    done: '{{date}}の割り当てを解除しました',
+    busy: '解除中…',
+    confirm: '{{n}}件の割り当てを解除',
+  },
   autoAssign: {
+    booking: {
+      open: '{{time}} {{name}} の予約のくわしい内容',
+      group: '{{n}}組',
+      playersCount: '{{n}}名',
+      number: '予約番号',
+      product: 'プレー商品',
+      organizer: '幹事',
+      players: '参加する人',
+      unnamed: '名前未入力',
+    },
     unavailableDetails: '誰が空いていないか（{{n}}人）',
     unavailableMissing: '一人ずつの理由を取得できませんでした。',
     unavailableReasons: {

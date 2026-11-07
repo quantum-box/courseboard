@@ -83,6 +83,7 @@ mod reception_ocr_job;
 mod record_reception_customer_values;
 mod record_visit_checkin;
 mod refresh_customer_summaries;
+mod release_day_caddie_assignments;
 mod replace_caddie_memberships;
 mod replace_product_slots;
 pub(crate) mod reservation_report_import;
@@ -250,3 +251,7 @@ pub use update_reservation_policy::UpdateReservationPolicyUseCase;
 pub use upsert_caddie_availability::UpsertCaddieAvailabilityUseCase;
 pub use upsert_daily_budget::UpsertDailyBudgetUseCase;
 pub use upsert_reservation_product::UpsertReservationProductUseCase;
+
+pub use release_day_caddie_assignments::{
+    ReleaseDayAssignmentsResult, ReleaseDayCaddieAssignmentsUseCase,
+};

@@ -139,7 +139,26 @@ export const caddies: DeepPartial<typeof source> = {
     },
     note: 'Morning {{morning}} · Afternoon {{afternoon}}',
   },
+  releaseDay: {
+    open: 'Clear day’s assignments',
+    title: 'Clear assignments for {{date}}',
+    description: 'Clear {{n}} unstarted assignments. Reservations and shifts stay; started and completed rounds are excluded.',
+    failed: 'Could not clear {{n}} assignments. Retry the remaining items.',
+    done: 'Cleared assignments for {{date}}',
+    busy: 'Clearing…',
+    confirm: 'Clear {{n}} assignments',
+  },
   autoAssign: {
+    booking: {
+      open: 'Booking details: {{time}} {{name}}',
+      group: 'Group {{n}}',
+      playersCount: '{{n}} players',
+      number: 'Reservation number',
+      product: 'Play product',
+      organizer: 'Organizer',
+      players: 'Players',
+      unnamed: 'Name not entered',
+    },
     unavailableDetails: 'Reasons by caddie ({{n}})',
     unavailableMissing: 'Caddie-level information is unavailable.',
     unavailableReasons: {

@@ -141,7 +141,26 @@ export const caddies = {
     },
     note: '午前に出られる {{morning}}人 · 午後に出られる {{afternoon}}人',
   },
+  releaseDay: {
+    open: 'この日の割り当てを解除',
+    title: '{{date}}の割り当てを解除',
+    description: '未開始の{{n}}件を解除して、未配置に戻します。予約とシフトは残り、開始済み・完了済みは対象外です。',
+    failed: '{{n}}件を解除できませんでした。残った対象を確認して再実行できます。',
+    done: '{{date}}の割り当てを解除しました',
+    busy: '解除中…',
+    confirm: '{{n}}件の割り当てを解除',
+  },
   autoAssign: {
+    booking: {
+      open: '{{time}} {{name}} の予約詳細',
+      group: '{{n}}組',
+      playersCount: '{{n}}名',
+      number: '予約番号',
+      product: 'プレー商品',
+      organizer: '幹事',
+      players: 'プレイヤー',
+      unnamed: '名前未入力',
+    },
     unavailableDetails: '候補者ごとの理由（{{n}}人）',
     unavailableMissing: '候補者ごとの情報を取得できませんでした。',
     unavailableReasons: {

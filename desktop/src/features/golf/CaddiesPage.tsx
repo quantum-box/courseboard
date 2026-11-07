@@ -91,6 +91,7 @@ import { CaddieDutiesPanel } from './CaddieDutyBoard'
 import { CaddieFeeAlignmentSheet } from './CaddieFeeAlignmentSheet'
 import { ReassignRoundSheet } from './ReassignRoundSheet'
 import { CaddieLink } from './CaddieLink'
+import { AutoAssignReservationRow } from './AutoAssignReservationRow'
 import { roundIsStillOn, unassignedCaddieRounds } from './caddieRoundCoverage'
 import {
   employmentLabel,
@@ -1081,8 +1082,12 @@ function DispatchView({
           horizon={horizon}
           onHorizonChange={setHorizon}
           onChanged={onChanged}
-          toolbar={<AutoAssignPanel rounds={teeSheet.data?.items ?? []} date={date}
-            onChanged={onChanged} setFlash={setFlash} />}
+          toolbar={<>
+            <AutoAssignPanel rounds={teeSheet.data?.items ?? []} date={date}
+              onChanged={onChanged} setFlash={setFlash} />
+            <ReleaseDayAssignments date={date} assignments={dayAssignments} profiles={profiles}
+              loading={assignmentsResource.loading || Boolean(assignmentsResource.error)} onChanged={onChanged} />
+          </>}
         />
 
         <CollapsibleSection
@@ -1530,6 +1535,76 @@ function ReinforcementSheet({
   )
 }
 
+export function ReleaseDayAssignments({ date, assignments, profiles, loading, onChanged }: {
+  date: string
+  assignments: CaddieAssignment[]
+  profiles: CaddieProfile[]
+  loading?: boolean
+  onChanged: () => void
+}) {
+  const { t } = useTranslation(['caddies', 'common'])
+  const timezone = useTenantTimezone()
+  const [pending, setPending] = useState<CaddieAssignment[] | null>(null)
+  const [targetDate, setTargetDate] = useState(date)
+  const [busy, setBusy] = useState(false)
+  const [failure, setFailure] = useState<string | null>(null)
+  const eligible = assignments.filter(item => dateKey(item.scheduledAt, timezone) === date
+    && (item.canonicalStatus ?? item.status) === 'assigned' && item.reservationId)
+
+  async function release() {
+    if (!pending || busy) return
+    setBusy(true)
+    setFailure(null)
+    try {
+      const result = await courseboardApiJson<{
+        releasedAssignmentIds: string[]
+        failed: { assignmentId: string; message: string }[]
+      }>(`${COURSE_API}/caddie-assignments/release-day`, request('POST', { date: targetDate }))
+      onChanged()
+      if (result.failed.length > 0) {
+        const failedIds = new Set(result.failed.map(item => item.assignmentId))
+        setPending(pending.filter(item => failedIds.has(item.id)))
+        setFailure(t('caddies:releaseDay.failed', { n: String(result.failed.length) }))
+      } else {
+        setPending(null)
+        showToast({ tone: 'success', message: t('caddies:releaseDay.done', { date: targetDate }) })
+      }
+    } catch {
+      setFailure(t('caddies:releaseDay.failed', { n: String(pending.length) }))
+    } finally {
+      setBusy(false)
+    }
+  }
+
+  return <>
+    <Button type="button" variant="secondary" size="sm" disabled={loading || eligible.length === 0}
+      onClick={() => { setTargetDate(date); setPending(eligible); setFailure(null) }}>
+      <XCircle />{t('caddies:releaseDay.open')}
+    </Button>
+    <Dialog open={pending !== null} onOpenChange={open => { if (!open && !busy) setPending(null) }}>
+      <DialogContent className="flex max-h-[calc(100dvh-2rem)] max-w-xl flex-col overflow-hidden">
+        <DialogHeader>
+          <DialogTitle>{t('caddies:releaseDay.title', { date: targetDate })}</DialogTitle>
+          <DialogDescription>{t('caddies:releaseDay.description', { n: String(pending?.length ?? 0) })}</DialogDescription>
+        </DialogHeader>
+        {failure ? <Notice tone="danger">{failure}</Notice> : null}
+        <div className="min-h-0 overflow-y-auto divide-y divide-border">
+          {pending?.map(item => <div key={item.id} className="flex items-center justify-between gap-3 py-2 text-sm">
+            <span>{formatDateTime(item.scheduledAt, timezone)} · {item.roundReference || item.reservationId}</span>
+            <span>{profiles.find(profile => profile.id === item.caddieProfileId)?.displayName ?? item.caddieProfileId}</span>
+          </div>)}
+        </div>
+        <DialogFooter>
+          <Button type="button" variant="secondary" disabled={busy} onClick={() => setPending(null)}>{t('common:action.cancel')}</Button>
+          <Button type="button" variant="primary" disabled={busy || !pending?.length} onClick={() => void release()}>
+            {busy ? t('caddies:releaseDay.busy') : t('caddies:releaseDay.confirm', { n: String(pending?.length ?? 0) })}
+          </Button>
+        </DialogFooter>
+      </DialogContent>
+    </Dialog>
+  </>
+}
+
 export function AutoAssignPanel({
   date,
   rounds = [],
@@ -1666,11 +1741,9 @@ export function AutoAssignPanel({
                   <div className="divide-y divide-border rounded-md border border-border">
                     {plan.assigned.map(item => (
                       <div key={`${item.reservationId}-${item.caddieProfileId}`} className="bg-background px-3 py-2">
-                        <div className="flex flex-wrap items-center gap-x-3 gap-y-1">
-                          <time className="w-24 shrink-0 text-xs tabular-nums text-muted-foreground">
-                            {formatDateTime(item.scheduledAt, timezone)}
-                          </time>
-                          <span className="flex-1 text-sm font-medium text-foreground">{item.caddieDisplayName}</span>
+                        <AutoAssignReservationRow round={rounds.find(round => round.id === item.reservationId)}
+                          timeLabel={formatDateTime(item.scheduledAt, timezone)}>
+                          <span className="auto-assign-booking-caddie"><span aria-hidden="true">→ </span><span>{item.caddieDisplayName}</span></span>
                           <div className="flex flex-wrap items-center gap-1">
                             <Badge variant="accent">{t('caddies:autoAssign.candidate')}</Badge>
                             {(() => {
@@ -1682,7 +1755,7 @@ export function AutoAssignPanel({
                               ) : null
                             })()}
                           </div>
-                        </div>
+                        </AutoAssignReservationRow>
                         {item.rationale.length > 0 ? <RationaleText rationale={item.rationale} /> : null}
                       </div>
                     ))}

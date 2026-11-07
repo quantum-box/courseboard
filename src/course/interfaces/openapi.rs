@@ -154,6 +154,7 @@ impl Modify for SecurityAddon {
         http_ops::preview_caddie_shifts,
         http_ops::update_caddie_shift,
         http_ops::update_caddie_assignment,
+        http_ops::release_day_caddie_assignments,
         http_ops::list_caddie_memberships,
         http_ops::replace_caddie_memberships,
         http_ops::list_caddie_availabilities,
@@ -426,6 +427,9 @@ mod tests {
         assert!(paths.contains_key("/v1/course/tee-sheet"));
         assert!(paths.contains_key("/v1/course/courses"));
         assert!(paths.contains_key("/v1/course/caddie-profiles"));
+        assert!(paths["/v1/course/caddie-assignments/release-day"]
+            .get("post")
+            .is_some());
         assert!(paths.contains_key("/v1/course/feature-flags/evaluate"));
         assert!(paths.contains_key("/v1/course/caddie-attendance-snapshots"));
         assert!(paths.contains_key("/v1/course/reservation-policy"));
