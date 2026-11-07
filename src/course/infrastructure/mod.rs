@@ -91,3 +91,6 @@ pub use shift_rules_repository::MySqlShiftRulesRepository;
 pub use slot_override_repository::MySqlSlotOverrideRepository;
 pub use tax_rule_gateway::CourseboardTaxGateway;
 pub use visit_checkin_repository::MySqlVisitCheckinRepository;
+
+mod weather_repository;
+pub use weather_repository::MySqlWeatherRepository;

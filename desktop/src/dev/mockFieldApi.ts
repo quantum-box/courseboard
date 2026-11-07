@@ -3395,6 +3395,16 @@ function resolveGet(path: string): Json | null | undefined {
     return { ...mockReservationPolicy, tenantId: TENANT_ID() || 'courseboard_id' }
   }
 
+  if (pathname === '/v1/course/weather-observations') {
+    const observations = loadMockWrites<Array<{ golfCourseId: string; observedAt: string; weather: string; timezone: string }>>(`weather.${TENANT_ID()}`, [])
+    const from = url.searchParams.get('from') ?? TODAY
+    const to = url.searchParams.get('to') ?? TODAY
+    const course = url.searchParams.get('golfCourseId')
+    return items(observations.filter(row => row.observedAt.slice(0, 10) >= from
+      && row.observedAt.slice(0, 10) <= to && (!course || row.golfCourseId === course))
+      .sort((a, b) => b.observedAt.localeCompare(a.observedAt)))
+  }
+
   if (pathname === '/v1/erp/extensions/golf-course/daily-budgets') {
     return dailyBudgets(
       url.searchParams.get('from') ?? TODAY,
@@ -5392,6 +5402,20 @@ function resolveMutation(path: string, init?: RequestInit): MockFieldResult<Json
       }
     }
     return hit({ dryRun, assigned: planned, skipped })
+  }
+
+  if (pathname === '/v1/course/weather-observations' && method === 'POST') {
+    const observation = {
+      golfCourseId: String(body?.golfCourseId ?? ''),
+      observedAt: String(body?.observedAt ?? ''),
+      weather: String(body?.weather ?? ''),
+      timezone: 'Asia/Tokyo',
+    }
+    const key = `weather.${TENANT_ID()}`
+    const observations = loadMockWrites<typeof observation[]>(key, [])
+    saveMockWrites(key, [...observations.filter(row => row.golfCourseId !== observation.golfCourseId
+      || row.observedAt !== observation.observedAt), observation])
+    return hit(observation)
   }
 
   if (pathname === '/v1/erp/extensions/golf-course/daily-budgets' && method === 'POST') {

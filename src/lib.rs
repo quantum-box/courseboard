@@ -1496,6 +1496,15 @@ pub fn build_router(state: AppState) -> Router {
             ),
         )
         .route(
+            "/v1/course/weather-observations",
+            get(course::interfaces::http_weather::list_weather)
+                .post(course::interfaces::http_weather::save_weather)
+                .route_layer(middleware::from_fn_with_state(
+                    state.clone(),
+                    require_valid_token,
+                )),
+        )
+        .route(
             "/v1/course/daily-budgets",
             get(course::interfaces::http_commercial::list_daily_budgets)
                 .post(course::interfaces::http_commercial::upsert_daily_budget)

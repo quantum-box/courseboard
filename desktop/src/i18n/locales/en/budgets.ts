@@ -2,6 +2,14 @@ import type { DeepPartial } from '../../types'
 import type { budgets as source } from '../ja/budgets'
 
 export const budgets: DeepPartial<typeof source> = {
+  weather: {
+    title: 'Observed weather',
+    description: 'Record weather and observation time for each course. Saving the same course and time updates the record.',
+    course: 'Course', observedAt: 'Observed at ({{timezone}})', datetime: 'Observed at', condition: 'Weather',
+    save: 'Save weather', saving: 'Saving…', saved: 'Weather observation saved',
+    loading: 'Loading weather observations…', empty: 'No weather observations in this period.', edit: 'Edit',
+    options: { sunny: 'Sunny', cloudy: 'Cloudy', rain: 'Rain', snow: 'Snow', other: 'Other' },
+  },
   title: 'Daily revenue targets',
   description:
     'Tune revenue, spend per player, and the caddie share for the month, side by side with actual bookings.',
