@@ -115,6 +115,7 @@ const NON_FEE_STARTUP_ROUTES = [
   'golf',
   'golf/ledger',
   'golf/timeline',
+  'golf/insights',
   'golf/customers',
   'golf/products',
   'golf/courses',
@@ -163,6 +164,10 @@ export function routeActionRequirement(route: string): RouteActionRequirement | 
       FIELD_ACTIONS.listCaddieAssignments,
       FIELD_ACTIONS.listShifts,
     )
+  }
+  // PoC: counts the tee sheet and asks the model for a layout.
+  if (route === 'golf/insights') {
+    return allRequirements(FIELD_ACTIONS.listTeeSheet)
   }
   if (route === 'golf/timeline') {
     return allRequirements(

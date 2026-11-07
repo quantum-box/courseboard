@@ -46,6 +46,7 @@ import { CustomersPage } from './features/golf/customers/CustomersPage'
 import { ReceptionPage } from './features/golf/customers/reception/ReceptionPage'
 import { SettingsPage } from './features/settings/SettingsPage'
 import { DataExportsPage } from './features/data-exports/DataExportsPage'
+import { InsightsPage } from './features/insights/InsightsPage'
 import { StaffPage } from './features/staff/StaffPage'
 import { useCartUpdates } from './hooks/useCartUpdates'
 import { currentRouteSearchParams, navigate, routeHref, useRoute } from './lib/router'
@@ -167,6 +168,7 @@ function RouteContent({ route }: { route: string }) {
     return <ReservationReportImportPage />
   }
   if (route === 'golf/timeline') return <TimelinePage />
+  if (route === 'golf/insights') return <InsightsPage />
   if (route === 'golf/caddies/shifts') return <ShiftBoardPage />
   if (route === 'golf/caddies' || route.startsWith('golf/caddies/')) {
     const segment = route === 'golf/caddies'

@@ -45,6 +45,7 @@ export type FeatureKey = typeof FEATURE_KEYS[number]
 export const ROUTE_FEATURES: Readonly<Record<string, FeatureKey>> = Object.freeze({
   'golf/ledger': 'courseboard.tee_sheet',
   'golf/timeline': 'courseboard.tee_sheet',
+  'golf/insights': 'courseboard.tee_sheet',
   'golf/courses': 'courseboard.courses',
   'golf/courses/:courseId': 'courseboard.courses',
   'golf/products': 'courseboard.products',

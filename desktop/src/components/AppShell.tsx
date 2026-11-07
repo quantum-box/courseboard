@@ -345,6 +345,8 @@ function isActive(route: string, itemRoute: string) {
 }
 
 export function routeTitle(route: string) {
+  // PoC screen, reached by link only; not translated yet.
+  if (route === INSIGHTS_ROUTE) return '予約インサイト'
   const master = settingsMaster(route)
   if (master) return i18next.t(master.titleKey)
   if (route === 'golf/reservation-products' || route.startsWith('golf/reservation-products/')) {
@@ -373,6 +375,7 @@ export function routeTitle(route: string) {
 }
 
 export function routeDescription(route: string) {
+  if (route === INSIGHTS_ROUTE) return '質問から予約データのグラフや表を組み立てる'
   const master = settingsMaster(route)
   if (master) return i18next.t(master.descriptionKey)
   if (route === 'golf/reservation-products' || route.startsWith('golf/reservation-products/')) {
@@ -391,7 +394,10 @@ export function routeDescription(route: string) {
   return match ? navDescription(match.route) : i18next.t('nav:notFound.description')
 }
 
+const INSIGHTS_ROUTE = 'golf/insights'
+
 export function isKnownAppRoute(route: string) {
+  if (route === INSIGHTS_ROUTE) return true
   if (route === 'golf/reservation-products' || route.startsWith('golf/reservation-products/')) return true
   if (route === 'settings' || route === 'settings/advanced') return true
   if (settingsMaster(route)) return true
