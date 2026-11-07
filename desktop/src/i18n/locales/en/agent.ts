@@ -26,6 +26,21 @@ export const agent: DeepPartial<typeof source> = {
     "information": "information"
   }
 ,
+  "history": {
+  "open": "Open conversation history",
+  "title": "Conversation history",
+  "description": "The latest 30 conversations in this tab. Select one to continue.",
+  "empty": "No conversations yet."
+},
+  "trace": {
+  "running": "Running",
+  "ok": "Completed",
+  "error": "Failed",
+  "input": "Input",
+  "output": "Result",
+  "failed": "The operation failed. Check the current state on the relevant screen."
+},
+
   breakdown: {
   "title": "Reservations by course — {{date}}",
   "source": "Course names and figures are displayed directly from the reservation ledger.",
