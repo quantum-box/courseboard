@@ -1,4 +1,12 @@
 export const budgets = {
+  weather: {
+    title: '天気の実績',
+    description: '観測した日時と天気をコースごとに記録します。同じコース・日時で保存すると更新されます。',
+    course: 'コース', observedAt: '観測日時（{{timezone}}）', datetime: '観測日時', condition: '天気',
+    save: '天気を保存', saving: '保存中…', saved: '天気の実績を保存しました',
+    loading: '天気の実績を読み込み中…', empty: 'この期間の天気の実績はありません。', edit: '編集',
+    options: { sunny: '晴れ', cloudy: '曇り', rain: '雨', snow: '雪', other: 'その他' },
+  },
   title: '日ごとの売上目標',
   description: 'その月の売上・1人あたりの金額・キャディ付きの割合を、予約の実績と並べて調整します。',
   loading: '目標と実績を読み込んでいます',

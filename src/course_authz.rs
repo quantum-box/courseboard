@@ -76,6 +76,16 @@ pub enum RouteAuthorization {
 const ROUTES: &[(&str, &str, RouteAuthorization)] = &[
     (
         "GET",
+        "/v1/course/weather-observations",
+        RouteAuthorization::Action(crate::course::domain::actions::LIST_BUDGETS),
+    ),
+    (
+        "POST",
+        "/v1/course/weather-observations",
+        RouteAuthorization::Action(crate::course::domain::actions::MANAGE_BUDGETS),
+    ),
+    (
+        "GET",
         "/v1/course/data-exports/objects",
         RouteAuthorization::HandlerEnforced,
     ),

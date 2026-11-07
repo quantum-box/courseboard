@@ -272,3 +272,5 @@ pub use tenant_timezone::{
     utc_offset_minutes_at, DEFAULT_TIMEZONE,
 };
 pub use visit_checkin::{NewVisitCheckin, VisitCheckin, VisitCheckinRequest};
+
+pub mod weather;

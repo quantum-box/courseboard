@@ -1496,6 +1496,15 @@ pub fn build_router(state: AppState) -> Router {
             ),
         )
         .route(
+            "/v1/course/weather-observations",
+            get(course::interfaces::http_weather::list_weather)
+                .post(course::interfaces::http_weather::save_weather)
+                .route_layer(middleware::from_fn_with_state(
+                    state.clone(),
+                    require_valid_token,
+                )),
+        )
+        .route(
             "/v1/course/daily-budgets",
             get(course::interfaces::http_commercial::list_daily_budgets)
                 .post(course::interfaces::http_commercial::upsert_daily_budget)
@@ -1930,6 +1939,18 @@ mod migration_set {
                     migration.checksum.iter().map(|byte| format!("{byte:02x}")).collect::<String>(),
                     "68fc05bfbf6b62f56d373ec98208d9660fec437bad6fde9aeadcd2ff1125bb90caf7ad33773d4ae39ff9d8fbfa9ffec9",
                     "the already-applied common-import migration must stay immutable",
+                );
+                continue;
+            }
+            // PR #440's preview applied this version before the naming check
+            // ran. Pin both its identity and bytes so existing databases can
+            // still validate their migration history.
+            if migration.version == 20_261_107_090_000 {
+                assert_eq!(migration.description, "create golf weather observations");
+                assert_eq!(
+                    migration.checksum.iter().map(|byte| format!("{byte:02x}")).collect::<String>(),
+                    "9871e697504b585d097f10f41ea6674d383830504a4d9a42028a82ec2d0267fdd4e0bba4600394d690e25504aa46ac5d",
+                    "the already-applied weather migration must stay immutable",
                 );
                 continue;
             }

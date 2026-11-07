@@ -15,3 +15,5 @@ pub mod openapi;
 
 #[cfg(test)]
 mod persistence_tests;
+
+pub mod http_weather;

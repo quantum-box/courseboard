@@ -389,6 +389,11 @@ const ROUTE_RULES: &[(&str, &str, FeatureRoute)] = &[
     // Money.
     (
         "*",
+        "/v1/course/weather-observations",
+        Feature("courseboard.budgets"),
+    ),
+    (
+        "*",
         "/v1/course/daily-budgets",
         Feature("courseboard.budgets"),
     ),

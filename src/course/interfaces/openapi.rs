@@ -178,6 +178,8 @@ impl Modify for SecurityAddon {
         http_ops::list_caddie_ratings,
         http_commercial::get_reservation_policy,
         http_commercial::update_reservation_policy,
+        crate::course::interfaces::http_weather::list_weather,
+        crate::course::interfaces::http_weather::save_weather,
         http_commercial::list_daily_budgets,
         http_commercial::upsert_daily_budget,
         http_commercial::import_daily_budgets_csv,

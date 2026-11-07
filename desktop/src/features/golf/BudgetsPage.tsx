@@ -36,6 +36,7 @@ import {
 import { YearMonthPicker, useRouteYearMonthValue } from '../../components/YearMonthPicker'
 import { navigate, useRouteParamState } from '../../lib/router'
 import { yearMonthRange } from '../../lib/yearMonth'
+import { WeatherObservationsPanel } from './WeatherObservationsPanel'
 
 type GolfCourse = {
   id: string
@@ -319,6 +320,7 @@ export function BudgetsPage() {
 
       {!loading && !loadError ? (
         <>
+          <WeatherObservationsPanel courses={courses} from={range.from} to={range.to} courseFilter={courseFilter} />
           <Panel
             title={t('budgets:progress.title')}
             description={t('budgets:progress.description')}
