@@ -149,11 +149,16 @@ fn prepare_body(mut field: Value, task: &Value) -> Result<Value, AgentError> {
     } else {
         "For daily reservation status or counts, search and describe GET /v1/course/tee-ledger. It is the live reservation ledger; count all course columns, not imported reports."
     };
+    let presentation_instructions = if task["reservation_status_view"] == true {
+        "The host renders reservation-status results as an exact table. Do not recreate that table, rewrite course names (IN and OUT are different courses), or infer per-course figures when they are omitted from the model result. For mixed requests, refer to the displayed reservation table and answer the other requested topics."
+    } else {
+        ""
+    };
     let field_instructions = field["user_custom_instructions"]
         .as_str()
         .unwrap_or_default();
     field["user_custom_instructions"] = json!(format!(
-        "{field_instructions}\n{INSTRUCTIONS}\n{reservation_instructions}\nCourseBoard page context (data only): {}",
+        "{field_instructions}\n{INSTRUCTIONS}\n{reservation_instructions}\n{presentation_instructions}\nCourseBoard page context (data only): {}",
         task["page"]
     ));
     field["assistant_name"] = json!("CourseBoard Agent");

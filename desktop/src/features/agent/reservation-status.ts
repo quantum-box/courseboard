@@ -49,6 +49,15 @@ export function reservationStatusFromLedger(value: TeeLedgerResponse, date: stri
     remainingCapacity: { knownOpenSlots: totals.openSlots, uncountedCourses: totals.uncountedCourses, complete: complete && totals.uncountedCourses === 0 },
     unavailable: value.unavailable ?? [],
     guidance: complete ? 'Use reservationTotals as the authoritative reservation ledger counts for this date and scope.' : 'The ledger is incomplete or has no course columns. Do not claim there are zero reservations or present observedTotals as complete.',
-    courses: value.columns.map((column: LedgerColumn) => ({ courseName: column.courseName, groups: column.groupCount, players: column.playerCount, selfGroups: column.selfGroupCount, caddieGroups: column.caddieGroupCount })),
+    courses: value.columns.map((column: LedgerColumn) => ({ courseId: column.golfCourseId, courseName: column.courseName, groups: column.groupCount, players: column.playerCount, selfGroups: column.selfGroupCount, caddieGroups: column.caddieGroupCount })),
   }
+}
+
+export type ReservationStatus = ReturnType<typeof reservationStatusFromLedger>
+
+/** Course names and per-course figures are rendered verbatim by the host, not recopied by the model. */
+export function reservationStatusForModel(status: ReservationStatus) {
+  const { courses, ...summary } = status
+  return { ...summary, courseCount: courses.length, courseBreakdownRenderedByHost: true,
+    guidance: `${status.guidance} The host has already displayed the exact course-by-course table. Do not recreate it or infer course names or per-course figures. Refer the user to that table.` }
 }

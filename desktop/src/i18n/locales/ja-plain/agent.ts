@@ -3,6 +3,18 @@ import type { agent as source } from '../ja/agent'
 
 export const agent: DeepPartial<typeof source> = {
   chat: {
+  breakdown: {
+  "title": "{{date}}のコース別予約内訳",
+  "source": "予約台帳のコース名と数を、そのまま表示しています。",
+  "course": "コース",
+  "groups": "組数",
+  "players": "人数",
+  "self": "セルフ",
+  "caddie": "キャディ付き",
+  "total": "合計",
+  "capacity": "空き枠：{{count}}枠",
+  "capacityPartial": "把握済みの空き枠：{{count}}枠（{{missing}}コース分は不明）"
+},
   reservationTotals: '予約台帳 {{date}}：{{groups}}組・{{players}}名',
   reservationIncomplete: '予約台帳の一部を取得できませんでした。全件の数は確定できません。',
   reservationStatus: '予約台帳の予約数と人数を調べています',

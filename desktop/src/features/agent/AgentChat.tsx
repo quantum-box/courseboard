@@ -7,12 +7,13 @@ import remarkGfm from 'remark-gfm'
 import { toolResultText } from '@tachyon-sdk/agent'
 import { ApiError, today } from '../../api'
 import { useTenantTimezone } from '../../context/TenantTimezoneProvider'
-import { getReservationStatus } from './reservation-status'
+import { getReservationStatus, reservationStatusForModel, type ReservationStatus } from './reservation-status'
+import { ReservationStatusCard } from './ReservationStatusCard'
 import { Notice } from '../../components/Page'
 import { agentSessionClient, callFieldTool, demoEvents, describeOperation, executeOperation, isAgentDemo, loadCatalog, searchOperations, toolArgs, type Catalog, type FieldContext, type Operation, type ToolArgs } from './chat-api'
 import './agent.css'
 
-type Entry = { id: string; role: 'user' | 'assistant' | 'activity'; text: string; state?: 'running' | 'ok' | 'error' }
+type Entry = { id: string; role: 'user' | 'assistant' | 'activity' | 'reservation'; text: string; reservation?: ReservationStatus; state?: 'running' | 'ok' | 'error' }
 type Pending = { operation: Pick<Operation, 'method' | 'path' | 'summary'>; args: ToolArgs; decide: (allow: boolean) => void }
 
 export function AgentChat() {
@@ -61,7 +62,21 @@ export function AgentChat() {
     const signal = controller.signal
     setBusy(true); setError(''); setDraft('')
     setEntries(current => [...current, { id: crypto.randomUUID(), role: 'user', text }])
-    const append = (entry: Entry) => { if (!signal.aborted) setEntries(current => [...current, entry]) }
+    let hasReservationResult = false
+    let hasOtherBusinessExecution = false
+    const generated = new Map<string, Entry>()
+    const append = (entry: Entry) => {
+      if (entry.role === 'assistant') generated.set(entry.id, entry)
+      if (!signal.aborted && (entry.role !== 'assistant' || !hasReservationResult)) setEntries(current => [...current, entry])
+    }
+    const presentReservation = (status: ReservationStatus) => {
+      hasReservationResult = true
+      if (!signal.aborted) setEntries(current => [
+        ...current.filter(entry => !generated.has(entry.id)),
+        { id: crypto.randomUUID(), role: 'reservation', text: '', reservation: status },
+      ])
+      return reservationStatusForModel(status)
+    }
     const update = (id: string, patch: Partial<Entry>) => { if (!signal.aborted) setEntries(current => current.map(entry => entry.id === id ? { ...entry, ...patch } : entry)) }
     let messageId = ''
     let lastType = ''
@@ -78,6 +93,7 @@ export function AgentChat() {
       const events = demo ? demoEvents(signal) : sdk.execute(activeSession!, {
         task: text,
         reservation_status: true,
+        reservation_status_view: true,
         page: `CourseBoard /agent; date=${today(timezone)}; timezone=${timezone}; language=${i18n.language}`,
       }, signal)
       for await (const event of events) {
@@ -91,7 +107,10 @@ export function AgentChat() {
           lastType = event.type
           spoken += event.text
           const fragment = event.text
-          setEntries(current => current.map(entry => entry.id === messageId ? { ...entry, text: entry.text + fragment } : entry))
+          const message = generated.get(messageId)!
+          const next = { ...message, text: message.text + fragment }
+          generated.set(messageId, next)
+          if (!hasReservationResult) setEntries(current => current.map(entry => entry.id === messageId ? next : entry))
         } else if (event.type.startsWith('tool_')) lastType = ''
         if (event.type === 'attempt_completion' && event.result && !spoken.includes(event.result)) {
           append({ id: crypto.randomUUID(), role: 'assistant', text: event.result })
@@ -111,7 +130,7 @@ export function AgentChat() {
             if (name === 'courseboard_get_reservation_status') {
               update(activity, { text: t('chat.reservationStatus') })
               const status = await getReservationStatus(args, signal, today(timezone))
-              result = status
+              result = presentReservation(status)
               update(activity, { text: status.reservationTotals
                 ? t('chat.reservationTotals', { date: status.date, groups: status.reservationTotals.groups, players: status.reservationTotals.players })
                 : t('chat.reservationIncomplete') })
@@ -134,7 +153,10 @@ export function AgentChat() {
                   result = { cancelled: true, message: 'The user declined this change. Do not execute or retry it.' }
                   update(activity, { text: t('chat.declined') })
                 } else {
+                  const reservationRead = operation.method === 'GET' && operation.path === '/v1/course/tee-ledger'
+                  if (!reservationRead) hasOtherBusinessExecution = true
                   result = await executeOperation(operation, args, signal)
+                  if (reservationRead) result = presentReservation(result as ReservationStatus)
                 }
               } else throw new Error('Unknown CourseBoard tool')
             }
@@ -151,6 +173,7 @@ export function AgentChat() {
               }
             }
             // Field preserves IAM, its describe-before-execute guard and its tool result callback.
+            if (name === 'field_execute_operation') hasOtherBusinessExecution = true
             const answer = await callFieldTool(activeSession!, toolId, name, args, fieldContext, signal)
             fieldContext = answer.context
             failed = answer.event.state === 'error'
@@ -171,6 +194,12 @@ export function AgentChat() {
               : 'Operation rejected or response unavailable. Check the schema and read the current state before retrying any write.' }, signal)
         }
         update(activity, { state: failed ? 'error' : 'ok' })
+      }
+      // A pure reservation answer is the verified table above. Never show an
+      // additional generated copy that can swap IN/OUT or shift a row's figures.
+      // Mixed requests retain their other answers after all tools finish.
+      if (hasReservationResult && hasOtherBusinessExecution && !signal.aborted) {
+        setEntries(current => [...current, ...generated.values()])
       }
     } catch (cause) {
       setError(signal.aborted ? t('chat.interrupted') : cause instanceof ApiError && cause.status === 403 ? t('chat.forbidden') : t('chat.failed'))
@@ -193,7 +222,9 @@ export function AgentChat() {
       {!entries.length ? <div className="agent-welcome"><h1>{t('chat.title')}</h1><p>{t('chat.welcome')}</p>
         <div className="agent-suggestions">{(['reservations', 'customers', 'summary'] as const).map(key => <Button key={key} onClick={() => { setDraft(t(`chat.examples.${key}`)); composer.current?.focus() }}>{t(`chat.examples.${key}`)}</Button>)}</div>
       </div> : null}
-      {entries.map(entry => entry.role === 'activity'
+      {entries.map(entry => entry.role === 'reservation' && entry.reservation
+        ? <ReservationStatusCard key={entry.id} status={entry.reservation} />
+        : entry.role === 'activity'
         ? <p className="agent-activity" key={entry.id} data-state={entry.state}>{entry.state === 'running' ? '…' : entry.state === 'error' ? '!' : '✓'} {entry.text}</p>
         : <article key={entry.id} className={`agent-message agent-message-${entry.role}`}><strong>{t(entry.role === 'user' ? 'chat.you' : 'chat.assistant')}</strong><div className="agent-markdown"><Markdown remarkPlugins={[remarkGfm]} components={{ a: ({ children, href }) => <a href={href} target="_blank" rel="noopener noreferrer">{children}</a>, img: ({ alt }) => <span>{alt}</span> }}>{entry.text}</Markdown></div></article>)}
       {pending ? <div className="agent-confirm" role="region" aria-label={t('chat.confirmTitle')}>

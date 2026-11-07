@@ -1,5 +1,17 @@
 export const agent = {
   chat: {
+  breakdown: {
+  "title": "{{date}}のコース別予約内訳",
+  "source": "予約台帳から取得した名称・数値をそのまま表示しています。",
+  "course": "コース",
+  "groups": "組数",
+  "players": "人数",
+  "self": "セルフ",
+  "caddie": "キャディ付き",
+  "total": "合計",
+  "capacity": "空き枠：{{count}}枠",
+  "capacityPartial": "把握済みの空き枠：{{count}}枠（{{missing}}コース分は不明）"
+},
   reservationTotals: '予約台帳 {{date}}：{{groups}}組・{{players}}名',
   reservationIncomplete: '予約台帳を完全には取得できませんでした',
   reservationStatus: '予約台帳から予約状況を確認しています',
