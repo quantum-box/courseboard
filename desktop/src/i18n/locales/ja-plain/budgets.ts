@@ -4,7 +4,7 @@ import type { budgets as source } from '../ja/budgets'
 /** See `ja-plain/common.ts` for what this locale is for. */
 export const budgets: DeepPartial<typeof source> = {
   weather: {
-    description: 'コースごとに、天気を見た日時と、そのときの天気を入れます。同じコース・同じ日時で保存すると、前の記録を書きかえます。',
+    description: 'コースごとに、午前と午後の天気を入れます。どちらか一方だけでも保存できます。同じコース・同じ日時で保存すると、前の記録を書きかえます。',
   },
   title: '日ごとの売上目標',
   description:

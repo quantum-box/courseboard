@@ -4,7 +4,11 @@ import type { budgets as source } from '../ja/budgets'
 export const budgets: DeepPartial<typeof source> = {
   weather: {
     title: 'Observed weather',
-    description: 'Record weather and observation time for each course. Saving the same course and time updates the record.',
+    description: 'Record morning and afternoon weather for each course. You can save either period on its own. The same course and time updates the existing record.',
+    date: 'Date ({{timezone}})', morning: 'Morning', afternoon: 'Afternoon', period: 'Period',
+    morningWeather: 'Morning weather', afternoonWeather: 'Afternoon weather',
+    morningTime: 'Morning observation time', afternoonTime: 'Afternoon observation time',
+    notEntered: 'Not entered', saveEdit: 'Save changes', cancel: 'Close editor',
     course: 'Course', observedAt: 'Observed at ({{timezone}})', datetime: 'Observed at', condition: 'Weather',
     save: 'Save weather', saving: 'Saving…', saved: 'Weather observation saved',
     loading: 'Loading weather observations…', empty: 'No weather observations in this period.', edit: 'Edit',

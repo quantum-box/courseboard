@@ -29,12 +29,44 @@ describe('weather observations', () => {
     renderPanel()
     fireEvent.click(await screen.findByRole('button', { name: '編集' }))
     fireEvent.change(screen.getByLabelText('天気'), { target: { value: 'snow' } })
-    fireEvent.click(screen.getByRole('button', { name: '天気を保存' }))
+    fireEvent.click(screen.getByRole('button', { name: '変更を保存' }))
     await screen.findByText('天気の実績を保存しました')
     expect(api.json).toHaveBeenCalledWith('/v1/course/weather-observations', {
       method: 'POST', body: JSON.stringify({ golfCourseId: 'east', observedAt: '2026-11-07T09:00:00', weather: 'snow' }),
     })
     expect(screen.getByText('2026-11-07 09:00 (Asia/Tokyo)')).toBeTruthy()
+  })
+
+  it('saves morning and afternoon together with their local observation times', async () => {
+    api.json.mockResolvedValue({ items: [] })
+    renderPanel()
+    await screen.findByText('この期間の天気の実績はありません。')
+    fireEvent.change(screen.getByLabelText('午前の天気'), { target: { value: 'sunny' } })
+    fireEvent.change(screen.getByLabelText('午後の天気'), { target: { value: 'rain' } })
+    fireEvent.change(screen.getByLabelText('午後の観測時刻'), { target: { value: '14:30' } })
+    fireEvent.click(screen.getByRole('button', { name: '天気を保存' }))
+    await screen.findByText('天気の実績を保存しました')
+    expect(api.json).toHaveBeenCalledWith('/v1/course/weather-observations', {
+      method: 'POST', body: JSON.stringify({ items: [
+        { golfCourseId: 'east', observedAt: '2026-11-01T09:00:00', weather: 'sunny' },
+        { golfCourseId: 'east', observedAt: '2026-11-01T14:30:00', weather: 'rain' },
+      ] }),
+    })
+  })
+
+  it('saves only the entered period and leaves the other period unrecorded', async () => {
+    api.json.mockResolvedValue({ items: [] })
+    renderPanel()
+    await screen.findByText('この期間の天気の実績はありません。')
+    expect((screen.getByRole('button', { name: '天気を保存' }) as HTMLButtonElement).disabled).toBe(true)
+    fireEvent.change(screen.getByLabelText('午後の天気'), { target: { value: 'cloudy' } })
+    fireEvent.click(screen.getByRole('button', { name: '天気を保存' }))
+    await screen.findByText('天気の実績を保存しました')
+    expect(api.json).toHaveBeenCalledWith('/v1/course/weather-observations', {
+      method: 'POST', body: JSON.stringify({ items: [
+        { golfCourseId: 'east', observedAt: '2026-11-01T15:00:00', weather: 'cloudy' },
+      ] }),
+    })
   })
 
   it('keeps the draft and allows retry when saving fails', async () => {
@@ -44,9 +76,11 @@ describe('weather observations', () => {
     })
     renderPanel()
     await screen.findByText('この期間の天気の実績はありません。')
+    fireEvent.change(screen.getByLabelText('午前の天気'), { target: { value: 'rain' } })
     fireEvent.click(screen.getByRole('button', { name: '天気を保存' }))
     await waitFor(() => expect((screen.getByRole('button', { name: '天気を保存' }) as HTMLButtonElement).disabled).toBe(false))
     expect(screen.queryByText('天気の実績を保存しました')).toBeNull()
-    expect((screen.getByLabelText(/観測日時/) as HTMLInputElement).value).toBe('2026-11-01T09:00')
+    expect((screen.getByLabelText('午前の天気') as HTMLSelectElement).value).toBe('rain')
+    expect((screen.getByLabelText('午前の観測時刻') as HTMLInputElement).value).toBe('09:00')
   })
 })
