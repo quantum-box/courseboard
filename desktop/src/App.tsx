@@ -48,7 +48,7 @@ import { SettingsPage } from './features/settings/SettingsPage'
 import { DataExportsPage } from './features/data-exports/DataExportsPage'
 import { StaffPage } from './features/staff/StaffPage'
 import { useCartUpdates } from './hooks/useCartUpdates'
-import { navigate, useRoute } from './lib/router'
+import { currentRouteSearchParams, navigate, routeHref, useRoute } from './lib/router'
 import { DownloadPage } from './DownloadPage'
 import { PaymentPage } from './PaymentPage'
 import { LegalDocumentPage } from './LegalDocumentPage'
@@ -125,6 +125,15 @@ function OperatorWebRedirect({ href }: { href: string }) {
 function RouteContent({ route }: { route: string }) {
   // Hooks run for every route rather than beside the branch that needs them.
   const reportImportGate = useRouteGate('golf/reservation-report-import')
+  const legacyTab = currentRouteSearchParams().get('tab')
+  useEffect(() => {
+    if (route !== 'golf/caddies/dispatch' || legacyTab !== 'duties') return
+    const params = currentRouteSearchParams()
+    params.delete('tab')
+    window.history.replaceState(window.history.state, '', routeHref('golf/caddies/duties', params))
+    window.dispatchEvent(new PopStateEvent('popstate'))
+  }, [route, legacyTab])
+
   if (route === 'agent') return <AgentPage />
   if (route === 'golf') return <GolfHomePage />
   if (route === 'golf/courses') return <CoursesPage />
@@ -165,8 +174,8 @@ function RouteContent({ route }: { route: string }) {
       : decodeRouteSegment(route.slice('golf/caddies/'.length).split('/')[0] ?? '')
     // Keep a stable key so selecting a caddie (or switching roster/dispatch tabs)
     // updates props instead of remounting and flashing every useResource loader.
-    if (segment === 'dispatch' || segment === 'attendance' || segment === 'payroll') {
-      return <CaddiesPage key="golf/caddies" initialView={segment} />
+    if (segment === 'dispatch' || segment === 'duties' || segment === 'attendance' || segment === 'payroll') {
+      return <CaddiesPage key="golf/caddies" initialView={segment === 'dispatch' && legacyTab === 'duties' ? 'duties' : segment} />
     }
     return (
       <CaddiesPage

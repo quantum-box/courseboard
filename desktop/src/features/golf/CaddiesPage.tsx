@@ -15,7 +15,6 @@ import {
   CalendarDays,
   CheckCircle2,
   ClipboardCheck,
-  ClipboardList,
   Clock,
   Download,
   Link2,
@@ -144,12 +143,8 @@ const PAYROLL_PAGE_SIZE = 20
 
 type ListResponse<T> = { items: T[] }
 type CaddieRosterResponse = ListResponse<CaddieProfile> & { staff?: StaffMember[] }
-type View = 'roster' | 'dispatch' | 'attendance' | 'payroll'
-type DispatchTab = 'rounds' | 'duties'
-type DispatchDutySummary = {
-  dutyCount: number | null
-  freeCount: number | null
-}
+type View = 'roster' | 'dispatch' | 'duties' | 'attendance' | 'payroll'
+
 type SkillLevel = 'rookie' | 'regular' | 'veteran'
 type AvailabilityStatus =
   | 'available'
@@ -621,7 +616,7 @@ export function CaddiesPage({
     view,
     profilesResource.data !== null,
   )
-  const assignmentMonth = view === 'dispatch'
+  const assignmentMonth = view === 'dispatch' || view === 'duties'
     ? operationDate.slice(0, 7)
     : today(timezone).slice(0, 7)
   const assignmentBounds = monthBounds(assignmentMonth)
@@ -743,11 +738,13 @@ export function CaddiesPage({
       attendanceResource.refresh()
       return
     }
-    if (view === 'dispatch') {
+    if (view === 'dispatch' || view === 'duties') {
       profilesResource.refresh()
       assignmentsResource.refresh()
-      recommendationsResource.refresh()
-      attendanceResource.refresh()
+      if (view === 'dispatch') {
+        recommendationsResource.refresh()
+        attendanceResource.refresh()
+      }
       return
     }
     if (view === 'attendance') {
@@ -823,6 +820,31 @@ export function CaddiesPage({
           onChanged={refreshDispatch}
           setFlash={setFlash}
         />
+      ) : null}
+
+      {view === 'duties' ? (
+        <div className="space-y-4">
+          <Input
+            type="date"
+            aria-label={t('caddies:operationDate')}
+            className="h-8 w-full sm:w-40"
+            value={operationDate}
+            onChange={event => setOperationDate(event.target.value)}
+          />
+          {profilesResource.loading || assignmentsResource.loading ? <LoadingState label={t('caddies:dispatch.loading')} /> : null}
+          {profilesResource.error ? <ResourceError error={profilesResource.error} onRetry={profilesResource.refresh} /> : null}
+          {assignmentsResource.error ? <ResourceError error={assignmentsResource.error} onRetry={assignmentsResource.refresh} /> : null}
+          {profilesResource.data && assignmentsResource.data && !profilesResource.error && !assignmentsResource.error ? (
+            <CaddieDutiesPanel
+              date={operationDate}
+              profiles={profiles}
+              assignments={assignmentsResource.data.items.filter(
+                item => dateKey(item.scheduledAt, timezone) === operationDate,
+              )}
+              onChanged={assignmentsResource.refresh}
+            />
+          ) : null}
+        </div>
       ) : null}
 
       {view === 'attendance' ? (
@@ -947,13 +969,6 @@ function DispatchView({
     ? dayRounds.filter(round => roundIsStillOn(round) && round.playType === 'caddie').length
       - unassignedDayRounds.length
     : null
-  const [dutySummary, setDutySummary] = useState<DispatchDutySummary>({
-    dutyCount: null,
-    freeCount: null,
-  })
-  useEffect(() => {
-    setDutySummary({ dutyCount: null, freeCount: null })
-  }, [date])
   // Who asked to walk two rounds today. Read on the board because the pair is
   // what the club sold the day's supply as, and a two-round caddie left on one
   // round is a group's worth of capacity that quietly went missing. A failed
@@ -974,64 +989,8 @@ function DispatchView({
     [availabilities.data],
   )
 
-  const [tab, setTab] = useRouteParamState('tab', {
-    fallback: 'rounds',
-    normalize: value => value === 'duties' || value === 'rounds' ? value : null,
-  })
-  const activeTab: DispatchTab = tab === 'duties' ? 'duties' : 'rounds'
-
-  function moveDispatchTab(event: KeyboardEvent<HTMLButtonElement>, current: DispatchTab) {
-    const next: DispatchTab | null = event.key === 'ArrowRight'
-      ? current === 'rounds' ? 'duties' : 'rounds'
-      : event.key === 'ArrowLeft'
-        ? current === 'rounds' ? 'duties' : 'rounds'
-        : event.key === 'Home'
-          ? 'rounds'
-          : event.key === 'End'
-            ? 'duties'
-            : null
-    if (!next) return
-    event.preventDefault()
-    setTab(next)
-    document.getElementById(`caddie-dispatch-${next === 'rounds' ? 'round' : 'duty'}-tab`)?.focus()
-  }
-
-  // Deciding who walks each group is the whole job of the round tab, so the
-  // date, tabs and shared day summary come before either branch. The figures
-  // consulted while deciding — sellable capacity, the per-course balance, the
-  // ranked roster — stay inside the round branch instead of competing with the
-  // action of putting a caddie on another job.
   return (
-    <div className="space-y-6">
-      <div
-        className="grid w-full max-w-md grid-cols-2 gap-1 rounded-lg border border-border bg-surface p-1"
-        role="tablist"
-        aria-label={t('caddies:dispatch.tabs.label')}
-      >
-        <DetailTabButton
-          id="caddie-dispatch-round-tab"
-          ariaControls="caddie-dispatch-round-panel"
-          active={activeTab === 'rounds'}
-          tabIndex={activeTab === 'rounds' ? 0 : -1}
-          onKeyDown={event => moveDispatchTab(event, 'rounds')}
-          onClick={() => setTab('rounds')}
-          prominent
-        >
-          <ClipboardCheck className="size-4" /> {t('caddies:dispatch.tabs.rounds')}
-        </DetailTabButton>
-        <DetailTabButton
-          id="caddie-dispatch-duty-tab"
-          ariaControls="caddie-dispatch-duty-panel"
-          active={activeTab === 'duties'}
-          tabIndex={activeTab === 'duties' ? 0 : -1}
-          onKeyDown={event => moveDispatchTab(event, 'duties')}
-          onClick={() => setTab('duties')}
-          prominent
-        >
-          <ClipboardList className="size-4" /> {t('caddies:dispatch.tabs.duties')}
-        </DetailTabButton>
-      </div>
-
+    <div className="space-y-4">
       <div
         className="flex min-h-10 flex-wrap items-center gap-x-4 gap-y-1 border-y border-border py-2 text-sm"
         aria-label={t('caddies:dispatch.summary.label')}
@@ -1055,27 +1014,9 @@ function DispatchView({
             {assignedCount === null ? '—' : t('caddies:groups', { n: String(assignedCount) })}
           </strong>
         </span>
-        <span className="whitespace-nowrap text-muted-foreground">
-          {t('caddies:dispatch.summary.duties')}
-          <strong className="ml-1 font-semibold text-foreground">
-            {dutySummary.dutyCount === null ? '—' : t('caddies:people', { n: String(dutySummary.dutyCount) })}
-          </strong>
-        </span>
-        <span className="whitespace-nowrap text-muted-foreground">
-          {t('caddies:dispatch.summary.free')}
-          <strong className="ml-1 font-semibold text-foreground">
-            {dutySummary.freeCount === null ? '—' : t('caddies:people', { n: String(dutySummary.freeCount) })}
-          </strong>
-        </span>
       </div>
 
-      <div
-        id="caddie-dispatch-round-panel"
-        role="tabpanel"
-        aria-labelledby="caddie-dispatch-round-tab"
-        hidden={activeTab !== 'rounds'}
-        className="space-y-4"
-      >
+      <div className="space-y-4">
         <UnassignedRoundsPanel
           sheet={teeSheet}
           assignments={horizonAssignments}
@@ -1134,20 +1075,7 @@ function DispatchView({
         </CollapsibleSection>
       </div>
 
-      <div
-        id="caddie-dispatch-duty-panel"
-        role="tabpanel"
-        aria-labelledby="caddie-dispatch-duty-tab"
-        hidden={activeTab !== 'duties'}
-      >
-        <CaddieDutiesPanel
-          date={date}
-          profiles={profiles}
-          assignments={dayAssignments}
-          onChanged={onChanged}
-          onSummaryChange={setDutySummary}
-        />
-      </div>
+
     </div>
   )
 }

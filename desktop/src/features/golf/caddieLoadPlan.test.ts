@@ -24,6 +24,7 @@ describe('caddieLoadPlan', () => {
       courses: false,
       attendance: true,
     })
+    expect(caddieLoadPlan('duties', true)).toEqual({ assignments: true, recommendations: false, courses: false, attendance: false })
     expect(caddieLoadPlan('attendance', true)).toEqual({
       assignments: false,
       recommendations: false,

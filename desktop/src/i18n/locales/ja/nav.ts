@@ -50,6 +50,10 @@ export const nav = {
       label: 'キャディの配置',
       description: 'だれがどの組につくかを決める',
     },
+    'golf/caddies/duties': {
+      label: 'キャディの別業務',
+      description: 'コース整備や練習場などの担当を決める',
+    },
     'golf/caddies/attendance': {
       label: '出勤',
       description: '出勤の打刻と実績の確認',
