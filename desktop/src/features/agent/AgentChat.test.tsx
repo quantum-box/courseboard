@@ -8,7 +8,7 @@ vi.mock('./chat-api', async importOriginal => ({
   ...await importOriginal<typeof import('./chat-api')>(),
   isAgentDemo: () => false,
   agentSessionClient: () => ({ createSession: mocks.create, execute: mocks.execute, submitToolResult: mocks.submit }),
-  loadCatalog: vi.fn(async () => ({ operations: [{ operationId: 'update', method: 'PATCH', path: '/v1/course/reservations/{id}', summary: '予約を変更', parameters: [] }, { operationId: 'ledger', method: 'GET', path: '/v1/course/tee-ledger', summary: '予約台帳', parameters: [] }], schemas: {} })),
+  loadCatalog: vi.fn(async () => ({ operations: [{ operationId: 'update', method: 'PATCH', path: '/v1/course/reservations/{id}', summary: '予約を変更', parameters: [] }, { operationId: 'monthly', method: 'GET', path: '/v1/course/monthly-settlement', summary: 'GET /v1/course/monthly-settlement', parameters: [] }, { operationId: 'ledger', method: 'GET', path: '/v1/course/tee-ledger', summary: '予約台帳', parameters: [] }], schemas: {} })),
   executeOperation: mocks.write,
   callFieldTool: mocks.field,
 }))
@@ -141,4 +141,46 @@ it('also renders authoritative rows when the generic ledger operation is selecte
   await screen.findByRole('button', { name: '送信' })
   expect(screen.getByRole('row', { name: '滝のOUT 4 13 2 2' })).toBeTruthy()
   expect(screen.queryByText(/誤記/)).toBeNull()
+})
+
+it('submits with Cmd/Ctrl+Enter while preserving normal Enter and IME composition', async () => {
+  mocks.execute.mockImplementation(async function* () { yield { type: 'done' } })
+  render(<AgentChat />)
+  const input = screen.getByLabelText('依頼内容')
+  fireEvent.change(input, { target: { value: '予約を調べて' } })
+  fireEvent.keyDown(input, { key: 'Enter' })
+  fireEvent.keyDown(input, { key: 'Enter', metaKey: true, isComposing: true })
+  expect(mocks.execute).not.toHaveBeenCalled()
+  fireEvent.keyDown(input, { key: 'Enter', metaKey: true })
+  await waitFor(() => expect(mocks.execute).toHaveBeenCalledTimes(1))
+  await screen.findByRole('button', { name: '送信' })
+  fireEvent.change(input, { target: { value: '売上を調べて' } })
+  fireEvent.keyDown(input, { key: 'Enter', ctrlKey: true })
+  await waitFor(() => expect(mocks.execute).toHaveBeenCalledTimes(2))
+  expect(screen.getByRole('button', { name: '送信' }).closest('.agent-composer-input')?.contains(input)).toBe(true)
+  expect(screen.queryByText('データの更新前に、内容を確認できます。')).toBeNull()
+})
+
+it('collapses completed activities and uses business descriptions instead of endpoints', async () => {
+  let finish!: () => void
+  const done = new Promise<void>(resolve => { finish = resolve })
+  mocks.execute.mockImplementation(async function* () {
+    yield tool('courseboard_describe_operation', 'describe-month', { operationId: 'monthly' })
+    yield tool('courseboard_execute_operation', 'read-month', { operationId: 'monthly' })
+    yield { type: 'say', text: '月の集計です' }
+    await done
+    yield { type: 'done' }
+  })
+  render(<AgentChat />); start()
+  await screen.findByText('月の集計です')
+  const log = screen.getByText('作業中…').closest('details')!
+  expect(log.open).toBe(true)
+  expect(within(log).getByText('月次集計を確認しています')).toBeTruthy()
+  expect(screen.queryByText(/GET \/v1\/course/)).toBeNull()
+  finish()
+  await screen.findByText('作業履歴（2件完了）')
+  await waitFor(() => expect(log.open).toBe(false))
+  fireEvent.click(within(log).getByText('作業履歴（2件完了）'))
+  expect(log.open).toBe(true)
+  expect(screen.getByText('月の集計です')).toBeTruthy()
 })
