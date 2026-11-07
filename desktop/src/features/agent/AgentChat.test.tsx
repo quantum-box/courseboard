@@ -1,5 +1,5 @@
 /* @vitest-environment jsdom */
-import { cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react'
+import { cleanup, fireEvent, render, screen, waitFor, within } from '@testing-library/react'
 import { afterEach, beforeEach, expect, it, vi } from 'vitest'
 import { i18next } from '../../i18n'
 import { AgentChat } from './AgentChat'
@@ -8,11 +8,12 @@ vi.mock('./chat-api', async importOriginal => ({
   ...await importOriginal<typeof import('./chat-api')>(),
   isAgentDemo: () => false,
   agentSessionClient: () => ({ createSession: mocks.create, execute: mocks.execute, submitToolResult: mocks.submit }),
-  loadCatalog: vi.fn(async () => ({ operations: [{ operationId: 'update', method: 'PATCH', path: '/v1/course/reservations/{id}', summary: '予約を変更', parameters: [] }], schemas: {} })),
+  loadCatalog: vi.fn(async () => ({ operations: [{ operationId: 'update', method: 'PATCH', path: '/v1/course/reservations/{id}', summary: '予約を変更', parameters: [] }, { operationId: 'ledger', method: 'GET', path: '/v1/course/tee-ledger', summary: '予約台帳', parameters: [] }], schemas: {} })),
   executeOperation: mocks.write,
   callFieldTool: mocks.field,
 }))
-vi.mock('./reservation-status', () => ({ getReservationStatus: mocks.reservations }))
+vi.mock('./reservation-status', async importOriginal => ({ ...await importOriginal<typeof import('./reservation-status')>(), getReservationStatus: mocks.reservations }))
+const status = { source: '/v1/course/tee-ledger', sourceLabel: '予約台帳', date: '2026-11-07', timezone: 'Asia/Tokyo', scope: 'all', complete: true, reservationTotals: { groups: 29, players: 98, selfGroups: 20, caddieGroups: 9 }, observedTotals: { groups: 29, players: 98, selfGroups: 20, caddieGroups: 9 }, remainingCapacity: { knownOpenSlots: 306, uncountedCourses: 3, complete: false }, unavailable: [], guidance: '', courses: [{ courseId: 'in', courseName: '滝のIN', groups: 0, players: 0, selfGroups: 0, caddieGroups: 0 }, { courseId: 'out', courseName: '滝のOUT', groups: 4, players: 13, selfGroups: 2, caddieGroups: 2 }] }
 const tool = (name: string, id: string, args: object) => ({ type: 'tool_call_pending', tool_name: name, tool_id: id, args })
 beforeEach(async () => {
   vi.clearAllMocks()
@@ -80,7 +81,7 @@ it('never repeats a write after an uncertain failure', async () => {
 })
 
 it('uses the dedicated reservation summary directly without selecting report operations', async () => {
-  mocks.reservations.mockResolvedValue({ source: '/v1/course/tee-ledger', complete: true, reservationTotals: { groups: 29, players: 98 } })
+  mocks.reservations.mockResolvedValue(status)
   mocks.execute.mockImplementation(async function* () {
     yield tool('courseboard_get_reservation_status', 'status', { date: '2026-11-07' })
     yield { type: 'done' }
@@ -92,4 +93,52 @@ it('uses the dedicated reservation summary directly without selecting report ope
   expect(mocks.write).not.toHaveBeenCalled()
   expect(mocks.submit.mock.calls[0][1].result).toContain('29')
   expect(mocks.submit.mock.calls[0][1].result).toContain('98')
+})
+
+it('renders source rows exactly and suppresses generated IN/OUT transcriptions', async () => {
+  mocks.reservations.mockResolvedValue(status)
+  mocks.execute.mockImplementation(async function* () {
+    yield { type: 'say', text: '先行する生成文' }
+    yield tool('courseboard_get_reservation_status', 'status', { date: '2026-11-07' })
+    yield { type: 'say', text: '誤記: 滝のINは4組13名' }
+    yield { type: 'attempt_completion', result: '誤記: 滝のOUTは0組' }
+    yield { type: 'done' }
+  })
+  render(<AgentChat />); start()
+  await screen.findByRole('button', { name: '送信' })
+  expect(within(screen.getByRole('row', { name: '滝のIN 0 0 0 0' })).getAllByRole('cell').map(cell => cell.textContent)).toEqual(['0', '0', '0', '0'])
+  expect(screen.getByRole('row', { name: '滝のOUT 4 13 2 2' })).toBeTruthy()
+  expect(screen.queryByText(/誤記|先行する生成文/)).toBeNull()
+  const result = JSON.parse(mocks.submit.mock.calls[0][1].result)
+  expect(result.courseBreakdownRenderedByHost).toBe(true)
+  expect(result.courses).toBeUndefined()
+  expect(JSON.stringify(result)).not.toContain('滝の')
+})
+it('retains other answers when reservation status is part of a mixed request', async () => {
+  mocks.reservations.mockResolvedValue(status)
+  mocks.execute.mockImplementation(async function* () {
+    yield tool('courseboard_get_reservation_status', 'status', { date: '2026-11-07' })
+    yield tool('courseboard_describe_operation', 'describe', { operationId: 'update' })
+    yield tool('courseboard_execute_operation', 'write', { operationId: 'update', pathParams: { id: 'r1' } })
+    yield { type: 'attempt_completion', result: '予約を更新しました' }
+    yield { type: 'done' }
+  })
+  render(<AgentChat />); start()
+  fireEvent.click(await screen.findByRole('button', { name: 'この内容で実行' }))
+  await screen.findByText('予約を更新しました')
+  expect(screen.getByRole('row', { name: '滝のOUT 4 13 2 2' })).toBeTruthy()
+})
+
+it('also renders authoritative rows when the generic ledger operation is selected', async () => {
+  mocks.write.mockResolvedValue(status)
+  mocks.execute.mockImplementation(async function* () {
+    yield tool('courseboard_describe_operation', 'describe', { operationId: 'ledger' })
+    yield tool('courseboard_execute_operation', 'ledger', { operationId: 'ledger', query: { date: status.date } })
+    yield { type: 'attempt_completion', result: '誤記: 滝のINは4組13名' }
+    yield { type: 'done' }
+  })
+  render(<AgentChat />); start()
+  await screen.findByRole('button', { name: '送信' })
+  expect(screen.getByRole('row', { name: '滝のOUT 4 13 2 2' })).toBeTruthy()
+  expect(screen.queryByText(/誤記/)).toBeNull()
 })

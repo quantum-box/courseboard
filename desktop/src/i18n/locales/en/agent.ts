@@ -3,6 +3,18 @@ import type { agent as source } from '../ja/agent'
 
 export const agent: DeepPartial<typeof source> = {
   chat: {
+  breakdown: {
+  "title": "Reservations by course — {{date}}",
+  "source": "Course names and figures are displayed directly from the reservation ledger.",
+  "course": "Course",
+  "groups": "Groups",
+  "players": "Players",
+  "self": "Self play",
+  "caddie": "With caddie",
+  "total": "Total",
+  "capacity": "Available slots: {{count}}",
+  "capacityPartial": "Known available slots: {{count}} (unknown for {{missing}} courses)"
+},
   reservationTotals: 'Reservation ledger {{date}}: {{groups}} groups, {{players}} players',
   reservationIncomplete: 'The reservation ledger could not be loaded completely',
   reservationStatus: 'Checking reservation counts in the booking ledger',
