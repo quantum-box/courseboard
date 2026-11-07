@@ -1942,6 +1942,18 @@ mod migration_set {
                 );
                 continue;
             }
+            // PR #440's preview applied this version before the naming check
+            // ran. Pin both its identity and bytes so existing databases can
+            // still validate their migration history.
+            if migration.version == 20_261_107_090_000 {
+                assert_eq!(migration.description, "create golf weather observations");
+                assert_eq!(
+                    migration.checksum.iter().map(|byte| format!("{byte:02x}")).collect::<String>(),
+                    "9871e697504b585d097f10f41ea6674d383830504a4d9a42028a82ec2d0267fdd4e0bba4600394d690e25504aa46ac5d",
+                    "the already-applied weather migration must stay immutable",
+                );
+                continue;
+            }
             assert!(
                 (202_001_010_000..=209_912_319_999).contains(&migration.version),
                 "{} is numbered {}, which is not a YYYYMMDDNNNN stamp",
