@@ -7884,3 +7884,5 @@ button,
   .auto-assign-booking-title { flex-basis: calc(100% - 105px); }
   .auto-assign-booking-caddie { margin-left: auto; }
 }
+
+.dispatch-assigned-caddies { display: flex; flex-direction: column; gap: 2px; font-size: 12px; font-weight: 600; color: hsl(var(--nui-primary)); }

@@ -14,7 +14,7 @@ import {
 import { Sheet } from '../../components/Sheet'
 import { CaddieLink } from './CaddieLink'
 import { placementWarningStatus, type ShiftPlacementStatus } from './caddiePlacement'
-import { holdsTheRound, roundIsStillOn, unassignedCaddieRounds } from './caddieRoundCoverage'
+import { holdsTheRound, roundIsStillOn } from './caddieRoundCoverage'
 import type { PartyDetails } from './ledger/models'
 import { UnassignedRoundsLedger } from './UnassignedRoundsLedger'
 import { useResource } from '../../hooks/useResource'
@@ -58,6 +58,7 @@ type DayAssignment = {
   reservationId?: string | null
   status: string
   canonicalStatus?: string | null
+  caddieProfileId?: string
 }
 
 type Candidate = RecommendationForExplanation & {
@@ -121,16 +122,19 @@ export function horizonEnd(date: string, horizon: Horizon): string {
   return start.toISOString().slice(0, 10)
 }
 
-/**
- * The caddie-attached groups nobody is on yet, and the way to put someone there.
- *
- * The automatic run covers the ordinary morning. This is what the desk needs
- * for everything else — a named request, a swap, a round the plan could not
- * fill — and until now there was no way to do it from CourseBoard at all.
- */
+/** Club names group the existing course labels without depending on fixture IDs. */
+export function dispatchClub(name: string): string {
+  if (/真駒内|空沼|藻岩/.test(name)) return '真駒内'
+  if (/滝の/.test(name)) return '滝の'
+  if (/羊[ヶケが]丘/.test(name)) return '羊ヶ丘'
+  return 'その他'
+}
+
+/** All caddie bookings stay on the board while the desk fills the open groups. */
 export function UnassignedRoundsPanel({
   sheet,
   assignments,
+  profiles = [],
   horizon,
   onHorizonChange,
   onChanged,
@@ -138,6 +142,7 @@ export function UnassignedRoundsPanel({
 }: {
   sheet: ResourceValue<{ items: TeeSheetRow[] }>
   assignments: DayAssignment[]
+  profiles?: { id: string; displayName: string }[]
   horizon: Horizon
   onHorizonChange: (horizon: Horizon) => void
   onChanged: () => void
@@ -145,14 +150,14 @@ export function UnassignedRoundsPanel({
 }) {
   const { t } = useTranslation(['caddies', 'common'])
   const [naming, setNaming] = useState<TeeSheetRow | null>(null)
-  // The board is every course at once, which is right for a desk that runs
-  // several — but staffing one course at a time is the usual way through it.
+  // Keep a club's start courses together, with an optional course filter.
   const [courseFilter, setCourseFilter] = useState('')
+  const [clubFilter, setClubFilter] = useState('')
   const [view, setView] = useState<'ledger' | 'list'>('ledger')
 
   const rounds = useMemo(
-    () => unassignedCaddieRounds(sheet.data?.items ?? [], assignments),
-    [sheet.data, assignments],
+    () => (sheet.data?.items ?? []).filter(row => roundIsStillOn(row) && row.playType === 'caddie'),
+    [sheet.data],
   )
   const courses = useMemo(() => {
     const named = new Map<string, string>()
@@ -161,16 +166,45 @@ export function UnassignedRoundsPanel({
     }
     return [...named].map(([id, name]) => ({ id, name }))
   }, [sheet.data])
-  const hasCaddieBookings = (sheet.data?.items ?? []).some(row => roundIsStillOn(row) && row.playType === 'caddie')
-  const emptyKey = !hasCaddieBookings ? 'noBookings' : rounds.length > 0 ? 'noMatches' : 'empty'
+  const clubs = useMemo(() => {
+    const grouped = new Map<string, typeof courses>()
+    for (const course of courses) {
+      const club = dispatchClub(course.name)
+      grouped.set(club, [...(grouped.get(club) ?? []), course])
+    }
+    const order = ['真駒内', '滝の', '羊ヶ丘']
+    return [...grouped].map(([name, items]) => {
+      const courseRank = (label: string) => {
+        if (name === '真駒内') return (label.includes('藻岩') ? 2 : 0) + (/IN/i.test(label) ? 1 : 0)
+        if (name === '滝の') return label.includes('東') ? 0 : label.includes('中') ? 1 : 2
+        return /IN/i.test(label) ? 1 : 0
+      }
+      return [name, [...items].sort((a, b) => courseRank(a.name) - courseRank(b.name))] as const
+    }).sort(([a], [b]) => {
+      const rank = (name: string) => order.includes(name) ? order.indexOf(name) : order.length
+      return rank(a) - rank(b)
+    })
+  }, [courses])
+  const activeClub = clubs.some(([name]) => name === clubFilter) ? clubFilter : clubs[0]?.[0]
+  const clubCourses = clubs.find(([name]) => name === activeClub)?.[1] ?? []
+  const activeCourseFilter = clubCourses.some(course => course.id === courseFilter) ? courseFilter : ''
+  const assignedCaddies = useMemo(() => {
+    const names = new Map(profiles.map(profile => [profile.id, profile.displayName]))
+    const result = new Map<string, { id: string; name: string }[]>()
+    for (const assignment of assignments.filter(holdsTheRound)) {
+      if (!assignment.reservationId) continue
+      const id = assignment.caddieProfileId ?? ''
+      const current = result.get(assignment.reservationId) ?? []
+      current.push({ id, name: names.get(id) ?? (id || t('caddies:unassigned.assigned')) })
+      result.set(assignment.reservationId, current)
+    }
+    return result
+  }, [assignments, profiles, t])
   const shown = useMemo(() => {
-    const picked = courseFilter === ''
-      ? rounds
-      : rounds.filter(row => row.golfCourseId === courseFilter)
-    // Over several days the board arrives day by day but not in order within a
-    // day, and the desk works down the list from the earliest start.
-    return [...picked].sort((left, right) => left.teeTime.localeCompare(right.teeTime))
-  }, [rounds, courseFilter])
+    const courseIds = new Set(clubCourses.map(course => course.id))
+    return rounds.filter(row => courseIds.has(row.golfCourseId) && (!activeCourseFilter || row.golfCourseId === activeCourseFilter))
+      .sort((left, right) => left.teeTime.localeCompare(right.teeTime))
+  }, [rounds, clubCourses, activeCourseFilter])
   const byDay = useMemo(() => {
     const days = new Map<string, TeeSheetRow[]>()
     for (const round of shown) {
@@ -197,15 +231,22 @@ export function UnassignedRoundsPanel({
               </button>
             ))}
           </div>
-          {courses.length > 1 ? (
+          {clubs.length > 1 ? (
+            <div className="horizon-switch" role="group" aria-label={t('caddies:unassigned.clubFilter')}>
+              {clubs.map(([name]) => <button key={name} type="button"
+                className={`horizon-chip${name === activeClub ? ' is-on' : ''}`} aria-pressed={name === activeClub}
+                onClick={() => { setClubFilter(name); setCourseFilter('') }}>{name}</button>)}
+            </div>
+          ) : null}
+          {clubCourses.length > 1 ? (
             <div className="w-full sm:w-48">
               <NativeSelect
                 aria-label={t('caddies:unassigned.courseFilter')}
-                value={courseFilter}
+                value={activeCourseFilter}
                 onChange={event => setCourseFilter(event.target.value)}
               >
                 <option value="">{t('caddies:unassigned.allCourses')}</option>
-                {courses.map(course => (
+                {clubCourses.map(course => (
                   <option key={course.id} value={course.id}>{course.name}</option>
                 ))}
               </NativeSelect>
@@ -233,8 +274,8 @@ export function UnassignedRoundsPanel({
       {sheet.error ? <ResourceError error={sheet.error} onRetry={sheet.refresh} /> : null}
       {!sheet.loading && !sheet.error && shown.length === 0 ? (
         <EmptyState
-          title={t(`caddies:unassigned.${emptyKey}.title`)}
-          description={t(`caddies:unassigned.${emptyKey}.description`)}
+          title={t('caddies:unassigned.noBookings.title')}
+          description={t('caddies:unassigned.noBookings.description')}
         />
       ) : null}
 
@@ -255,8 +296,8 @@ export function UnassignedRoundsPanel({
               </h3>
             ) : null}
             {view === 'ledger' ? (
-              <UnassignedRoundsLedger rounds={dayRounds} courseOrder={courses.map(course => course.id)}
-                selectedId={naming?.id ?? null} onSelect={setNaming} />
+              <UnassignedRoundsLedger rounds={dayRounds} courseOrder={clubCourses.map(course => course.id)}
+                assignedCaddies={assignedCaddies} selectedId={naming?.id ?? null} onSelect={setNaming} />
             ) : (
               <div className="space-y-2">
                 {dayRounds.map(round => (
@@ -275,10 +316,15 @@ export function UnassignedRoundsPanel({
                         {round.courseName} · {t('caddies:unassigned.players', { n: String(round.partySize) })}
                       </p>
                     </div>
-                    <Button type="button" variant="secondary" size="sm" onClick={() => setNaming(round)}>
-                      <UserPlus />
-                      {t('caddies:unassigned.name')}
-                    </Button>
+                    {assignedCaddies.has(round.id) ? (
+                      <div className="dispatch-assigned-caddies">
+                        {assignedCaddies.get(round.id)?.map((caddie, index) => caddie.id
+                          ? <CaddieLink key={`${caddie.id}-${index}`} caddieId={caddie.id} displayName={caddie.name} />
+                          : <span key={index}>{caddie.name}</span>)}
+                      </div>
+                    ) : <Button type="button" variant="secondary" size="sm" onClick={() => setNaming(round)}>
+                      <UserPlus />{t('caddies:unassigned.name')}
+                    </Button>}
                   </div>
                 ))}
               </div>

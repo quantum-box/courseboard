@@ -3,6 +3,7 @@ import { UserPlus } from 'lucide-react'
 import { Fragment, useMemo } from 'react'
 import { useTranslation } from 'react-i18next'
 
+import { CaddieLink } from './CaddieLink'
 import { LedgerGroupCell, LedgerSeatCell } from './ledger/LedgerBoard'
 import { seatCells } from './ledger/ledgerLayout'
 import type { TeeReservation } from './timeline/models'
@@ -24,11 +25,13 @@ function reservationForLedger(round: TeeSheetRow): TeeReservation {
 export function UnassignedRoundsLedger({
   rounds,
   courseOrder,
+  assignedCaddies,
   selectedId,
   onSelect,
 }: {
   rounds: TeeSheetRow[]
   courseOrder: string[]
+  assignedCaddies: Map<string, { id: string; name: string }[]>
   selectedId: string | null
   onSelect: (round: TeeSheetRow) => void
 }) {
@@ -51,7 +54,7 @@ export function UnassignedRoundsLedger({
     () => [...new Set(rounds.map(round => round.teeTime.slice(11, 16)))].sort(),
     [rounds],
   )
-  const unassignedIds = useMemo(() => new Set(rounds.map(round => round.id)), [rounds])
+  const unassignedIds = useMemo(() => new Set(rounds.filter(round => !assignedCaddies.has(round.id)).map(round => round.id)), [rounds, assignedCaddies])
   // A simultaneous multi-group start gets the same height in every course.
   const rowsPerTime = useMemo(() => new Map(times.map(time => [time,
     Math.max(...courses.map(course => course.rounds.filter(
@@ -67,7 +70,7 @@ export function UnassignedRoundsLedger({
             <header className="ledger-column-head">
               <h3>{course.name}</h3>
               <p className="ledger-column-totals">
-                {t('caddies:unassigned.pendingCount', { n: String(course.rounds.length) })}
+                {t('caddies:unassigned.pendingCount', { n: String(course.rounds.filter(round => !assignedCaddies.has(round.id)).length) })}
               </p>
             </header>
             <table className="ledger-table" style={{ width: 76 + 190 + 108 * course.seats + 148 }}>
@@ -97,7 +100,7 @@ export function UnassignedRoundsLedger({
                             className={`ledger-row dispatch-ledger-row${round ? ' is-booked' : ''}${selectedId === round?.id ? ' is-selected' : ''}`}
                             onClick={round ? event => {
                               if ((event.target as HTMLElement).closest('button, a')) return
-                              onSelect(round)
+                              if (!assignedCaddies.has(round.id)) onSelect(round)
                             } : undefined}
                           >
                             {index === 0 ? (
@@ -108,16 +111,20 @@ export function UnassignedRoundsLedger({
                             {round ? (
                               <>
                                 <LedgerGroupCell item={reservationForLedger(round)} isSelected={selectedId === round.id}
-                                  shiftsConfirmed unassignedIds={unassignedIds} onSelect={() => onSelect(round)} />
+                                  shiftsConfirmed unassignedIds={unassignedIds} onSelect={() => { if (!assignedCaddies.has(round.id)) onSelect(round) }} />
                                 {seatCells(reservationForLedger(round), course.seats).map((cell, seat) => (
                                   <LedgerSeatCell key={seat} cell={cell} />
                                 ))}
                                 <td className="dispatch-ledger-action">
-                                  <Button type="button" variant="secondary" size="sm"
+                                  {assignedCaddies.has(round.id) ? <div className="dispatch-assigned-caddies">
+                                    {assignedCaddies.get(round.id)?.map((caddie, index) => caddie.id
+                                      ? <CaddieLink key={`${caddie.id}-${index}`} caddieId={caddie.id} displayName={caddie.name} />
+                                      : <span key={index}>{caddie.name}</span>)}
+                                  </div> : <Button type="button" variant="secondary" size="sm"
                                     aria-label={t('caddies:unassigned.assignRound', { time, name: round.partyName || round.reservationNumber })}
                                     onClick={() => onSelect(round)}>
                                     <UserPlus aria-hidden="true" />{t('caddies:unassigned.name')}
-                                  </Button>
+                                  </Button>}
                                 </td>
                               </>
                             ) : (

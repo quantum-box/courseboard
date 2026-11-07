@@ -1079,6 +1079,7 @@ function DispatchView({
         <UnassignedRoundsPanel
           sheet={teeSheet}
           assignments={horizonAssignments}
+          profiles={profiles}
           horizon={horizon}
           onHorizonChange={setHorizon}
           onChanged={onChanged}

@@ -291,7 +291,7 @@ test.describe('キャディ名簿', () => {
 
   test('配置画面に割当とおすすめが出る', async ({ page }) => {
     await page.goto(`/golf/caddies/dispatch?date=${D}`)
-    await expect(page.getByRole('heading', { name: 'キャディが決まっていない組' })).toBeVisible()
+    await expect(page.getByRole('heading', { name: '組ごとのキャディ配置' })).toBeVisible()
     await expect(page.getByRole('button', { name: 'キャディを自動配置' })).toBeVisible()
     const assigned = page.getByText(/^配置済み [1-9][0-9]*組$/)
     await expect(assigned).toBeVisible()
@@ -299,9 +299,24 @@ test.describe('キャディ名簿', () => {
     await expect(page.getByText(/担当を変えるときは、その行の「付け替え」から/)).toBeVisible()
   })
 
+  test('ゴルフ場ごとにコースをまとめ、配置済みの担当者を台帳と一覧に残す', async ({ page }) => {
+    await page.goto(`/golf/caddies/dispatch?date=${D}`)
+    const ledger = page.getByRole('region', { name: 'キャディ配置の予約台帳' })
+    await expect(page.getByRole('button', { name: '真駒内', exact: true })).toHaveAttribute('aria-pressed', 'true')
+    await expect(ledger.getByRole('heading', { name: '真駒内CC 空沼 OUT', exact: true })).toBeVisible()
+    await expect(ledger.locator('.dispatch-assigned-caddies').first()).toBeVisible()
+    await page.getByRole('button', { name: '滝の', exact: true }).click()
+    await expect(ledger.getByRole('heading', { name: '滝のCC 東コース', exact: true })).toBeVisible()
+    await expect(ledger.getByRole('heading', { name: /真駒内/ })).toHaveCount(0)
+    await page.getByRole('button', { name: '羊ヶ丘', exact: true }).click()
+    await expect(ledger.getByRole('heading', { name: '羊ヶ丘CC OUT', exact: true })).toBeVisible()
+    await page.getByRole('button', { name: '一覧表示', exact: true }).click()
+    await expect(page.locator('.dispatch-assigned-caddies').first()).toBeVisible()
+  })
+
   test('台帳から自動配置を開き、未配置の理由を確認して閉じる', async ({ page }) => {
     await page.goto(`/golf/caddies/dispatch?date=${D}`)
-    await expect(page.getByRole('region', { name: 'キャディ未配置の予約台帳' })).toBeVisible()
+    await expect(page.getByRole('region', { name: 'キャディ配置の予約台帳' })).toBeVisible()
     await expect(page.getByRole('button', { name: '台帳表示', exact: true })).toHaveAttribute('aria-pressed', 'true')
     await page.getByRole('button', { name: 'キャディを自動配置' }).click()
     const dialog = page.getByRole('dialog', { name: '自動で配置する' })
