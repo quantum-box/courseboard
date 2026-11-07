@@ -23,6 +23,21 @@ export const agent = {
     "information": "情報"
   }
 ,
+  "history": {
+  "open": "会話の履歴を開く",
+  "title": "会話の履歴",
+  "description": "このタブでの直近30件の会話です。会話を選ぶと続きから再開できます。",
+  "empty": "まだ会話がありません。"
+},
+  "trace": {
+  "running": "実行中",
+  "ok": "完了",
+  "error": "失敗",
+  "input": "入力",
+  "output": "結果",
+  "failed": "操作に失敗しました。対象の画面で現在の状態を確認してください。"
+},
+
   breakdown: {
   "title": "{{date}}のコース別予約内訳",
   "source": "予約台帳から取得した名称・数値をそのまま表示しています。",

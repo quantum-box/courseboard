@@ -17,6 +17,7 @@ const status = { source: '/v1/course/tee-ledger', sourceLabel: '予約台帳', d
 const tool = (name: string, id: string, args: object) => ({ type: 'tool_call_pending', tool_name: name, tool_id: id, args })
 beforeEach(async () => {
   vi.clearAllMocks()
+  sessionStorage.clear()
   HTMLElement.prototype.scrollIntoView = vi.fn()
   mocks.create.mockResolvedValue('as_test')
   mocks.submit.mockResolvedValue(undefined)
@@ -176,11 +177,106 @@ it('collapses completed activities and uses business descriptions instead of end
   const log = screen.getByText('作業中…').closest('details')!
   expect(log.open).toBe(true)
   expect(within(log).getByText('月次集計を確認しています')).toBeTruthy()
-  expect(screen.queryByText(/GET \/v1\/course/)).toBeNull()
+  expect([...log.querySelectorAll('summary')].some(summary => /GET \/v1\/course/.test(summary.textContent ?? ''))).toBe(false)
   finish()
   await screen.findByText('作業履歴（2件完了）')
   await waitFor(() => expect(log.open).toBe(false))
   fireEvent.click(within(log).getByText('作業履歴（2件完了）'))
   expect(log.open).toBe(true)
   expect(screen.getByText('月の集計です')).toBeTruthy()
+})
+
+it('opens an empty history and restores a previous conversation with its original session', async () => {
+  mocks.create.mockResolvedValueOnce('as_first').mockResolvedValueOnce('as_second')
+  mocks.execute.mockImplementation(async function* () {
+    yield { type: 'attempt_completion', result: '回答しました' }
+    yield { type: 'done' }
+  })
+  render(<AgentChat historyKey="history:tenant:user" />)
+  fireEvent.click(screen.getByRole('button', { name: '会話の履歴を開く' }))
+  expect(screen.getByText('まだ会話がありません。')).toBeTruthy()
+  fireEvent.keyDown(screen.getByRole('dialog'), { key: 'Escape' })
+  start()
+  await screen.findByText('回答しました')
+  fireEvent.change(screen.getByLabelText('依頼内容'), { target: { value: '続きの下書き' } })
+  fireEvent.click(screen.getByRole('button', { name: '新しい会話' }))
+  fireEvent.change(screen.getByLabelText('依頼内容'), { target: { value: '別の相談' } })
+  fireEvent.click(screen.getByRole('button', { name: '送信' }))
+  await screen.findByText('回答しました')
+  fireEvent.click(screen.getByRole('button', { name: '会話の履歴を開く' }))
+  fireEvent.click(within(screen.getByRole('dialog')).getByRole('button', { name: /予約を変更して/ }))
+  expect(screen.queryByRole('dialog')).toBeNull()
+  expect((screen.getByLabelText('依頼内容') as HTMLTextAreaElement).value).toBe('続きの下書き')
+  fireEvent.click(screen.getByRole('button', { name: '送信' }))
+  await waitFor(() => expect(mocks.execute).toHaveBeenCalledTimes(3))
+  expect(mocks.execute.mock.calls[2][0]).toBe('as_first')
+  expect(mocks.create).toHaveBeenCalledTimes(2)
+})
+
+it('restores the history after remounting and isolates another account', async () => {
+  mocks.execute.mockImplementation(async function* () {
+    yield { type: 'attempt_completion', result: '保存された回答' }
+    yield { type: 'done' }
+  })
+  const view = render(<AgentChat historyKey="history:tenant:user" />)
+  start()
+  await screen.findByText('保存された回答')
+  view.unmount()
+  const restored = render(<AgentChat historyKey="history:tenant:user" />)
+  expect(screen.getByText('保存された回答')).toBeTruthy()
+  restored.unmount()
+  render(<AgentChat historyKey="history:tenant:other-user" />)
+  expect(screen.queryByText('保存された回答')).toBeNull()
+  fireEvent.click(screen.getByRole('button', { name: '会話の履歴を開く' }))
+  expect(screen.getByText('まだ会話がありません。')).toBeTruthy()
+})
+
+it('restores an interrupted turn as read-only without replaying a pending change', async () => {
+  const view = render(<AgentChat historyKey="history:tenant:user" />)
+  start()
+  await screen.findByRole('button', { name: 'この内容で実行' })
+  view.unmount()
+  render(<AgentChat historyKey="history:tenant:user" />)
+  expect((screen.getByLabelText('依頼内容') as HTMLTextAreaElement).disabled).toBe(true)
+  expect(screen.queryByRole('button', { name: 'この内容で実行' })).toBeNull()
+  expect(screen.getByText(/処理を中断しました/)).toBeTruthy()
+  expect(mocks.write).not.toHaveBeenCalled()
+  expect(mocks.execute).toHaveBeenCalledTimes(1)
+})
+
+it('shows tool inputs and results only when the trace row is expanded', async () => {
+  mocks.execute.mockImplementation(async function* () {
+    yield tool('courseboard_describe_operation', 'describe', { operationId: 'update' })
+    yield { type: 'done' }
+  })
+  const { container } = render(<AgentChat />)
+  start()
+  await waitFor(() => expect(container.querySelector('details[data-state="ok"]')).toBeTruthy())
+  const log = container.querySelector<HTMLDetailsElement>('details.agent-activity-log')!
+  fireEvent.click(within(log).getByText('作業履歴（1件完了）'))
+  const trace = container.querySelector<HTMLDetailsElement>('details.agent-trace')!
+  expect(trace.open).toBe(false)
+  fireEvent.click(within(trace).getByText('操作内容を確認しています'))
+  expect(trace.open).toBe(true)
+  expect(within(trace).getByText('入力')).toBeTruthy()
+  expect(within(trace).getByText('結果')).toBeTruthy()
+  expect(trace.textContent).toContain('operationId')
+  expect(trace.textContent).toContain('予約を変更')
+})
+
+it('keeps an unsent draft when switching to a new conversation', () => {
+  render(<AgentChat historyKey="history:tenant:user" />)
+  fireEvent.change(screen.getByLabelText('依頼内容'), { target: { value: '明日の予約を確認したい' } })
+  fireEvent.click(screen.getByRole('button', { name: '新しい会話' }))
+  fireEvent.click(screen.getByRole('button', { name: '会話の履歴を開く' }))
+  fireEvent.click(within(screen.getByRole('dialog')).getByRole('button', { name: /明日の予約を確認したい/ }))
+  expect((screen.getByLabelText('依頼内容') as HTMLTextAreaElement).value).toBe('明日の予約を確認したい')
+  expect(mocks.execute).not.toHaveBeenCalled()
+})
+
+it('starts normally if a stored history is unreadable', () => {
+  sessionStorage.setItem('history:tenant:user', '{invalid')
+  render(<AgentChat historyKey="history:tenant:user" />)
+  expect(screen.getByRole('heading', { name: 'Courseboard エージェント' })).toBeTruthy()
+  expect((screen.getByLabelText('依頼内容') as HTMLTextAreaElement).disabled).toBe(false)
 })

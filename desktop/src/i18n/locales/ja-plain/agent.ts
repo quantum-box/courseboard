@@ -26,6 +26,21 @@ export const agent: DeepPartial<typeof source> = {
     "information": "情報"
   }
 ,
+  "history": {
+  "open": "会話の履歴を開く",
+  "title": "会話の履歴",
+  "description": "このタブで話した内容を30件まで残しています。選ぶと前の会話に戻れます。",
+  "empty": "まだ会話がありません。"
+},
+  "trace": {
+  "running": "処理しています",
+  "ok": "完了",
+  "error": "失敗",
+  "input": "送った内容",
+  "output": "結果",
+  "failed": "処理できませんでした。対象の画面を開き、今の状態を確認してください。"
+},
+
   breakdown: {
   "title": "{{date}}のコース別予約内訳",
   "source": "予約台帳のコース名と数を、そのまま表示しています。",
