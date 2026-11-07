@@ -179,7 +179,7 @@ mod tests {
             rows,
             tenant_day_bounds(date, date, "Asia/Tokyo").unwrap(),
             |a, _| async move {
-                if a.id().to_string() == "fail" {
+                if a.id().as_str() == "fail" {
                     Err(CourseError::Provider("offline".into()))
                 } else {
                     Ok(())
