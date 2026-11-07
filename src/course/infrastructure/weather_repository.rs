@@ -42,18 +42,31 @@ impl MySqlWeatherRepository {
         tenant: &str,
         observation: &WeatherObservation,
     ) -> Result<(), sqlx::Error> {
-        sqlx::query(
-            "INSERT INTO golf_weather_observations (tenant_id, golf_course_id, observed_at, timezone, weather) \
-             VALUES (?, ?, ?, ?, ?) ON DUPLICATE KEY UPDATE weather = VALUES(weather), \
-             timezone = VALUES(timezone), updated_at = CURRENT_TIMESTAMP(6)",
-        )
-        .bind(tenant)
-        .bind(&observation.golf_course_id)
-        .bind(observation.observed_at)
-        .bind(&observation.timezone)
-        .bind(&observation.weather)
-        .execute(&self.0)
-        .await?;
+        self.save_all(tenant, std::slice::from_ref(observation))
+            .await
+    }
+
+    pub async fn save_all(
+        &self,
+        tenant: &str,
+        observations: &[WeatherObservation],
+    ) -> Result<(), sqlx::Error> {
+        let mut transaction = self.0.begin().await?;
+        for observation in observations {
+            sqlx::query(
+                "INSERT INTO golf_weather_observations (tenant_id, golf_course_id, observed_at, timezone, weather) \
+                 VALUES (?, ?, ?, ?, ?) ON DUPLICATE KEY UPDATE weather = VALUES(weather), \
+                 timezone = VALUES(timezone), updated_at = CURRENT_TIMESTAMP(6)",
+            )
+            .bind(tenant)
+            .bind(&observation.golf_course_id)
+            .bind(observation.observed_at)
+            .bind(&observation.timezone)
+            .bind(&observation.weather)
+            .execute(&mut *transaction)
+            .await?;
+        }
+        transaction.commit().await?;
         Ok(())
     }
 }
@@ -62,6 +75,28 @@ impl MySqlWeatherRepository {
 mod tests {
     use super::*;
     use crate::test_support::{test_pool, test_tenant};
+
+    #[tokio::test]
+    async fn saves_a_morning_and_afternoon_pair_together() {
+        let repo = MySqlWeatherRepository(test_pool().await);
+        let tenant = test_tenant("weather-pair");
+        let date = NaiveDate::from_ymd_opt(2026, 11, 7).unwrap();
+        let observations: Vec<_> = [(9, "sunny"), (15, "rain")]
+            .into_iter()
+            .map(|(hour, weather)| WeatherObservation {
+                golf_course_id: "east".into(),
+                observed_at: date.and_hms_opt(hour, 0, 0).unwrap(),
+                timezone: "Asia/Tokyo".into(),
+                weather: weather.into(),
+            })
+            .collect();
+        repo.save_all(&tenant, &observations).await.unwrap();
+        repo.save_all(&tenant, &observations).await.unwrap();
+        let rows = repo.list(&tenant, date, date, Some("east")).await.unwrap();
+        assert_eq!(rows.len(), 2);
+        assert_eq!(rows[0].weather, "rain");
+        assert_eq!(rows[1].weather, "sunny");
+    }
 
     #[tokio::test]
     async fn observations_persist_upsert_and_stay_tenant_scoped() {

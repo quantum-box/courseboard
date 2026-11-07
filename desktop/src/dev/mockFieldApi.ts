@@ -5405,17 +5405,22 @@ function resolveMutation(path: string, init?: RequestInit): MockFieldResult<Json
   }
 
   if (pathname === '/v1/course/weather-observations' && method === 'POST') {
-    const observation = {
-      golfCourseId: String(body?.golfCourseId ?? ''),
-      observedAt: String(body?.observedAt ?? ''),
-      weather: String(body?.weather ?? ''),
+    const batch = Array.isArray(body?.items)
+    const inputs: Array<Record<string, unknown>> = Array.isArray(body?.items) ? body.items : [body ?? {}]
+    const saved = inputs.map((input: Record<string, unknown>) => ({
+      golfCourseId: String(input?.golfCourseId ?? ''),
+      observedAt: String(input?.observedAt ?? ''),
+      weather: String(input?.weather ?? ''),
       timezone: 'Asia/Tokyo',
-    }
+    }))
     const key = `weather.${TENANT_ID()}`
-    const observations = loadMockWrites<typeof observation[]>(key, [])
-    saveMockWrites(key, [...observations.filter(row => row.golfCourseId !== observation.golfCourseId
-      || row.observedAt !== observation.observedAt), observation])
-    return hit(observation)
+    const observations = loadMockWrites<typeof saved>(key, [])
+    saveMockWrites(key, [
+      ...observations.filter(row => !saved.some((item: typeof row) =>
+        row.golfCourseId === item.golfCourseId && row.observedAt === item.observedAt)),
+      ...saved,
+    ])
+    return hit(batch ? items(saved) : saved[0])
   }
 
   if (pathname === '/v1/erp/extensions/golf-course/daily-budgets' && method === 'POST') {

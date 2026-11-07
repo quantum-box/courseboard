@@ -4,7 +4,7 @@ use axum::{
     Json,
 };
 use chrono::{Datelike, NaiveDate, NaiveDateTime, Timelike};
-use serde::Deserialize;
+use serde::{Deserialize, Serialize};
 use utoipa::{IntoParams, ToSchema};
 
 use super::http::{catalog_gateway, credentials, ItemsResponse};
@@ -30,6 +30,50 @@ pub struct SaveWeatherRequest {
     golf_course_id: String,
     observed_at: NaiveDateTime,
     weather: String,
+}
+
+/// Accept the original single observation or an atomic morning/afternoon pair.
+#[derive(Deserialize, ToSchema)]
+#[serde(untagged)]
+pub enum SaveWeatherBody {
+    Single(SaveWeatherRequest),
+    Batch { items: Vec<SaveWeatherRequest> },
+}
+
+#[derive(Serialize, ToSchema)]
+#[serde(untagged)]
+pub enum SaveWeatherResponse {
+    Single(WeatherObservation),
+    Batch { items: Vec<WeatherObservation> },
+}
+
+impl SaveWeatherBody {
+    fn validate(&self) -> Result<&[SaveWeatherRequest], AppError> {
+        let items = match self {
+            Self::Single(item) => std::slice::from_ref(item),
+            Self::Batch { items } => items.as_slice(),
+        };
+        if items.is_empty() || items.len() > 2 {
+            return Err(AppError::BadRequest("save one or two weather observations"));
+        }
+        for item in items {
+            if !valid_weather(&item.weather)
+                || item.observed_at.year() < 1000
+                || item.observed_at.year() > 9999
+                || item.observed_at.second() != 0
+                || item.observed_at.nanosecond() != 0
+            {
+                return Err(AppError::BadRequest("invalid weather observation"));
+            }
+        }
+        if items.len() == 2
+            && items[0].golf_course_id == items[1].golf_course_id
+            && items[0].observed_at == items[1].observed_at
+        {
+            return Err(AppError::BadRequest("duplicate weather observation"));
+        }
+        Ok(items)
+    }
 }
 
 #[utoipa::path(get, path = "/v1/course/weather-observations", params(WeatherQuery),
@@ -60,39 +104,79 @@ pub async fn list_weather(
     Ok(Json(ItemsResponse { items }))
 }
 
-#[utoipa::path(post, path = "/v1/course/weather-observations", request_body = SaveWeatherRequest,
-    responses((status = 200, body = WeatherObservation)), security(("bearer_auth" = [])))]
+#[utoipa::path(post, path = "/v1/course/weather-observations", request_body = SaveWeatherBody,
+    responses((status = 200, body = SaveWeatherResponse)), security(("bearer_auth" = [])))]
 pub async fn save_weather(
     State(state): State<AppState>,
     headers: HeaderMap,
-    Json(body): Json<SaveWeatherRequest>,
-) -> Result<Json<WeatherObservation>, AppError> {
+    Json(body): Json<SaveWeatherBody>,
+) -> Result<Json<SaveWeatherResponse>, AppError> {
     let credentials = credentials(&state, &headers)?;
     credentials.require(actions::MANAGE_BUDGETS).await?;
-    if !valid_weather(&body.weather)
-        || body.observed_at.year() < 1000
-        || body.observed_at.year() > 9999
-        || body.observed_at.second() != 0
-        || body.observed_at.nanosecond() != 0
-    {
-        return Err(AppError::BadRequest("invalid weather observation"));
-    }
+    let items = body.validate()?;
     let catalog = catalog_gateway(&state);
     let courses = catalog.list_courses(credentials).await?;
-    if !courses
-        .iter()
-        .any(|course| course.id().as_str() == body.golf_course_id)
-    {
+    if items.iter().any(|item| {
+        !courses
+            .iter()
+            .any(|course| course.id().as_str() == item.golf_course_id)
+    }) {
         return Err(AppError::BadRequest("unknown golf course"));
     }
-    let observation = WeatherObservation {
-        golf_course_id: body.golf_course_id,
-        observed_at: body.observed_at,
-        timezone: catalog.get_tenant_timezone(credentials).await?,
-        weather: body.weather,
-    };
+    let timezone = catalog.get_tenant_timezone(credentials).await?;
+    let mut observations: Vec<_> = items
+        .iter()
+        .map(|item| WeatherObservation {
+            golf_course_id: item.golf_course_id.clone(),
+            observed_at: item.observed_at,
+            timezone: timezone.clone(),
+            weather: item.weather.clone(),
+        })
+        .collect();
     MySqlWeatherRepository(state.common_import_pool.clone())
-        .save(credentials.operator_id, &observation)
+        .save_all(credentials.operator_id, &observations)
         .await?;
-    Ok(Json(observation))
+    let response = match body {
+        SaveWeatherBody::Single(_) => SaveWeatherResponse::Single(observations.remove(0)),
+        SaveWeatherBody::Batch { .. } => SaveWeatherResponse::Batch {
+            items: observations,
+        },
+    };
+    Ok(Json(response))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use serde_json::json;
+
+    fn observation(time: &str, weather: &str) -> serde_json::Value {
+        json!({ "golfCourseId": "east", "observedAt": time, "weather": weather })
+    }
+
+    #[test]
+    fn accepts_legacy_observations_and_a_morning_afternoon_pair() {
+        let morning = observation("2026-11-07T09:00:00", "sunny");
+        let afternoon = observation("2026-11-07T15:00:00", "rain");
+        let single: SaveWeatherBody = serde_json::from_value(morning.clone()).unwrap();
+        assert!(matches!(single, SaveWeatherBody::Single(_)));
+        assert_eq!(single.validate().unwrap().len(), 1);
+        let batch: SaveWeatherBody =
+            serde_json::from_value(json!({"items": [morning, afternoon]})).unwrap();
+        assert_eq!(batch.validate().unwrap().len(), 2);
+    }
+
+    #[test]
+    fn rejects_invalid_batches_before_saving_any_observation() {
+        let morning = observation("2026-11-07T09:00:00", "sunny");
+        for items in [
+            json!([]),
+            json!([morning, morning]),
+            json!([morning, observation("2026-11-07T15:00:00", "invalid")]),
+            json!([morning, morning, morning]),
+        ] {
+            let body: SaveWeatherBody = serde_json::from_value(json!({ "items": items })).unwrap();
+            assert!(body.validate().is_err());
+        }
+    }
 }
