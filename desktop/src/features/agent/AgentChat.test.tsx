@@ -3,7 +3,7 @@ import { cleanup, fireEvent, render, screen, waitFor } from '@testing-library/re
 import { afterEach, beforeEach, expect, it, vi } from 'vitest'
 import { i18next } from '../../i18n'
 import { AgentChat } from './AgentChat'
-const mocks = vi.hoisted(() => ({ create: vi.fn(), execute: vi.fn(), submit: vi.fn(), write: vi.fn(), field: vi.fn() }))
+const mocks = vi.hoisted(() => ({ create: vi.fn(), execute: vi.fn(), submit: vi.fn(), write: vi.fn(), field: vi.fn(), reservations: vi.fn() }))
 vi.mock('./chat-api', async importOriginal => ({
   ...await importOriginal<typeof import('./chat-api')>(),
   isAgentDemo: () => false,
@@ -12,6 +12,7 @@ vi.mock('./chat-api', async importOriginal => ({
   executeOperation: mocks.write,
   callFieldTool: mocks.field,
 }))
+vi.mock('./reservation-status', () => ({ getReservationStatus: mocks.reservations }))
 const tool = (name: string, id: string, args: object) => ({ type: 'tool_call_pending', tool_name: name, tool_id: id, args })
 beforeEach(async () => {
   vi.clearAllMocks()
@@ -76,4 +77,19 @@ it('never repeats a write after an uncertain failure', async () => {
   await waitFor(() => expect(mocks.submit).toHaveBeenCalledTimes(2))
   expect(mocks.write).toHaveBeenCalledTimes(1)
   expect(mocks.submit.mock.calls[1][1].is_error).toBe(true)
+})
+
+it('uses the dedicated reservation summary directly without selecting report operations', async () => {
+  mocks.reservations.mockResolvedValue({ source: '/v1/course/tee-ledger', complete: true, reservationTotals: { groups: 29, players: 98 } })
+  mocks.execute.mockImplementation(async function* () {
+    yield tool('courseboard_get_reservation_status', 'status', { date: '2026-11-07' })
+    yield { type: 'done' }
+  })
+  render(<AgentChat />); start()
+  await waitFor(() => expect(mocks.submit).toHaveBeenCalledTimes(1))
+  expect(mocks.execute.mock.calls[0][1].reservation_status).toBe(true)
+  expect(mocks.reservations).toHaveBeenCalledWith({ date: '2026-11-07' }, expect.any(AbortSignal), expect.any(String))
+  expect(mocks.write).not.toHaveBeenCalled()
+  expect(mocks.submit.mock.calls[0][1].result).toContain('29')
+  expect(mocks.submit.mock.calls[0][1].result).toContain('98')
 })

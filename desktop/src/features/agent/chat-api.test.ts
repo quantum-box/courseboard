@@ -14,6 +14,14 @@ describe('CourseBoard agent tools', () => {
     expect(searchOperations(catalog, 'unknown').operations).toHaveLength(0)
     expect(Object.keys(describeOperation(catalog, operation.operationId).schemas)).toEqual(['Booking'])
   })
+  it('keeps imported report rows out of general reservation searches', () => {
+    const data: Catalog = { schemas: {}, operations: [
+      { operationId: 'list_report', method: 'GET', path: '/v1/course/reservation-report-entries', summary: 'Imported reservation reports' },
+      { operationId: 'get_tee_ledger', method: 'GET', path: '/v1/course/tee-ledger', description: 'Start-time ledger for the requested date' },
+    ] }
+    expect(searchOperations(data, 'reservation').operations.map(op => op.operationId)).toEqual(['get_tee_ledger'])
+    expect(searchOperations(data, 'imported reservation report').operations.map(op => op.operationId)).toContain('list_report')
+  })
   it('rejects invented operations, paths, extra query keys and path traversal', () => {
     expect(() => describeOperation(catalog, 'delete_everything')).toThrow()
     for (const id of ['../secret', 'x/y', '?foo=1', '']) {
