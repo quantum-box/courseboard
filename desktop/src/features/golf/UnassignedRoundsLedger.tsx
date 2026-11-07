@@ -1,8 +1,9 @@
 import { Button } from '@tachyon-sdk/native-ui'
-import { UserPlus } from 'lucide-react'
+import { UserPlus, Shuffle } from 'lucide-react'
 import { Fragment, useMemo } from 'react'
 import { useTranslation } from 'react-i18next'
 
+import { CaddieLink } from './CaddieLink'
 import { LedgerGroupCell, LedgerSeatCell } from './ledger/LedgerBoard'
 import { seatCells } from './ledger/ledgerLayout'
 import type { TeeReservation } from './timeline/models'
@@ -24,13 +25,17 @@ function reservationForLedger(round: TeeSheetRow): TeeReservation {
 export function UnassignedRoundsLedger({
   rounds,
   courseOrder,
+  assignedCaddies,
   selectedId,
   onSelect,
+  onChangeCaddie,
 }: {
   rounds: TeeSheetRow[]
   courseOrder: string[]
+  assignedCaddies: Map<string, { id: string; name: string; assignmentId?: string }[]>
   selectedId: string | null
   onSelect: (round: TeeSheetRow) => void
+  onChangeCaddie: (round: TeeSheetRow, assignmentId: string) => void
 }) {
   const { t } = useTranslation(['caddies', 'ledger'])
   const courses = useMemo(() => {
@@ -51,7 +56,7 @@ export function UnassignedRoundsLedger({
     () => [...new Set(rounds.map(round => round.teeTime.slice(11, 16)))].sort(),
     [rounds],
   )
-  const unassignedIds = useMemo(() => new Set(rounds.map(round => round.id)), [rounds])
+  const unassignedIds = useMemo(() => new Set(rounds.filter(round => !assignedCaddies.has(round.id)).map(round => round.id)), [rounds, assignedCaddies])
   // A simultaneous multi-group start gets the same height in every course.
   const rowsPerTime = useMemo(() => new Map(times.map(time => [time,
     Math.max(...courses.map(course => course.rounds.filter(
@@ -67,7 +72,7 @@ export function UnassignedRoundsLedger({
             <header className="ledger-column-head">
               <h3>{course.name}</h3>
               <p className="ledger-column-totals">
-                {t('caddies:unassigned.pendingCount', { n: String(course.rounds.length) })}
+                {t('caddies:unassigned.pendingCount', { n: String(course.rounds.filter(round => !assignedCaddies.has(round.id)).length) })}
               </p>
             </header>
             <table className="ledger-table" style={{ width: 76 + 190 + 108 * course.seats + 148 }}>
@@ -108,16 +113,23 @@ export function UnassignedRoundsLedger({
                             {round ? (
                               <>
                                 <LedgerGroupCell item={reservationForLedger(round)} isSelected={selectedId === round.id}
-                                  shiftsConfirmed unassignedIds={unassignedIds} onSelect={() => onSelect(round)} />
+                                  shiftsConfirmed unassignedIds={unassignedIds} onSelect={() => { onSelect(round) }} />
                                 {seatCells(reservationForLedger(round), course.seats).map((cell, seat) => (
                                   <LedgerSeatCell key={seat} cell={cell} />
                                 ))}
                                 <td className="dispatch-ledger-action">
-                                  <Button type="button" variant="secondary" size="sm"
+                                  {assignedCaddies.has(round.id) ? <div className="dispatch-assigned-caddies">
+                                    {assignedCaddies.get(round.id)?.map((caddie, index) => <div key={`${caddie.id}-${index}`} className="flex items-center gap-1">
+                                      <CaddieLink caddieId={caddie.id} displayName={caddie.name} />
+                                      {caddie.assignmentId ? <Button type="button" variant="ghost" size="sm"
+                                        aria-label={t('caddies:unassigned.changeCaddie', { name: caddie.name, time })}
+                                        onClick={() => onChangeCaddie(round, caddie.assignmentId!)}><Shuffle aria-hidden="true" /></Button> : null}
+                                    </div>)}
+                                  </div> : <Button type="button" variant="secondary" size="sm"
                                     aria-label={t('caddies:unassigned.assignRound', { time, name: round.partyName || round.reservationNumber })}
                                     onClick={() => onSelect(round)}>
                                     <UserPlus aria-hidden="true" />{t('caddies:unassigned.name')}
-                                  </Button>
+                                  </Button>}
                                 </td>
                               </>
                             ) : (

@@ -116,7 +116,7 @@ describe('CaddiesPage dispatch tabs', () => {
     expect(roundTab.compareDocumentPosition(dateInput) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy()
 
     expect(screen.queryByRole('heading', { name: '未配置を解消する' })).toBeNull()
-    expect(await screen.findByRole('heading', { name: 'キャディが決まっていない組' })).toBeTruthy()
+    expect(await screen.findByRole('heading', { name: '組ごとのキャディ配置' })).toBeTruthy()
     expect(screen.getByRole('button', { name: 'キャディを自動配置' })).toBeTruthy()
     const assigned = document.querySelector('details.collapsible-section')
     expect(assigned).toBeTruthy()

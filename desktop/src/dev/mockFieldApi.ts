@@ -352,6 +352,12 @@ const mockCourses = [
 
 /** The club's own bookings for the month around the fixture day. */
 const generatedReservations = generateReservations(MOCK_FIXTURE_DATE, mockCourses)
+// Add a denser second layer only into empty start times. Existing IDs stay stable.
+const occupiedSampleStarts = new Set(generatedReservations.map(row => `${row.golfCourseId}:${row.teeTime}`))
+const additionalReservations = generateReservations(MOCK_FIXTURE_DATE, mockCourses, {
+  seed: 11072026, densityScale: 0.7, idPrefix: 'res_extra_november',
+}).filter(row => !occupiedSampleStarts.has(`${row.golfCourseId}:${row.teeTime}`))
+
 
 type MockReservationReportEntry = {
   id: string
@@ -1430,6 +1436,7 @@ const initialMockTeeReservations = [
   // day board holds a dozen groups, and nothing on these screens is read the
   // way it is read at sixty.
   ...generatedReservations,
+  ...additionalReservations,
 ].map(item => {
   const course = mockCourses.find(course => course.id === item.golfCourseId)!
   const product = mockProducts.find(product => product.playType === item.playType
@@ -1443,6 +1450,13 @@ const mockTeeReservations = loadMockWrites<MockTeeReservation[]>(
   'teeReservations',
   initialMockTeeReservations,
 )
+// Keep desk edits and assignments while upgrading existing local sessions.
+const existingReservationIds = new Set(mockTeeReservations.map(row => row.id))
+for (const row of initialMockTeeReservations) {
+  if (row.id.startsWith('res_extra_november_') && !existingReservationIds.has(row.id)) {
+    mockTeeReservations.push(row)
+  }
+}
 
 function datesBetween(from: string, to: string): string[] {
   const results: string[] = []
@@ -2290,6 +2304,7 @@ function normalizeMockPath(pathname: string): string {
     || pathname === '/v1/course/config'
     // Confirmed shifts and the balance board are CourseBoard's own data, with
     // nothing behind them in Field to map onto.
+    || pathname === '/v1/course/caddie-assignments/release-day'
     || pathname === '/v1/course/caddie-shifts'
     || pathname === '/v1/course/caddie-course-supply'
     || pathname === '/v1/course/caddie-reinforcements'
@@ -5268,6 +5283,21 @@ function resolveMutation(path: string, init?: RequestInit): MockFieldResult<Json
     mockAssignments.push(created)
     saveMockWrites('caddieAssignments', mockAssignments)
     return hit(created)
+  }
+
+  if (pathname === '/v1/course/caddie-assignments/release-day' && method === 'POST') {
+    const date = String(body?.date ?? '')
+    if (!/^\d{4}-\d{2}-\d{2}$/.test(date) || Number.isNaN(Date.parse(`${date}T00:00:00Z`))) {
+      return error(400, 'Invalid date')
+    }
+    const releasedAssignmentIds: string[] = []
+    for (const assignment of mockAssignments) {
+      if (new Intl.DateTimeFormat('en-CA', { timeZone: 'Asia/Tokyo', year: 'numeric', month: '2-digit', day: '2-digit' }).format(new Date(assignment.scheduledAt)) !== date || assignment.status !== 'assigned' || !assignment.reservationId) continue
+      assignment.status = 'cancelled'
+      releasedAssignmentIds.push(assignment.id)
+    }
+    saveMockWrites('caddieAssignments', mockAssignments)
+    return hit({ releasedAssignmentIds, failed: [] })
   }
 
   const assignmentMatch = pathname.match(

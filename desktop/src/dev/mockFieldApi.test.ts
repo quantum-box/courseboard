@@ -532,3 +532,31 @@ describe('mockFieldApi', () => {
     expect(nextMockTermsVersion('4294967295')).toBe('4294967295.1')
   })
 })
+
+describe('release day assignments API', () => {
+  it('releases only the selected local day and is safe to repeat', () => {
+    vi.stubEnv('VITE_COURSEBOARD_AUTH_MODE', 'development')
+    vi.stubEnv('VITE_COURSEBOARD_MOCK_DATA', 'true')
+    const before = resolveMockFieldApiJson('/v1/course/caddie-assignments')
+    if (before.kind !== 'hit') throw new Error('missing assignments')
+    const date = '2026-11-08'
+    const localDay = (at: string) => new Intl.DateTimeFormat('en-CA', { timeZone: 'Asia/Tokyo', year: 'numeric', month: '2-digit', day: '2-digit' }).format(new Date(at))
+    const beforeItems = (before.data as { items: { id: string; scheduledAt: string; status: string; reservationId?: string }[] }).items
+    const expected = beforeItems.filter(row => localDay(row.scheduledAt) === date && row.status === 'assigned' && row.reservationId).map(row => row.id)
+    expect(expected.length).toBeGreaterThan(0)
+    const release = () => resolveMockFieldApiJson('/v1/course/caddie-assignments/release-day', { method: 'POST', body: JSON.stringify({ date }) })
+    try {
+      expect(release()).toEqual({ kind: 'hit', data: { releasedAssignmentIds: expected, failed: [] } })
+      expect(release()).toEqual({ kind: 'hit', data: { releasedAssignmentIds: [], failed: [] } })
+      const after = resolveMockFieldApiJson('/v1/course/caddie-assignments')
+      if (after.kind !== 'hit') throw new Error('missing assignments')
+      const afterItems = (after.data as { items: { id: string; status: string }[] }).items
+      for (const row of beforeItems) {
+        expect(afterItems.find(item => item.id === row.id)?.status).toBe(expected.includes(row.id) ? 'cancelled' : row.status)
+      }
+    } finally {
+      for (const id of expected) resolveMockFieldApiJson(`/v1/course/caddie-assignments/${id}`, { method: 'PATCH', body: JSON.stringify({ status: 'assigned' }) })
+      vi.unstubAllEnvs()
+    }
+  })
+})

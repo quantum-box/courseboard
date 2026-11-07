@@ -157,6 +157,11 @@ const ROUTES: &[(&str, &str, RouteAuthorization)] = &[
         "/v1/course/slot-overrides",
         RouteAuthorization::Action(MANAGE_SLOT_OVERRIDES),
     ),
+    (
+        "POST",
+        "/v1/course/caddie-assignments/release-day",
+        RouteAuthorization::Action(MANAGE_CADDIE_ASSIGNMENTS),
+    ),
     // Moving a round already placed: the same permission as putting one there.
     (
         "PUT",
@@ -1761,6 +1766,14 @@ mod tests {
     }
 
     #[test]
+    fn releasing_a_day_requires_dispatch_write_permission() {
+        assert_eq!(
+            classify(&Method::POST, "/v1/course/caddie-assignments/release-day"),
+            Some(RouteAuthorization::Action(MANAGE_CADDIE_ASSIGNMENTS))
+        );
+    }
+
+    #[test]
     fn local_routes_carry_golf_actions() {
         assert_eq!(
             classify(&Method::PUT, "/v1/course/caddie-shift-rules"),
@@ -2063,6 +2076,7 @@ mod tests {
             ("PUT", "/v1/course/caddie-profiles/cp_1/courses"),
             ("GET", "/v1/course/caddie-assignments"),
             ("POST", "/v1/course/caddie-assignments"),
+            ("POST", "/v1/course/caddie-assignments/release-day"),
             ("PATCH", "/v1/course/caddie-assignments/ca_1"),
             ("GET", "/v1/course/caddie-availabilities"),
             ("POST", "/v1/course/caddie-availabilities"),

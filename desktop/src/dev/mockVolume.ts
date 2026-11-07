@@ -216,8 +216,9 @@ function slotTime(index: number, intervalMinutes: number): string {
 export function generateReservations(
   fixtureDate: string,
   courses: Array<{ id: string; name: string; startIntervalMinutes: number }>,
+  options: { seed?: number; densityScale?: number; idPrefix?: string } = {},
 ): GeneratedReservation[] {
-  const random = seeded(90210)
+  const random = seeded(options.seed ?? 90210)
   const reservations: GeneratedReservation[] = []
   let sequence = 0
 
@@ -226,7 +227,7 @@ export function generateReservations(
     const busy = weekday === 0 || weekday === 6
     // Morning is what sells; the afternoon thins out. Occupancy is per day so
     // that a quiet Tuesday reads differently from a full Sunday.
-    const occupancy = busy ? 0.82 : 0.46
+    const occupancy = (busy ? 0.82 : 0.46) * (options.densityScale ?? 1)
 
     for (const course of courses) {
       const slots = Math.floor((7 * 60) / course.startIntervalMinutes)
@@ -242,8 +243,8 @@ export function generateReservations(
         const suffix = PARTY_SUFFIX[Math.floor(random() * PARTY_SUFFIX.length)]!
 
         reservations.push({
-          id: `res_gen_${sequence}`,
-          reservationNumber: `R-${date.replace(/-/g, '')}-${String(sequence).padStart(4, '0')}`,
+          id: `${options.idPrefix ?? 'res_gen'}_${sequence}`,
+          reservationNumber: `R-${date.replace(/-/g, '')}-${options.idPrefix ? 'A' : ''}${String(sequence).padStart(4, '0')}`,
           golfCourseId: course.id,
           courseName: course.name,
           teeTime: `${date}T${slotTime(slot, course.startIntervalMinutes)}:00+09:00`,

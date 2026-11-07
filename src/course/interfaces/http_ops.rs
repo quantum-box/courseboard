@@ -2765,3 +2765,46 @@ mod tests {
         let _: AutoAssignResultDto = serde_json::from_value(old_auto).expect("decode old auto");
     }
 }
+
+#[derive(Debug, Deserialize, ToSchema)]
+#[serde(rename_all = "camelCase")]
+pub struct ReleaseDayAssignmentsRequest {
+    pub date: NaiveDate,
+}
+
+/// Releases only unstarted booking assignments on the tenant-local date.
+/// Individual upstream failures are returned in `failed`; retrying is safe.
+#[utoipa::path(
+    post,
+    path = "/v1/course/caddie-assignments/release-day",
+    tag = "course-ops",
+    request_body = ReleaseDayAssignmentsRequest,
+    responses(
+        (status = 200, description = "Release result, including individual failures", body = crate::course::usecase::ReleaseDayAssignmentsResult),
+        (status = 400, description = "Invalid date", body = ErrorBody),
+        (status = 401, description = "Unauthorized", body = ErrorBody),
+        (status = 424, description = "Upstream read failed", body = ErrorBody),
+    ),
+    security(("bearer_auth" = []))
+)]
+pub async fn release_day_caddie_assignments(
+    State(state): State<AppState>,
+    headers: HeaderMap,
+    Json(body): Json<ReleaseDayAssignmentsRequest>,
+) -> Result<Json<crate::course::usecase::ReleaseDayAssignmentsResult>, AppError> {
+    let credentials = credentials(&state, &headers)?;
+    credentials
+        .require(crate::course::domain::actions::MANAGE_CADDIE_ASSIGNMENTS)
+        .await
+        .map_err(AppError::from)?;
+    let timezone = catalog_gateway(&state)
+        .get_tenant_timezone(credentials)
+        .await
+        .map_err(AppError::from)?;
+    let result =
+        crate::course::usecase::ReleaseDayCaddieAssignmentsUseCase::new(ops_gateway(&state))
+            .execute(credentials, body.date, &timezone)
+            .await
+            .map_err(AppError::from)?;
+    Ok(Json(result))
+}

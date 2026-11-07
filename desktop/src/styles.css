@@ -7861,3 +7861,28 @@ button,
 .dispatch-ledger-empty { padding: 5px 8px !important; color: hsl(var(--nui-muted-foreground)); background: hsl(var(--nui-muted) / .18); }
 .dispatch-ledger-hint { margin: 0 0 12px; color: hsl(var(--nui-muted-foreground)); font-size: 12px; }
 .unassigned-view-switch svg { display: inline-block; width: 14px; height: 14px; margin-right: 5px; vertical-align: -2px; }
+
+.auto-assign-booking summary, .auto-assign-booking-fallback { display: flex; align-items: center; gap: 10px; font-size: 12px; }
+.auto-assign-booking summary { cursor: pointer; list-style: none; }
+.auto-assign-booking summary::-webkit-details-marker { display: none; }
+.auto-assign-booking summary:focus-visible { outline: 2px solid hsl(var(--nui-primary)); outline-offset: 4px; }
+.auto-assign-booking time, .auto-assign-booking-fallback time { flex: none; font-variant-numeric: tabular-nums; color: hsl(var(--nui-muted-foreground)); }
+.auto-assign-booking-title { flex: 1; min-width: 0; }
+.auto-assign-booking-title strong, .auto-assign-booking-title small { display: block; overflow-wrap: anywhere; }
+.auto-assign-booking-title small { color: hsl(var(--nui-muted-foreground)); font-size: 11px; }
+.auto-assign-booking-caddie { flex: none; font-weight: 600; }
+.auto-assign-booking-chevron { width: 14px; height: 14px; flex: none; }
+.auto-assign-booking[open] .auto-assign-booking-chevron { transform: rotate(180deg); }
+.auto-assign-booking-detail { margin-top: 10px; padding-top: 10px; border-top: 1px solid hsl(var(--nui-border)); font-size: 12px; }
+.auto-assign-booking-detail dl { display: grid; gap: 4px; margin: 0 0 10px; }
+.auto-assign-booking-detail dl > div { display: flex; gap: 12px; }
+.auto-assign-booking-detail dt { flex: 0 0 80px; color: hsl(var(--nui-muted-foreground)); }
+.auto-assign-booking-detail dd { margin: 0; overflow-wrap: anywhere; }
+.auto-assign-booking-detail ol { display: flex; flex-wrap: wrap; gap: 4px 24px; padding-left: 20px; list-style: decimal; }
+@media (max-width: 540px) {
+  .auto-assign-booking summary { flex-wrap: wrap; gap: 5px 8px; }
+  .auto-assign-booking-title { flex-basis: calc(100% - 105px); }
+  .auto-assign-booking-caddie { margin-left: auto; }
+}
+
+.dispatch-assigned-caddies { display: flex; flex-direction: column; gap: 2px; font-size: 12px; font-weight: 600; color: hsl(var(--nui-primary)); }
