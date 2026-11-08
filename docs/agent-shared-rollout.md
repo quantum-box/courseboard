@@ -22,8 +22,11 @@ but sessions from another connection scope require a new conversation.
 For a paired preview, set the existing Field proxy `TACHYON_FIELD_API_URL` to
 the Field PR API and the existing stream setting to
 `https://field-agent-stream.txcloud.app/preview/<Field PR number>`.
-The same Worker code then prepares against that Field API. Record both Field
-and Courseboard commits and the deployed Worker commit.
+Register the Field preview's direct Lambda Function URL in the common Worker's
+existing FIELD_API_ORIGIN production/previews map first. Its same-zone public
+API URL cannot be used from the Worker. The same Worker code then prepares
+against that Field API. Record both Field and Courseboard commits and the
+deployed Worker commit.
 
 ## Acceptance record
 
