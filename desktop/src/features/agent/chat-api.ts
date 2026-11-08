@@ -6,12 +6,15 @@ import { reservationStatusFromLedger } from './reservation-status'
 import type { TeeLedgerResponse } from '../golf/ledger/models'
 
 const ROOT = '/v1/course/agent'
+const LEGACY_STREAM = 'https://courseboard-agent-stream.txcloud.app'
+const isLegacyStream = (stream?: string) => stream?.trim().replace(/\/$/, '') === LEGACY_STREAM
 /** The legacy host remains selectable during rollout and rollback. */
-export function agentStreamBaseUrl(_base = operatorApiBaseUrl(), stream = import.meta.env.VITE_COURSEBOARD_AGENT_STREAM_BASE_URL) {
+export function agentStreamBaseUrl(base = operatorApiBaseUrl(), stream = import.meta.env.VITE_COURSEBOARD_AGENT_STREAM_BASE_URL) {
+  if (isLegacyStream(stream) && base.replace(/\/$/, '') !== 'https://courseboard-api.txcloud.app') return undefined
   return stream?.trim() || 'https://field-agent-stream.txcloud.app'
 }
 export function usesSharedAgent() {
-  return !agentStreamBaseUrl().includes('courseboard-agent-stream.txcloud.app')
+  return !isLegacyStream(import.meta.env.VITE_COURSEBOARD_AGENT_STREAM_BASE_URL)
 }
 // The released SDK already supports custom transports. These are the Field
 // application headers also exported by the additive SDK 0.5 release.
