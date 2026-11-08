@@ -19,6 +19,18 @@ describe('authoritative reservation status', () => {
     expect(result.complete).toBe(true)
     expect(JSON.stringify(result)).not.toContain('slots')
   })
+  it('preserves all nine reference courses and their IN/OUT figures exactly', () => {
+    const expected = [
+      ['空沼IN', 13, 45, 9, 4], ['藻岩OUT', 11, 38, 8, 3],
+      ['滝のOUT', 4, 13, 2, 2], ['空沼OUT', 1, 2, 1, 0],
+      ['藻岩IN', 0, 0, 0, 0], ['滝のIN', 0, 0, 0, 0],
+      ['実務再テストコース_20260812', 0, 0, 0, 0],
+      ['羊ヶ丘IN', 0, 0, 0, 0], ['羊ケ丘OUT', 0, 0, 0, 0],
+    ] as const
+    const result = reservationStatusFromLedger({ ...ledger, columns: expected.map(([name, groups, players, self]) => column(name, groups, players, self)) }, ledger.date)
+    expect(result.courses.map(course => [course.courseName, course.groups, course.players, course.selfGroups, course.caddieGroups])).toEqual(expected)
+    expect(result.reservationTotals).toEqual({ groups: 29, players: 98, selfGroups: 20, caddieGroups: 9 })
+  })
   it('returns a confirmed zero only from a successfully loaded nonempty ledger', () => {
     expect(reservationStatusFromLedger({ ...ledger, columns: [column('A', 0, 0, 0)] }, ledger.date).reservationTotals?.groups).toBe(0)
     expect(reservationStatusFromLedger({ ...ledger, columns: [] }, ledger.date).reservationTotals).toBeNull()

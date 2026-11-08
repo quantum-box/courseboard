@@ -1,26 +1,44 @@
 import { TachyonAgentSessionClient, type AgentSessionEvent } from '@tachyon-sdk/agent'
-import { courseboardApiJson, courseboardApiStream, operatorApiBaseUrl } from '../../api'
+import { courseboardApiJson, courseboardApiStream, fieldApiJson, operatorApiBaseUrl } from '../../api'
 import { isMockFieldDataEnabled } from '../../dev/mockFieldApi'
 import { i18next } from '../../i18n'
 import { reservationStatusFromLedger } from './reservation-status'
 import type { TeeLedgerResponse } from '../golf/ledger/models'
 
 const ROOT = '/v1/course/agent'
-/** Lambda buffers SSE; production uses the same edge-transport pattern as Field. */
-export function agentStreamBaseUrl(base = operatorApiBaseUrl(), stream = import.meta.env.VITE_COURSEBOARD_AGENT_STREAM_BASE_URL) {
-  return base.replace(/\/$/, '') === 'https://courseboard-api.txcloud.app' && stream?.trim() ? stream.trim() : undefined
+/** The legacy host remains selectable during rollout and rollback. */
+export function agentStreamBaseUrl(_base = operatorApiBaseUrl(), stream = import.meta.env.VITE_COURSEBOARD_AGENT_STREAM_BASE_URL) {
+  return stream?.trim() || 'https://field-agent-stream.txcloud.app'
 }
+export function usesSharedAgent() {
+  return !agentStreamBaseUrl().includes('courseboard-agent-stream.txcloud.app')
+}
+// The released SDK already supports custom transports. These are the Field
+// application headers also exported by the additive SDK 0.5 release.
+export const sharedAgentHeaders = () => ({
+  'x-field-agent-app': 'courseboard',
+  'x-field-agent-capabilities': 'reservation_status,reservation_status_view',
+})
 export type Operation = { operationId: string; method: string; path: string; summary?: string | null; description?: string | null; parameters?: { name: string; in: string; required?: boolean; schema?: unknown }[] | null; requestBody?: unknown }
 export type Catalog = { operations: Operation[]; schemas: Record<string, unknown> }
 export type ToolArgs = { date?: string; golfCourseIds?: string[]; operationId?: string; query?: Record<string, unknown> | string; pathParams?: Record<string, unknown>; body?: unknown; confirmation?: string }
 export type FieldContext = { described?: Record<string, { method: string; path: string; summary?: string }>; [key: string]: unknown }
 
 export function agentSessionClient() {
+  const shared = usesSharedAgent()
+  const root = shared ? '/v1/field/agent' : ROOT
   return new TachyonAgentSessionClient({
-    paths: { sessions: `${ROOT}/sessions`, execute: id => `${ROOT}/sessions/${encodeURIComponent(id)}/execute`, toolResult: id => `${ROOT}/sessions/${encodeURIComponent(id)}/tool-result` },
+    paths: {
+      sessions: `${root}/sessions`, execute: id => `${root}/sessions/${encodeURIComponent(id)}/execute`,
+      toolResult: id => `${root}/sessions/${encodeURIComponent(id)}/tool-result`,
+    },
     transport: {
-      postJson: (path, body, signal) => courseboardApiJson(path, { method: 'POST', body: JSON.stringify(body ?? {}), signal }),
-      postStream: (path, body, signal) => courseboardApiStream(path, { method: 'POST', body: JSON.stringify(body), signal }, agentStreamBaseUrl()),
+      postJson: (path, body, signal) => (shared ? fieldApiJson : courseboardApiJson)(path, {
+        method: 'POST', body: JSON.stringify(body ?? {}), signal, headers: shared ? sharedAgentHeaders() : undefined,
+      }),
+      postStream: (path, body, signal) => courseboardApiStream(path, {
+        method: 'POST', body: JSON.stringify(body), signal, headers: shared ? sharedAgentHeaders() : undefined,
+      }, agentStreamBaseUrl()),
     },
   })
 }
@@ -102,8 +120,10 @@ export async function executeOperation(operation: Operation, args: ToolArgs, sig
   return result
 }
 export async function callFieldTool(session: string, tool_id: string, tool_name: string, args: ToolArgs, context: FieldContext, signal: AbortSignal) {
-  return courseboardApiJson<{ context: FieldContext; event: AgentSessionEvent }>(`${ROOT}/sessions/${encodeURIComponent(session)}/tool-call`, {
+  const shared = usesSharedAgent()
+  return (shared ? fieldApiJson : courseboardApiJson)<{ context: FieldContext; event: AgentSessionEvent }>(`${shared ? '/v1/field/agent' : ROOT}/sessions/${encodeURIComponent(session)}/tool-call`, {
     method: 'POST', body: JSON.stringify({ tool_id, tool_name, args, context }), signal,
+    headers: shared ? sharedAgentHeaders() : undefined,
   })
 }
 
