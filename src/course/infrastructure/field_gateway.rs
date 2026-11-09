@@ -527,6 +527,10 @@ impl FieldGolfCatalogGateway {
         credentials: GatewayCredentials<'_>,
         product: &mut Value,
     ) -> Result<(), CourseError> {
+        let credentials = GatewayCredentials {
+            authorization: credentials.caller_bearer,
+            ..credentials
+        };
         let service_id = product["id"]
             .as_str()
             .ok_or_else(|| CourseError::Provider("reservation product ID is missing".into()))?;
@@ -2485,7 +2489,7 @@ mod tests {
             Some(&format!("http://{address}")),
         );
         let credentials = GatewayCredentials {
-            authorization: "Bearer test-token",
+            authorization: "Bearer service-account-override",
             operator_id: "tenant-test",
             platform_id: None,
             authorizer: &crate::course::infrastructure::ALLOW_ALL,
