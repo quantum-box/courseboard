@@ -44,7 +44,10 @@
   初回イベントはそれぞれ3486ms、2192ms、2321ms、server_tools の検索・仕様確認2件が成功した。
 - 同一のツール結果を2回返して会話完了を確認し、完了後の同一結果の再送も受理された。
 - ローカルで認可31件、Fieldプロキシ関連15件、廃止ルートとカタログ2件を確認した。
-  共通 Worker は19件、Courseboard のAgent関連は35件を回帰検証の対象とする。
+  共通 Worker は19件、Courseboard のAgent関連は35件が成功した。
+- Field はプロファイル5件、Agent API11件、実AIPとのMCP往復1件が成功した。
+- 確認待ちの顧客作成中に再読み込みし、履歴が中断状態で復元され、書き込みが再送されないことを確認した。
+  再接続対象と拒否対象の顧客を新しい会話で検索し、どちらも0件だった。
 
 ## 旧経路の利用確認
 
@@ -59,10 +62,20 @@ Cloudflare の Workers for Platforms の集計を、scriptName を指定して�
 
 ## プレビューと廃止確認
 
-対応する Field API の配備済み Function URL を確認し、共通 Worker の既存
-`FIELD_API_ORIGIN` に本番 URL と検証先の登録を行う。Courseboard プレビューの
-既存 `TACHYON_FIELD_API_URL` と `VITE_COURSEBOARD_AGENT_STREAM_BASE_URL` を
-その組に合わせる。登録先、コミット、検証結果を完了時に追記する。
+Field の検証専用 PR3162（`aa917f045f20a8b3592df39ea62a6f457b46e0e6`）と
+Courseboard PR446（実装 `be7e272990bd5976c725a4765489520dca75ff5c`）を組み合わせた。
+Field の配備 `bld_01m6z4m7ydrxq1n60s6cjxr5wn`、Courseboard API の配備
+`bld_01m6z4mcrbj53qy77n1hv2c7bd`、UI の配備 `bld_01m6z4mjtb5vh2kpx0g9qbax4x`
+が成功した。配備済み Field Function URL を共通 Worker の既存 `FIELD_API_ORIGIN`
+に一時登録し、既存のプレビュー設定でこの組を選択した。
+
+両アプリのセッション準備、Field の重複結果返却を伴うストリーム、Courseboard の
+ストリーム、画面からの業務ツールと未承認書き込みの再送防止を確認した。
+Field 側の検証用DBは本番の業務データを持たない。ゴルフ機能をこの検証DBで有効にし、
+コースが未投入のときは予約台帳の不完全な取得を警告し、予約数を0件と断定しないことを確認した。
+実データの全9コース照合と更新承認は、本番Fieldに接続したCourseboardプレビューと本番で行った。
+一時的な Worker 登録とブランチ限定の設定は検証後に撤去した。
+検証専用 Field PR3162 はマージせず閉じる。
 
 専用 Worker の削除は、プレビュー・本番の確認と利用終了の再確認の後に行う。
 削除後は共通経路で予約照会を再実行し、旧ルートが利用できないことを確認する。
@@ -76,4 +89,4 @@ Courseboard の業務 API をそれぞれ確認する。未承認の更新を再
 廃止前の構成が必要な場合は、Courseboard の `b63819dc48d7594fcfed5539bbd41ac262db655b`
 の配備設定とソースから専用 Worker を再作成し、配備と接続確認を終えてから
 対応する旧クライアントを配備する。共通構成への通常の切り戻しは、正常だった
-Courseboard の配備を選択する。手順の対象と検証結果は本 PR の完了時に確定する。
+Courseboard の配備を選択する。削除後の配備・利用集計・疎通結果は PR446 の完了コメントにも記録する。
