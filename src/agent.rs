@@ -75,7 +75,7 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn retired_session_routes_are_absent_but_catalog_remains() {
+    async fn retired_session_routes_are_rejected_but_catalog_remains() {
         use axum::{body::Body, http::Request};
         use std::sync::Arc;
         use tower::ServiceExt;
@@ -102,6 +102,7 @@ mod tests {
                         .method("POST")
                         .uri(path)
                         .header("authorization", "Bearer test-token")
+                        .header("x-operator-id", "tn_test")
                         .body(Body::empty())
                         .unwrap(),
                 )
@@ -109,7 +110,7 @@ mod tests {
                 .unwrap();
             assert_eq!(
                 response.status(),
-                axum::http::StatusCode::NOT_FOUND,
+                axum::http::StatusCode::FORBIDDEN,
                 "{path}"
             );
         }
@@ -118,6 +119,7 @@ mod tests {
                 Request::builder()
                     .uri("/v1/course/agent/operations")
                     .header("authorization", "Bearer test-token")
+                    .header("x-operator-id", "tn_test")
                     .body(Body::empty())
                     .unwrap(),
             )
