@@ -1,63 +1,73 @@
-# Field common Agent rollout
+# Field 共通 Agent の運用記録
 
-Related work is PLT-6313 through PLT-6320. Deploy the Field profile/API and
-common Worker before switching this client. The client continues to use
-`@tachyon-sdk/agent`'s published transport interface and can adopt its additive
-0.5 helpers after that package is released.
+対象は PLT-6313〜PLT-6320。Courseboard は `@tachyon-sdk/agent` 0.5.0 の
+アプリ識別ヘッダーとセッションパスを利用する。
 
-## Connections
+## 接続と責務
 
-JSON session creation and results use the existing authenticated `/field-api`
-proxy. It forwards the caller bearer and Field application headers unchanged.
-Field prepares Agent execution. Streaming connects directly to
-`https://field-agent-stream.txcloud.app`, which prepares only through Field.
-Business reads and writes continue through Courseboard API authorization.
+- セッション作成と結果返却は、既存の `/field-api` プロキシから Field Agent API へ送る。
+- SSE は `https://field-agent-stream.txcloud.app` から受け取る。
+- Field がプロファイル・実行準備を所有し、AIP が会話と実行を管理する。
+- Courseboard の業務操作はブラウザが実行し、Courseboard API が権限を確認する。
+- 非 GET の操作は確認画面で承認を受けてから送信する。成功結果には承認済みであることを添える。
+- 予約内訳は台帳の構造化データから直接描画する。
 
-The existing `VITE_COURSEBOARD_AGENT_STREAM_BASE_URL` selects the common Worker.
-Restoring `https://courseboard-agent-stream.txcloud.app` selects the legacy
-client paths. Keep that deployment and its legacy API until the observation
-window proves that no old client calls remain. Restored transcripts are kept,
-but sessions from another connection scope require a new conversation.
+## 本番の照合
 
-For a paired preview, set the existing Field proxy `TACHYON_FIELD_API_URL` to
-the Field PR API and the existing stream setting to
-`https://field-agent-stream.txcloud.app/preview/<Field PR number>`.
-Register the Field preview's direct Lambda Function URL in the common Worker's
-existing FIELD_API_ORIGIN production/previews map first. Its same-zone public
-API URL cannot be used from the Worker. The same Worker code then prepares
-against that Field API. Record both Field and Courseboard commits and the
-deployed Worker commit.
+2026-11-09 10:16 JST 頃、共通経路に切り替えた通常画面と予約台帳を照合した。
+対象日は 2026-11-07、全9コースで一致した。以前の基準にあったコース名は
+現行台帳の名称に合わせて記録する。
 
-## Acceptance record
-
-The following numbers are the supplied reference fixture for 2026-11-07.
-Production comparison remains pending. Compare them with the current ledger
-before completing PLT-6319. If the data changed, keep the observed time and
-explain the difference.
-
-| Course | Groups | Players | Self | Caddie |
+| コース | 組数 | 人数 | セルフ | キャディ付き |
 | --- | ---: | ---: | ---: | ---: |
-| 空沼IN | 13 | 45 | 9 | 4 |
-| 藻岩OUT | 11 | 38 | 8 | 3 |
-| 滝のOUT | 4 | 13 | 2 | 2 |
-| 空沼OUT | 1 | 2 | 1 | 0 |
-| 藻岩IN | 0 | 0 | 0 | 0 |
-| 滝のIN | 0 | 0 | 0 | 0 |
-| 実務再テストコース_20260812 | 0 | 0 | 0 | 0 |
-| 羊ヶ丘IN | 0 | 0 | 0 | 0 |
-| 羊ケ丘OUT | 0 | 0 | 0 | 0 |
-| Total | 29 | 98 | 20 | 9 |
+| 真駒内CC 空沼 IN | 13 | 45 | 9 | 4 |
+| 真駒内CC 藻岩 OUT | 11 | 38 | 8 | 3 |
+| 真駒内CC 藻岩 IN | 0 | 0 | 0 | 0 |
+| 滝のCC 西コース | 0 | 0 | 0 | 0 |
+| 滝のCC 中コース | 0 | 0 | 0 | 0 |
+| 滝のCC 東コース | 4 | 13 | 2 | 2 |
+| 真駒内CC 空沼 OUT | 1 | 2 | 1 | 0 |
+| 羊ヶ丘CC IN | 0 | 0 | 0 | 0 |
+| 羊ヶ丘CC OUT | 0 | 0 | 0 | 0 |
+| 合計 | 29 | 98 | 20 | 9 |
 
-Verify reservation, customer, course and product reads, a mixed request, write
-approval, refusal, abort, repeated events and uncertain write recovery using
-safe test records. The screen must render all course figures from structured
-ledger data. A failed or partial read must remain incomplete.
+本番で顧客検索、コース・商品参照、複数依頼、更新の承認・拒否、中断を確認した。
+承認テストではデモの「滝のCC 中コース」を現在値のまま保存した。
+拒否した顧客作成は後の検索でも0件だった。
 
-## Retirement gate
+- Courseboard 切り替えコミットは `adbd10b59f75f645a964fa843ffdf2493e0b3770`。
+- 表示タグ修正コミットは `b63819dc48d7594fcfed5539bbd41ac262db655b`。
+- Field と Courseboard のプロファイル準備、未登録 Origin、別アプリ、別テナント、
+  別ユーザー、期限切れ認証の検証を実施中。結果を本 PR の完了時に追記する。
 
-PLT-6320 remains pending until preview and production acceptance, rollback
-verification, and recorded zero legacy traffic are complete. Then remove the
-dedicated Cloud App, its manifest block and Worker code, the old agent
-preparation in `src/agent.rs`, and the compatibility selection in this client.
-Retain the operations catalogue, business authorization, confirmation UI and
-structured ledger rendering. Record the post-retirement smoke result.
+## 旧経路の利用確認
+
+Cloudflare の Workers for Platforms の集計を、scriptName を指定して確認する。
+`workersInvocationsAdaptive` の `sum.requests` と `sum.errors` を使用し、
+旧 Worker と共通 Worker の両方を同じ区間で照合する。
+ログ取得失敗を0件と扱わない。直近5分は集計反映を待って対象から外す。
+
+最初の確認では、切り替え前の旧 Worker に4件の呼び出しがあった。
+2026-11-09 01:14 UTC 以降の確認区間では旧 Worker は0件、共通 Worker は18件、
+共通 Worker の実行エラーは0件だった。廃止直前に終了時刻を進めて再確認する。
+
+## プレビューと廃止確認
+
+対応する Field API の配備済み Function URL を確認し、共通 Worker の既存
+`FIELD_API_ORIGIN` に本番 URL と検証先の登録を行う。Courseboard プレビューの
+既存 `TACHYON_FIELD_API_URL` と `VITE_COURSEBOARD_AGENT_STREAM_BASE_URL` を
+その組に合わせる。登録先、コミット、検証結果を完了時に追記する。
+
+専用 Worker の削除は、プレビュー・本番の確認と利用終了の再確認の後に行う。
+削除後は共通経路で予約照会を再実行し、旧ルートが利用できないことを確認する。
+
+## 障害調査と切り戻し
+
+Field のセッション作成・実行準備・tool-call、共通 Worker の SSE、AIP の実行、
+Courseboard の業務 API をそれぞれ確認する。未承認の更新を再送しない。
+結果不明の更新は対象の状態を読み直す。
+
+廃止前の構成が必要な場合は、Courseboard の `b63819dc48d7594fcfed5539bbd41ac262db655b`
+の配備設定とソースから専用 Worker を再作成し、配備と接続確認を終えてから
+対応する旧クライアントを配備する。共通構成への通常の切り戻しは、正常だった
+Courseboard の配備を選択する。手順の対象と検証結果は本 PR の完了時に確定する。

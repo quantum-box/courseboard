@@ -1,19 +1,37 @@
-import { describe, expect, it } from 'vitest'
+import { afterEach, describe, expect, it, vi } from 'vitest'
 import { readAgentEvents } from '@tachyon-sdk/agent'
-import { agentStreamBaseUrl, describeOperation, operationRequest, searchOperations, type Catalog, type Operation } from './chat-api'
+import * as api from '../../api'
+import { agentSessionClient, agentStreamBaseUrl, describeOperation, operationRequest, searchOperations, type Catalog, type Operation } from './chat-api'
 const operation: Operation = { operationId: 'update_reservation', method: 'PATCH', path: '/v1/course/reservations/{reservation_id}', parameters: [{ name: 'reservation_id', in: 'path' }, { name: 'date', in: 'query', required: true }], requestBody: { content: { 'application/json': { schema: { $ref: '#/components/schemas/Booking' } } } } }
 const catalog: Catalog = { operations: [operation], schemas: { Booking: { properties: { name: { type: 'string' } } }, PrivateUnused: {} } }
+afterEach(() => vi.restoreAllMocks())
 describe('CourseBoard agent tools', () => {
-  it('uses the configured common stream in production, preview and local development', () => {
-    expect(agentStreamBaseUrl('https://courseboard-api.txcloud.app', 'https://stream.example')).toBe('https://stream.example')
-    expect(agentStreamBaseUrl('http://127.0.0.1:8080', 'https://stream.example')).toBe('https://stream.example')
-    expect(agentStreamBaseUrl('https://pr10--courseboard-api.txcloud.app', 'https://stream.example')).toBe('https://stream.example')
+  it('uses the SDK Field paths and application headers for every session request', async () => {
+    const json = vi.spyOn(api, 'fieldApiJson').mockResolvedValue({ session_id: 'as_test' })
+    const stream = vi.spyOn(api, 'courseboardApiStream').mockResolvedValue(new ReadableStream({
+      start(controller) {
+        controller.enqueue(new TextEncoder().encode('data: {"type":"done"}\n\n'))
+        controller.close()
+      },
+    }))
+    const client = agentSessionClient()
+    const session = await client.createSession()
+    for await (const event of client.execute(session, { task: 'read only' })) expect(event.type).toBe('done')
+    await client.submitToolResult(session, { tool_id: 'tool', result: '{}', is_error: false })
+    expect(json.mock.calls.map(([path]) => path)).toEqual([
+      '/v1/field/agent/sessions', '/v1/field/agent/sessions/as_test/tool-result',
+    ])
+    expect(stream.mock.calls[0][0]).toBe('/v1/field/agent/sessions/as_test/execute')
+    for (const [, init] of [...json.mock.calls, ...stream.mock.calls]) {
+      expect(init?.headers).toEqual({
+        'x-field-agent-app': 'courseboard',
+        'x-field-agent-capabilities': 'reservation_status,reservation_status_view',
+      })
+    }
   })
-  it('preserves direct API execution for a local legacy rollback', () => {
-    const legacy = 'https://courseboard-agent-stream.txcloud.app'
-    expect(agentStreamBaseUrl('https://courseboard-api.txcloud.app', legacy)).toBe(legacy)
-    expect(agentStreamBaseUrl('http://127.0.0.1:8080', legacy)).toBeUndefined()
-    expect(agentStreamBaseUrl('https://pr444--courseboard-api.txcloud.app', legacy)).toBeUndefined()
+  it('uses the common Worker by default and supports a paired preview', () => {
+    expect(agentStreamBaseUrl('')).toBe('https://field-agent-stream.txcloud.app')
+    expect(agentStreamBaseUrl('https://field-agent-stream.txcloud.app/preview/123')).toBe('https://field-agent-stream.txcloud.app/preview/123')
   })
   it('discovers operations and only includes schemas used by that operation', () => {
     expect(searchOperations(catalog, 'reservation').operations).toHaveLength(1)

@@ -203,6 +203,7 @@ export function AgentChat({ historyKey }: { historyKey?: string }) {
                   if (!reservationRead) hasOtherBusinessExecution = true
                   result = await executeOperation(operation, args, signal)
                   if (reservationRead) result = presentReservation(result as ReservationStatus)
+                  if (operation.method !== 'GET') result = { user_confirmed: true, result }
                 }
               } else throw new Error('Unknown CourseBoard tool')
             }
