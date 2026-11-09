@@ -565,11 +565,19 @@ function ProductEditorSheet({
   const editing = Boolean(product)
   const [masters, setMasters] = useState<{ id: string; name: string }[]>([])
   const [masterId, setMasterId] = useState('')
+  const [mastersLinked, setMastersLinked] = useState(false)
+  const [masterStatusReady, setMasterStatusReady] = useState(false)
   useEffect(() => {
     if (!open || editing) return
     let cancelled = false
     setMasterId('')
+    setMasterStatusReady(false)
     void (async () => {
+      const catalog = await fieldApiJson<{ productMastersLinked?: boolean }>('/v1/erp/reservation-products')
+      if (cancelled) return
+      const linked = catalog.productMastersLinked === true
+      setMastersLinked(linked)
+      if (!linked) { setMasterStatusReady(true); return }
       const items: { id: string; name: string }[] = []
       let offset = 0
       for (;;) {
@@ -579,7 +587,7 @@ function ProductEditorSheet({
         if (!page.items.length) throw new Error('商品マスタの続きを取得できませんでした。')
         offset += page.items.length
       }
-      if (!cancelled) setMasters(items)
+      if (!cancelled) { setMasters(items); setMasterStatusReady(true) }
     })().catch(error => { if (!cancelled) setError(errorMessage(error)) })
     return () => { cancelled = true }
   }, [open, editing])
@@ -626,7 +634,7 @@ function ProductEditorSheet({
       return
     }
 
-    if (!editing && !masterId) {
+    if (!editing && mastersLinked && !masterId) {
       setError('商品マスタを選択してください。')
       return
     }
@@ -640,7 +648,7 @@ function ProductEditorSheet({
           method: 'POST',
           body: JSON.stringify({
             displayName: draft.displayName.trim(),
-            ...(!editing ? { productMasterId: masterId } : {}),
+            ...(!editing && mastersLinked ? { productMasterId: masterId } : {}),
             playType: draft.playType,
             holeCount: draft.holeCount,
             expectedDurationMinutes: draft.expectedDurationMinutes,
@@ -681,7 +689,7 @@ function ProductEditorSheet({
     >
       <form className="grid gap-4" onSubmit={save}>
         <FormGrid columns={1}>
-          {!editing ? (
+          {!editing && mastersLinked ? (
             <label className="form-field">
               <span>商品マスタ</span>
               <select value={masterId} onChange={event => {
@@ -806,7 +814,7 @@ function ProductEditorSheet({
           <Button type="button" disabled={saving} onClick={() => onOpenChange(false)}>
             {t('common:action.cancel')}
           </Button>
-          <Button type="submit" variant="primary" disabled={saving}>
+          <Button type="submit" variant="primary" disabled={saving || (!editing && !masterStatusReady)}>
             <Save /> {saving ? t('common:action.saving') : t('products:editor.save')}
           </Button>
         </div>
