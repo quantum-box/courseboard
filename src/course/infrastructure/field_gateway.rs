@@ -519,6 +519,45 @@ impl FieldGolfCatalogGateway {
         read_extension_config(&self.client, &self.base_url, credentials).await
     }
 
+    async fn product_catalog(
+        &self,
+        credentials: GatewayCredentials<'_>,
+    ) -> Result<Value, CourseError> {
+        field_send_json(
+            &self.client,
+            &self.base_url,
+            reqwest::Method::GET,
+            "/v1/erp/reservation-products?includeDisabled=true",
+            credentials,
+            None,
+        )
+        .await
+    }
+
+    async fn read_product_config(
+        &self,
+        credentials: GatewayCredentials<'_>,
+    ) -> Result<Value, CourseError> {
+        let catalog = self.product_catalog(credentials).await?;
+        match catalog.get("seeded").and_then(Value::as_bool) {
+            Some(false) => return self.read_config(credentials).await,
+            Some(true) => {}
+            None => {
+                return Err(CourseError::Provider(
+                    "reservation catalog migration state is missing".into(),
+                ))
+            }
+        }
+        let items = catalog["items"]
+            .as_array()
+            .ok_or_else(|| CourseError::Provider("invalid reservation product catalog".into()))?;
+        let products = items
+            .iter()
+            .map(catalog_product_config)
+            .collect::<Result<Vec<_>, _>>()?;
+        Ok(json!({"reservationProducts": products}))
+    }
+
     async fn write_config_key(
         &self,
         credentials: GatewayCredentials<'_>,
@@ -824,7 +863,8 @@ impl GolfCatalogGateway for FieldGolfCatalogGateway {
         &self,
         credentials: GatewayCredentials<'_>,
     ) -> Result<Vec<ReservationProduct>, CourseError> {
-        let products = generic_product_config::read_products(&self.read_config(credentials).await?);
+        let products =
+            generic_product_config::read_products(&self.read_product_config(credentials).await?);
         let Some(repository) = &self.product_settings else {
             return Ok(products);
         };
@@ -836,7 +876,10 @@ impl GolfCatalogGateway for FieldGolfCatalogGateway {
             .into_iter()
             .map(
                 |product| match local.get(product.reservation_service_id().as_str()) {
-                    Some(settings) => settings.apply_to(&product),
+                    Some(settings) => settings
+                        .apply_to(&product)
+                        .with_enabled(product.enabled())
+                        .with_product_master_id(product.product_master_id().map(str::to_owned)),
                     None => product,
                 },
             )
@@ -860,7 +903,7 @@ impl GolfCatalogGateway for FieldGolfCatalogGateway {
             && match input.golf_course_ids().len() {
                 0 => false,
                 1 => generic_product_config::uses_canonical_scope(
-                    &self.read_config(credentials).await?,
+                    &self.read_product_config(credentials).await?,
                     &input.reservation_service_id,
                 ),
                 _ => true,
@@ -874,6 +917,90 @@ impl GolfCatalogGateway for FieldGolfCatalogGateway {
             .as_deref()
             .map(|resources| generic_product_config::ProductWriteMode::Canonical { resources })
             .unwrap_or(generic_product_config::ProductWriteMode::LegacyScalar);
+
+        let catalog = self.product_catalog(credentials).await?;
+        if catalog["seeded"] == true {
+            let config = self.read_product_config(credentials).await?;
+            let updated = generic_product_config::upsert_product(&config, &input, write_mode)?;
+            let product = updated["reservationProducts"]
+                .as_array()
+                .and_then(|items| {
+                    items
+                        .iter()
+                        .find(|item| item["id"] == input.reservation_service_id.as_str())
+                })
+                .ok_or_else(|| {
+                    CourseError::Provider("updated reservation product is missing".into())
+                })?;
+            let exists = config["reservationProducts"]
+                .as_array()
+                .is_some_and(|items| {
+                    items
+                        .iter()
+                        .any(|item| item["id"] == input.reservation_service_id.as_str())
+                });
+            let mut attributes = product
+                .as_object()
+                .cloned()
+                .ok_or_else(|| CourseError::Provider("invalid reservation product".into()))?;
+            for key in [
+                "id",
+                "name",
+                "enabled",
+                "durationMinutes",
+                "bookingMode",
+                "eligibleResourceIds",
+                "slots",
+                "ownerExtensionKey",
+                "planEnabled",
+            ] {
+                attributes.remove(key);
+            }
+            let body = json!({
+                "id": input.reservation_service_id.as_str(), "ownerExtensionKey": GOLF_EXTENSION_KEY,
+                "name": product["name"], "enabled": product.get("planEnabled").unwrap_or(&product["enabled"]),
+                "durationMinutes": product["durationMinutes"], "bookingMode": product["bookingMode"],
+                "eligibleResourceIds": product["eligibleResourceIds"], "attributesJson": attributes,
+            });
+            let path = if exists {
+                format!(
+                    "/v1/erp/reservation-products/{}",
+                    input.reservation_service_id.as_str()
+                )
+            } else {
+                "/v1/erp/reservation-products".into()
+            };
+            let saved: Value = field_send_json(
+                &self.client,
+                &self.base_url,
+                if exists {
+                    reqwest::Method::PUT
+                } else {
+                    reqwest::Method::POST
+                },
+                &path,
+                credentials,
+                Some(&body),
+            )
+            .await?;
+            let config = json!({"reservationProducts": [catalog_product_config(&saved)?]});
+            let product = generic_product_config::read_products(&config)
+                .into_iter()
+                .next()
+                .ok_or_else(|| {
+                    CourseError::Provider("saved reservation product is invalid".into())
+                })?;
+            if let Some(repository) = &self.product_settings {
+                repository
+                    .replace(
+                        credentials.operator_id,
+                        product.reservation_service_id().as_str(),
+                        &super::GolfProductSettings::from_product(&product),
+                    )
+                    .await?;
+            }
+            return Ok(product);
+        }
 
         // Same shared object as the column order, so the same write-and-verify:
         // arranging the board must not silently drop a plan saved at the same
@@ -912,7 +1039,10 @@ impl GolfCatalogGateway for FieldGolfCatalogGateway {
         credentials: GatewayCredentials<'_>,
         service_id: &ReservationServiceId,
     ) -> Result<Vec<ProductSlot>, CourseError> {
-        generic_product_config::read_slots(&self.read_config(credentials).await?, service_id)
+        generic_product_config::read_slots(
+            &self.read_product_config(credentials).await?,
+            service_id,
+        )
     }
 
     async fn replace_product_slots(
@@ -921,6 +1051,30 @@ impl GolfCatalogGateway for FieldGolfCatalogGateway {
         service_id: &ReservationServiceId,
         slots: Vec<ProductSlot>,
     ) -> Result<Vec<ProductSlot>, CourseError> {
+        if self.product_catalog(credentials).await?["seeded"] == true {
+            let config = self.read_product_config(credentials).await?;
+            let updated = generic_product_config::replace_slots(&config, service_id, &slots);
+            let product = updated["reservationProducts"]
+                .as_array()
+                .and_then(|items| items.iter().find(|item| item["id"] == service_id.as_str()))
+                .ok_or_else(|| CourseError::Provider("reservation product is missing".into()))?;
+            let body = json!({"slots": product["slots"]});
+            let path = format!("/v1/erp/reservation-products/{}/slots", service_id.as_str());
+            field_send_unit(
+                &self.client,
+                &self.base_url,
+                reqwest::Method::PUT,
+                &path,
+                credentials,
+                Some(&body),
+            )
+            .await?;
+            return generic_product_config::read_slots(
+                &self.read_product_config(credentials).await?,
+                service_id,
+            );
+        }
+
         // Slots live inside the same `reservationProducts` array as the plans,
         // and Field's own slot import rewrites that array too. A bare PATCH
         // here reported success while dropping whichever write landed second,
@@ -3072,4 +3226,33 @@ mod tests {
         assert_eq!(caddie.display_name(), "参照スタッフ");
         assert_eq!(caddie.staff_id(), Some("staff_ref"));
     }
+}
+
+fn catalog_product_config(item: &Value) -> Result<Value, CourseError> {
+    let mut object = item["attributesJson"]
+        .as_object()
+        .cloned()
+        .ok_or_else(|| CourseError::Provider("invalid reservation product attributes".into()))?;
+    for key in [
+        "id",
+        "name",
+        "enabled",
+        "durationMinutes",
+        "bookingMode",
+        "eligibleResourceIds",
+        "ownerExtensionKey",
+    ] {
+        object.insert(key.into(), item[key].clone());
+    }
+    if let Some(enabled) = item.get("planEnabled") {
+        object.insert("planEnabled".into(), enabled.clone());
+    }
+    let slots = item["slots"]
+        .as_array()
+        .ok_or_else(|| CourseError::Provider("invalid reservation product slots".into()))?;
+    object.insert(
+        "slots".into(),
+        Value::Array(slots.iter().map(|slot| slot["slotJson"].clone()).collect()),
+    );
+    Ok(Value::Object(object))
 }

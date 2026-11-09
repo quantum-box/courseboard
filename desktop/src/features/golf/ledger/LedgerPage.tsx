@@ -407,7 +407,7 @@ export function LedgerPage() {
   const cancellingReservation =
     allItems.find(item => item.id === cancellingReservationId) ?? null
 
-  const bookablePlans: BookablePlan[] = (productsResource.data?.items ?? []).map(product => ({
+  const bookablePlans: BookablePlan[] = (productsResource.data?.items ?? []).filter(product => product.enabled !== false).map(product => ({
     reservationServiceId: product.reservationServiceId,
     label: product.displayName?.trim() || product.reservationServiceId,
     playType: product.playType === 'caddie' ? 'caddie' : 'self',

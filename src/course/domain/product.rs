@@ -71,6 +71,7 @@ impl DurationMinutes {
 pub struct UpsertReservationProduct {
     pub reservation_service_id: ReservationServiceId,
     pub display_name: Option<String>,
+    pub product_master_id: Option<String>,
     pub play_type: PlayType,
     pub hole_count: HoleCount,
     pub expected_duration_minutes: DurationMinutes,
@@ -178,6 +179,7 @@ impl UpsertReservationProduct {
         Ok(Self {
             reservation_service_id: ReservationServiceId::try_new(reservation_service_id)?,
             display_name,
+            product_master_id: None,
             play_type: PlayType::parse(play_type.as_ref()),
             hole_count: HoleCount::try_new(hole_count).or_else(|_| {
                 // Products historically allow non-9/18 in some tenants; accept positive.
@@ -224,12 +226,16 @@ fn validate_group_size(value: Option<i32>) -> Result<Option<i32>, CourseError> {
 pub struct ReservationProduct {
     #[getter(skip)]
     id: ProductId,
+    #[getter(copy)]
+    enabled: bool,
     #[getter(skip)]
     tenant_id: Option<TenantId>,
     #[getter(skip)]
     reservation_service_id: ReservationServiceId,
     #[getter(skip)]
     display_name: Option<String>,
+    #[getter(skip)]
+    product_master_id: Option<String>,
     #[getter(copy)]
     play_type: PlayType,
     #[getter(copy)]
@@ -331,11 +337,13 @@ impl ReservationProduct {
     ) -> Self {
         Self {
             id: id.into(),
+            enabled: true,
             tenant_id: TenantId::from_optional(tenant_id),
             reservation_service_id: reservation_service_id.into(),
             display_name: display_name
                 .map(|value| value.trim().to_string())
                 .filter(|value| !value.is_empty()),
+            product_master_id: None,
             play_type,
             hole_count: HoleCount::from_raw(hole_count),
             expected_duration_minutes: DurationMinutes::from_raw(expected_duration_minutes),
@@ -355,6 +363,20 @@ impl ReservationProduct {
 
     pub fn reservation_service_id(&self) -> &ReservationServiceId {
         &self.reservation_service_id
+    }
+
+    pub fn with_enabled(mut self, enabled: bool) -> Self {
+        self.enabled = enabled;
+        self
+    }
+
+    pub fn with_product_master_id(mut self, id: Option<String>) -> Self {
+        self.product_master_id = id;
+        self
+    }
+
+    pub fn product_master_id(&self) -> Option<&str> {
+        self.product_master_id.as_deref()
     }
 
     pub fn display_name(&self) -> Option<&str> {

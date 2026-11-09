@@ -9,13 +9,13 @@ import { PageReloadProvider } from '../../lib/pageReload'
 import type { GolfCourse, GolfReservationProduct } from './models'
 import { ReservationProductsPage } from './ReservationProductsPage'
 
-const api = vi.hoisted(() => ({ json: vi.fn() }))
+const api = vi.hoisted(() => ({ json: vi.fn(), field: vi.fn() }))
 const toast = vi.hoisted(() => ({ show: vi.fn() }))
 const router = vi.hoisted(() => ({ navigate: vi.fn() }))
 
 vi.mock('../../api', async importOriginal => {
   const actual = await importOriginal<typeof import('../../api')>()
-  return { ...actual, courseboardApiJson: api.json }
+  return { ...actual, courseboardApiJson: api.json, fieldApiJson: api.field }
 })
 
 vi.mock('../../lib/toast', () => ({ showToast: toast.show }))
@@ -87,6 +87,7 @@ describe('ReservationProductsPage save paths', () => {
     clearResourceCache()
     storedProducts = []
     writes = []
+    api.field.mockResolvedValue({ items: [{ id: "master_1", name: "シーズンパス" }], hasNextPage: false })
     api.json.mockReset()
     toast.show.mockReset()
     router.navigate.mockReset()
@@ -125,6 +126,8 @@ describe('ReservationProductsPage save paths', () => {
     fireEvent.click((await screen.findAllByRole('button', { name: '予約サービスを追加' }))[0]!)
 
     const dialog = await screen.findByRole('dialog')
+    await within(dialog).findByRole('option', { name: 'シーズンパス' })
+    fireEvent.change(within(dialog).getByRole('combobox', { name: '商品マスタ' }), { target: { value: 'master_1' } })
     fireEvent.change(within(dialog).getByRole('textbox', { name: /プラン名/ }), {
       target: { value: 'シーズンパス' },
     })
@@ -137,6 +140,7 @@ describe('ReservationProductsPage save paths', () => {
 
     await waitFor(() => expect(writes).toHaveLength(1))
     expect(writes[0]!.path).toBe(`${productsPath}/season-pass`)
+    expect(writes[0]!.body.productMasterId).toBe('master_1')
     expect(writes[0]!.body.golfCourseIds).toEqual(['course-east', 'course-west'])
     // The API refuses both shapes in one request.
     expect(writes[0]!.body).not.toHaveProperty('golfCourseId')

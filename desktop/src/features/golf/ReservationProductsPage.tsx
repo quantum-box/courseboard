@@ -9,7 +9,7 @@ import {
 } from 'lucide-react'
 import { useEffect, useMemo, useState, type FormEvent } from 'react'
 import { useTranslation } from 'react-i18next'
-import { courseboardApiJson } from '../../api'
+import { courseboardApiJson, fieldApiJson } from '../../api'
 import { useTenantTimezone } from '../../context/TenantTimezoneProvider'
 import { i18next } from '../../i18n'
 import { useRegisterPageReload } from '../../lib/pageReload'
@@ -563,6 +563,27 @@ function ProductEditorSheet({
   const [saving, setSaving] = useState(false)
   const [error, setError] = useState<string | null>(null)
   const editing = Boolean(product)
+  const [masters, setMasters] = useState<{ id: string; name: string }[]>([])
+  const [masterId, setMasterId] = useState('')
+  useEffect(() => {
+    if (!open || editing) return
+    let cancelled = false
+    setMasterId('')
+    void (async () => {
+      const items: { id: string; name: string }[] = []
+      let offset = 0
+      for (;;) {
+        const page = await fieldApiJson<{ items: { id: string; name: string }[]; hasNextPage: boolean }>(`/v1/order/products?limit=100&offset=${offset}`)
+        items.push(...page.items)
+        if (!page.hasNextPage) break
+        if (!page.items.length) throw new Error('商品マスタの続きを取得できませんでした。')
+        offset += page.items.length
+      }
+      if (!cancelled) setMasters(items)
+    })().catch(error => { if (!cancelled) setError(errorMessage(error)) })
+    return () => { cancelled = true }
+  }, [open, editing])
+
 
   useEffect(() => {
     if (!open) return
@@ -605,6 +626,10 @@ function ProductEditorSheet({
       return
     }
 
+    if (!editing && !masterId) {
+      setError('商品マスタを選択してください。')
+      return
+    }
     const savedServiceId = draft.serviceId.trim()
     setSaving(true)
     setError(null)
@@ -615,6 +640,7 @@ function ProductEditorSheet({
           method: 'POST',
           body: JSON.stringify({
             displayName: draft.displayName.trim(),
+            ...(!editing ? { productMasterId: masterId } : {}),
             playType: draft.playType,
             holeCount: draft.holeCount,
             expectedDurationMinutes: draft.expectedDurationMinutes,
@@ -655,6 +681,19 @@ function ProductEditorSheet({
     >
       <form className="grid gap-4" onSubmit={save}>
         <FormGrid columns={1}>
+          {!editing ? (
+            <label className="form-field">
+              <span>商品マスタ</span>
+              <select value={masterId} onChange={event => {
+                setMasterId(event.target.value)
+                const selected = masters.find(item => item.id === event.target.value)
+                setDraft(current => ({ ...current, displayName: selected?.name ?? '' }))
+              }}>
+                <option value="">商品を選択</option>
+                {masters.map(item => <option key={item.id} value={item.id}>{item.name}</option>)}
+              </select>
+            </label>
+          ) : null}
           <Field
             label={t('products:editor.displayName')}
             hint={t('products:editor.displayNameHint')}
@@ -662,6 +701,7 @@ function ProductEditorSheet({
           >
             <Input
               value={draft.displayName}
+              readOnly={Boolean(masterId || product?.productMasterId)}
               maxLength={255}
               onChange={event => setDraft(current => ({
                 ...current,

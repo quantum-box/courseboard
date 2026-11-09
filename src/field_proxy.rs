@@ -215,7 +215,8 @@ fn is_allowed_path(path: &str) -> bool {
     // No extension path is proxied: the UI reaches extension status and config
     // through CourseBoard's own routes only, and CourseBoard is not a Field
     // extension (ADR-0010).
-    path == "/v1/erp/staff"
+    path == "/v1/order/products"
+        || path == "/v1/erp/staff"
         || is_non_empty_subpath(path, "/v1/erp/staff")
         || path == "/v1/erp/reservation-types"
         || is_field_iam_path(path)
@@ -229,6 +230,9 @@ fn is_allowed_path(path: &str) -> bool {
 }
 
 pub(crate) fn is_allowed_route(method: &Method, path: &str) -> bool {
+    if path == "/v1/order/products" {
+        return method == Method::GET;
+    }
     if is_field_agent_path(path) {
         return method == Method::POST;
     }

@@ -298,7 +298,13 @@ impl CreateReservationUseCase {
             return Ok(None);
         };
         let products = self.catalog.list_reservation_products(credentials).await?;
-        find_named_product(products, service_id).map(Some)
+        let product = find_named_product(products, service_id)?;
+        if !product.enabled() {
+            return Err(CourseError::BadRequest(
+                "the selected product is not available for booking",
+            ));
+        }
+        Ok(Some(product))
     }
 
     /// The reservation type every Field booking needs.

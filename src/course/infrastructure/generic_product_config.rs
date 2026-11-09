@@ -125,6 +125,15 @@ fn to_domain(product: &Value) -> Option<ReservationProduct> {
             ))
         }
     }
+    .map(|plan| {
+        plan.with_enabled(product.get("enabled").and_then(Value::as_bool) != Some(false))
+            .with_product_master_id(
+                product
+                    .get("productMasterId")
+                    .and_then(Value::as_str)
+                    .map(str::to_owned),
+            )
+    })
 }
 
 /// `None` means the canonical key is absent and the scalar compatibility key
@@ -204,6 +213,9 @@ pub(crate) fn upsert_product(
             "name".into(),
             json!(input.display_name.as_deref().unwrap_or(service_id)),
         );
+        if let Some(id) = &input.product_master_id {
+            object.insert("productMasterId".into(), json!(id));
+        }
         object.insert(PLAY_TYPE_KEY.into(), json!(input.play_type.as_str()));
         object.insert(HOLE_COUNT_KEY.into(), json!(input.hole_count.get()));
         object.insert(
