@@ -128,8 +128,7 @@ describe('ReservationProductsPage save paths', () => {
     fireEvent.click((await screen.findAllByRole('button', { name: '予約サービスを追加' }))[0]!)
 
     const dialog = await screen.findByRole('dialog')
-    await within(dialog).findByRole('option', { name: 'シーズンパス' })
-    fireEvent.change(within(dialog).getByRole('combobox', { name: '商品マスタ' }), { target: { value: 'master_1' } })
+    expect(within(dialog).queryByRole('combobox', { name: '商品マスタ' })).toBeNull()
     fireEvent.change(within(dialog).getByRole('textbox', { name: /プラン名/ }), {
       target: { value: 'シーズンパス' },
     })
@@ -142,7 +141,7 @@ describe('ReservationProductsPage save paths', () => {
 
     await waitFor(() => expect(writes).toHaveLength(1))
     expect(writes[0]!.path).toBe(`${productsPath}/season-pass`)
-    expect(writes[0]!.body.productMasterId).toBe('master_1')
+    expect(writes[0]!.body).not.toHaveProperty('productMasterId')
     expect(writes[0]!.body.golfCourseIds).toEqual(['course-east', 'course-west'])
     // The API refuses both shapes in one request.
     expect(writes[0]!.body).not.toHaveProperty('golfCourseId')
@@ -230,10 +229,12 @@ describe('ReservationProductsPage save paths', () => {
       },
       'sapporo-27h',
     )]
+    storedProducts[0]!.productMasterId = 'master_27h'
     renderPage('sapporo-27h')
 
     fireEvent.click(await screen.findByRole('button', { name: 'プラン設定' }))
     const dialog = await screen.findByRole('dialog')
+    expect(within(dialog).getByRole('textbox', { name: /プラン名/ })).toHaveProperty('readOnly', false)
     const holeCount = within(dialog).getByRole('combobox', { name: /ホール数/ })
     expect(holeCount).toHaveProperty('value', '27')
     expect(within(holeCount).getByRole('option', { name: '27ホール' })).toBeTruthy()

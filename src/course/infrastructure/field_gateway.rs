@@ -558,13 +558,6 @@ impl FieldGolfCatalogGateway {
         .await;
         let master: Value = match existing {
             Ok(master) => {
-                if master_id == generated_id
-                    && master["idempotencyKey"] != json!(format!("cbplan_{}", &digest[..48]))
-                {
-                    return Err(CourseError::Conflict(
-                        "product master identity is already in use",
-                    ));
-                }
                 if master["name"] == product["name"] {
                     master
                 } else {
@@ -2474,6 +2467,7 @@ mod tests {
                                 creates.lock().unwrap().is_none(),
                                 "retry must reuse the existing master"
                             );
+                            body.as_object_mut().unwrap().remove("idempotencyKey");
                             body["updatedAt"] = json!("version-1");
                             *creates.lock().unwrap() = Some(body.clone());
                             Json(body)
