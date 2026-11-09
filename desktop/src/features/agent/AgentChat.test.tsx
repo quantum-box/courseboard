@@ -55,6 +55,7 @@ it('waits for review before a real write and sends the result back to AIP', asyn
   await screen.findByText('処理しました')
   expect(mocks.write).toHaveBeenCalledTimes(1)
   expect(mocks.submit).toHaveBeenLastCalledWith('as_test', expect.objectContaining({ tool_id: 'write', is_error: false }), expect.any(AbortSignal))
+  expect(JSON.parse(mocks.submit.mock.calls.at(-1)?.[1].result)).toEqual({ user_confirmed: true, result: { updated: true } })
 })
 it('never executes declined changes', async () => {
   render(<AgentChat />); start()

@@ -1,7 +1,6 @@
 /* @vitest-environment jsdom */
-import { beforeEach, expect, it, vi } from 'vitest'
+import { beforeEach, expect, it } from 'vitest'
 import { readConversationHistory, writeConversationHistory } from './conversation-history'
-vi.mock('./chat-api', () => ({ usesSharedAgent: () => true }))
 beforeEach(() => sessionStorage.clear())
 const history = { activeId: 'conversation', conversations: [{
   id: 'conversation', session: 'as_legacy', entries: [{ id: 'message', role: 'assistant' as const, text: 'previous answer' }],
