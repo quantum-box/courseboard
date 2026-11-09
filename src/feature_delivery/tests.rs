@@ -969,6 +969,8 @@ fn only_the_timezone_read_is_left_to_every_feature() {
 #[test]
 fn every_route_the_field_proxy_allows_is_classified() {
     let allowed = [
+        ("GET", "/v1/order/products"),
+        ("GET", "/v1/erp/reservation-products"),
         ("GET", "/v1/erp/staff"),
         ("POST", "/v1/erp/staff"),
         ("PATCH", "/v1/erp/staff/stf_1"),

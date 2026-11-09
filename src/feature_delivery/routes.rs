@@ -414,6 +414,12 @@ const ROUTE_RULES: &[(&str, &str, FeatureRoute)] = &[
 /// guards its own routes as well; this is CourseBoard's product boundary on
 /// top.
 pub const FIELD_PROXY_RULES: &[(&str, &str, FeatureRoute)] = &[
+    ("GET", "/v1/order/products", Feature("courseboard.products")),
+    (
+        "GET",
+        "/v1/erp/reservation-products",
+        Feature("courseboard.products"),
+    ),
     ("POST", "/v1/field/agent/sessions", Exempt(Platform)),
     (
         "POST",
