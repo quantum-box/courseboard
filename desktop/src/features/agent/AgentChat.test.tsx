@@ -35,6 +35,17 @@ function start() {
   fireEvent.change(screen.getByLabelText('依頼内容'), { target: { value: '予約を変更して' } })
   fireEvent.click(screen.getByRole('button', { name: '送信' }))
 }
+it('renders streamed completion results without the runtime envelope', async () => {
+  mocks.execute.mockImplementation(async function* () {
+    yield { type: 'say', text: '<attempt_completion> <result> **確認結果**\n\n顧客は0件です。' }
+    yield { type: 'say', text: '</result><command></command></attempt_completion>' }
+    yield { type: 'done' }
+  })
+  render(<AgentChat />); start()
+  await screen.findByText('顧客は0件です。')
+  expect(screen.getByText('確認結果').tagName).toBe('STRONG')
+  expect(screen.queryByText(/attempt_completion|<result>|<command>/)).toBeNull()
+})
 it('waits for review before a real write and sends the result back to AIP', async () => {
   render(<AgentChat />); start()
   await screen.findByText('田中様の予約を変更します')
