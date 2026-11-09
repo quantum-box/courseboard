@@ -12,6 +12,7 @@ use chrono::{DateTime, NaiveDate, Utc};
 use reqwest::header::AUTHORIZATION;
 use serde::Deserialize;
 use serde_json::{json, Map, Value};
+use sha2::{Digest, Sha256};
 
 use crate::config::EMPTY_COURSE_STORE_URL;
 use crate::course::domain::{
@@ -519,6 +520,83 @@ impl FieldGolfCatalogGateway {
         read_extension_config(&self.client, &self.base_url, credentials).await
     }
 
+    /// Keep the existing play-product editor backed by Field's shared identity.
+    /// A stable ID lets a retry reuse a master if saving the plan failed later.
+    async fn sync_product_master(
+        &self,
+        credentials: GatewayCredentials<'_>,
+        product: &mut Value,
+    ) -> Result<(), CourseError> {
+        let service_id = product["id"]
+            .as_str()
+            .ok_or_else(|| CourseError::Provider("reservation product ID is missing".into()))?;
+        let source = format!(
+            "courseboard-product:{}:{}:{}",
+            credentials.operator_id.len(),
+            credentials.operator_id,
+            service_id
+        );
+        let digest = format!("{:x}", Sha256::digest(source.as_bytes()));
+        let generated_id = format!("prod_{}", &digest[..48]);
+        let master_id = product["productMasterId"]
+            .as_str()
+            .unwrap_or(&generated_id)
+            .to_owned();
+        let path = format!("/v1/order/products/{master_id}");
+        let existing: Result<Value, CourseError> = field_send_json_classified(
+            &self.client,
+            &self.base_url,
+            reqwest::Method::GET,
+            &path,
+            credentials,
+            None,
+            |failure| {
+                (failure.status == reqwest::StatusCode::NOT_FOUND)
+                    .then_some(CourseError::NotFound("product master not found"))
+            },
+        )
+        .await;
+        let master: Value = match existing {
+            Ok(master) => {
+                if master_id == generated_id
+                    && master["idempotencyKey"] != json!(format!("cbplan_{}", &digest[..48]))
+                {
+                    return Err(CourseError::Conflict(
+                        "product master identity is already in use",
+                    ));
+                }
+                if master["name"] == product["name"] {
+                    master
+                } else {
+                    field_send_json(
+                        &self.client, &self.base_url, reqwest::Method::PATCH, &path, credentials,
+                        Some(&json!({"name": product["name"], "expectedUpdatedAt": master["updatedAt"]})),
+                    ).await?
+                }
+            }
+            Err(CourseError::NotFound(_)) if master_id == generated_id => field_send_json(
+                &self.client,
+                &self.base_url,
+                reqwest::Method::POST,
+                "/v1/order/products",
+                credentials,
+                Some(&json!({
+                    "id": master_id, "idempotencyKey": format!("cbplan_{}", &digest[..48]),
+                    "name": product["name"], "description": product["description"],
+                    "status": "ACTIVE", "kind": "PLAN", "billingCycle": "ONCE",
+                    "listPrice": product.get("priceAmount").and_then(Value::as_i64).unwrap_or(0),
+                    "publicationStatus": "PRIVATE", "tags": ["reservation"],
+                })),
+            )
+            .await?,
+            Err(error) => return Err(error),
+        };
+        product["productMasterId"] = json!(master_id);
+        // The catalog enforces the master description alongside its name.
+        product["description"] = master["description"].clone();
+        Ok(())
+    }
+
     async fn product_catalog(
         &self,
         credentials: GatewayCredentials<'_>,
@@ -922,7 +1000,7 @@ impl GolfCatalogGateway for FieldGolfCatalogGateway {
         if catalog["seeded"] == true {
             let config = self.read_product_config(credentials).await?;
             let updated = generic_product_config::upsert_product(&config, &input, write_mode)?;
-            let product = updated["reservationProducts"]
+            let mut product = updated["reservationProducts"]
                 .as_array()
                 .and_then(|items| {
                     items
@@ -931,7 +1009,11 @@ impl GolfCatalogGateway for FieldGolfCatalogGateway {
                 })
                 .ok_or_else(|| {
                     CourseError::Provider("updated reservation product is missing".into())
-                })?;
+                })?
+                .clone();
+            if catalog["productMastersLinked"] == true {
+                self.sync_product_master(credentials, &mut product).await?;
+            }
             let exists = config["reservationProducts"]
                 .as_array()
                 .is_some_and(|items| {
@@ -2346,6 +2428,96 @@ mod tests {
     use axum::{extract::State, routing::get, Json, Router};
 
     use super::*;
+
+    #[tokio::test]
+    async fn product_master_sync_creates_once_and_renames_with_the_callers_credentials() {
+        let master = Arc::new(Mutex::new(None::<Value>));
+        let reads = master.clone();
+        let writes = master.clone();
+        let creates = master.clone();
+        let app = Router::new()
+            .route(
+                "/v1/order/products/:id",
+                get(move || {
+                    let reads = reads.clone();
+                    async move {
+                        let value = reads.lock().unwrap().clone();
+                        match value {
+                            Some(value) => (axum::http::StatusCode::OK, Json(value)),
+                            None => (axum::http::StatusCode::NOT_FOUND, Json(json!({}))),
+                        }
+                    }
+                })
+                .patch(
+                    move |headers: axum::http::HeaderMap, Json(body): Json<Value>| {
+                        let writes = writes.clone();
+                        async move {
+                            assert_eq!(headers["authorization"], "Bearer test-token");
+                            assert_eq!(body["expectedUpdatedAt"], "version-1");
+                            let mut stored = writes.lock().unwrap();
+                            let value = stored.as_mut().unwrap();
+                            value["name"] = body["name"].clone();
+                            Json(value.clone())
+                        }
+                    },
+                ),
+            )
+            .route(
+                "/v1/order/products",
+                axum::routing::post(
+                    move |headers: axum::http::HeaderMap, Json(mut body): Json<Value>| {
+                        let creates = creates.clone();
+                        async move {
+                            assert_eq!(headers["authorization"], "Bearer test-token");
+                            assert_eq!(body["kind"], "PLAN");
+                            assert!(
+                                creates.lock().unwrap().is_none(),
+                                "retry must reuse the existing master"
+                            );
+                            body["updatedAt"] = json!("version-1");
+                            *creates.lock().unwrap() = Some(body.clone());
+                            Json(body)
+                        }
+                    },
+                ),
+            );
+        let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let address = listener.local_addr().unwrap();
+        let server = tokio::spawn(async move {
+            axum::serve(listener, app).await.unwrap();
+        });
+        let gateway = FieldGolfCatalogGateway::new(
+            reqwest::Client::new(),
+            Some(&format!("http://{address}")),
+        );
+        let credentials = GatewayCredentials {
+            authorization: "Bearer test-token",
+            operator_id: "tenant-test",
+            platform_id: None,
+            authorizer: &crate::course::infrastructure::ALLOW_ALL,
+            caller_bearer: "Bearer test-token",
+        };
+        let mut product =
+            json!({"id": "plan-test", "name": "Original", "description": "Description"});
+        gateway
+            .sync_product_master(credentials, &mut product)
+            .await
+            .unwrap();
+        let id = product["productMasterId"].clone();
+        gateway
+            .sync_product_master(credentials, &mut product)
+            .await
+            .unwrap();
+        product["name"] = json!("Renamed");
+        gateway
+            .sync_product_master(credentials, &mut product)
+            .await
+            .unwrap();
+        assert_eq!(product["productMasterId"], id);
+        assert_eq!(product["description"], "Description");
+        assert_eq!(master.lock().unwrap().as_ref().unwrap()["name"], "Renamed");
+        server.abort();
+    }
 
     /// The takings have to be workable out on this side, which means the
     /// money Field records against a booking must survive the decode. A
