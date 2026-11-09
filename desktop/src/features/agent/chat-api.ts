@@ -48,10 +48,13 @@ export function searchOperations(catalog: Catalog, query: string) {
   const words = query.toLowerCase().split(/\s+/).filter(Boolean)
   const explicitlyImported = /import|取り込|取込|report[- ]entries/i.test(query)
   const scored = catalog.operations.filter(op => explicitlyImported || op.path !== '/v1/course/reservation-report-entries').map(op => {
-    const purpose = ['/v1/course/tee-ledger', '/v1/course/tee-sheet'].includes(op.path)
-      ? 'reservation reservations booking bookings daily status 予約 予約状況 予約台帳' : ''
+    const purpose = op.path === '/v1/course/reservation-products'
+      ? 'product products play plan plans 商品 プレー商品 予約商品 予約サービス プラン 料金プラン'
+      : ['/v1/course/tee-ledger', '/v1/course/tee-sheet'].includes(op.path)
+        ? 'reservation reservations booking bookings daily status 予約 予約状況 予約台帳' : ''
     const text = `${purpose} ${op.operationId} ${op.path} ${op.summary ?? ''} ${op.description ?? ''}`.toLowerCase()
-    return { op, score: words.filter(word => text.includes(word)).length }
+    const productMatch = /商品|予約サービス|products?|play plans?/i.test(query) && op.path === '/v1/course/reservation-products'
+    return { op, score: words.filter(word => text.includes(word)).length + (productMatch ? 10 : 0) }
   }).filter(item => item.score || !words.length).sort((a, b) => b.score - a.score)
   return { operations: scored.slice(0, 20).map(({ op }) => ({ operationId: op.operationId, method: op.method, path: op.path, summary: op.summary ?? op.description })), matched: scored.length }
 }

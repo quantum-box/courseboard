@@ -43,6 +43,7 @@ fn operation_catalog() -> Value {
                 continue;
             }
             let description = match path.as_str() {
+                "/v1/course/reservation-products" => json!("CourseBoard Products page / プレー商品・商品・予約サービス一覧. This is the authoritative list of play plans such as self-play and caddie rounds. For CourseBoard product questions use this route; generic Field catalog data is not a substitute."),
                 "/v1/course/tee-ledger" => json!("Authoritative reservation ledger / daily booking status (予約台帳・予約状況). Includes all course columns with groupCount and playerCount. Use courseboard_get_reservation_status for compact complete totals."),
                 "/v1/course/tee-sheet" => json!("Live reservations / bookings (予約一覧) for a date or date range. This is current reservation data, not imported report rows."),
                 "/v1/course/reservation-report-entries" => json!("Imported reservation report rows ONLY (取り込み済み予約レポート). This is NOT the reservation ledger. Empty items do NOT mean zero reservations; use courseboard_get_reservation_status or tee-ledger for reservation counts."),

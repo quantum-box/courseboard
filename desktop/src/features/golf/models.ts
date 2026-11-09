@@ -55,11 +55,13 @@ export type ExtensionStatus = {
 export type PlayType = 'caddie' | 'self'
 
 export type GolfReservationProduct = {
+  enabled?: boolean
   id: string
   tenantId: string
   extensionKey: string
   reservationServiceId: string
   displayName?: string | null
+  productMasterId?: string | null
   playType: PlayType
   holeCount: number
   expectedDurationMinutes: number
@@ -75,6 +77,7 @@ export type GolfReservationProduct = {
 
 export type GolfReservationProductDraft = {
   serviceId: string
+  productMasterId?: string | null
   displayName: string
   playType: PlayType
   holeCount: number

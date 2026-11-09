@@ -45,6 +45,7 @@ const TOKEN: &str = "test-token";
 #[derive(Default)]
 struct FieldState {
     config: Mutex<Value>,
+    catalog: Mutex<Option<Vec<Value>>>,
     reservation_custom_fields: Mutex<Value>,
     /// How many of the next config writes to throw away, standing in for another
     /// writer landing between our read and our write.
@@ -84,6 +85,52 @@ async fn extension_status(State(state): State<Arc<FieldState>>) -> Json<Value> {
             "configJson": state.config.lock().unwrap().clone(),
         }]
     }))
+}
+
+async fn product_catalog(State(state): State<Arc<FieldState>>) -> Json<Value> {
+    let catalog = state.catalog.lock().unwrap();
+    Json(json!({"seeded": catalog.is_some(), "items": catalog.clone().unwrap_or_default()}))
+}
+
+async fn update_catalog_product(
+    State(state): State<Arc<FieldState>>,
+    Path(id): Path<String>,
+    Json(body): Json<Value>,
+) -> Json<Value> {
+    let mut catalog = state.catalog.lock().unwrap();
+    let items = catalog.as_mut().expect("migrated catalog");
+    let old = items
+        .iter_mut()
+        .find(|item| item["id"] == id)
+        .expect("existing plan");
+    let slots = old["slots"].clone();
+    *old = body;
+    old["id"] = json!(id);
+    old["slots"] = slots;
+    old["planEnabled"] = old["enabled"].clone();
+    Json(old.clone())
+}
+
+async fn update_catalog_slots(
+    State(state): State<Arc<FieldState>>,
+    Path(id): Path<String>,
+    Json(body): Json<Value>,
+) -> Json<Value> {
+    let mut catalog = state.catalog.lock().unwrap();
+    let item = catalog
+        .as_mut()
+        .unwrap()
+        .iter_mut()
+        .find(|item| item["id"] == id)
+        .unwrap();
+    item["slots"] = json!(body["slots"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .enumerate()
+        .map(|(position, slot)| json!({"position":position,"slotJson":slot}))
+        .collect::<Vec<_>>());
+    Json(json!({"items":item["slots"]}))
 }
 
 async fn patch_config(
@@ -317,6 +364,15 @@ fn reservation(custom_fields: &Value) -> Value {
 /// One stub Field, kept alive for the whole test so several routers can share it.
 async fn spawn_field(state: Arc<FieldState>) -> String {
     let app = Router::new()
+        .route("/v1/erp/reservation-products", get(product_catalog))
+        .route(
+            "/v1/erp/reservation-products/:id",
+            axum::routing::put(update_catalog_product),
+        )
+        .route(
+            "/v1/erp/reservation-products/:id/slots",
+            axum::routing::put(update_catalog_slots),
+        )
         .route("/v1/erp/extensions/status", get(extension_status))
         .route(
             "/v1/erp/extensions/golf_course/timezone",
@@ -1697,6 +1753,15 @@ async fn a_tenant_with_no_reservation_type_is_told_what_to_do_rather_than_half_s
     let tenant = tenant_for("seed_no_type");
     let state = Arc::new(FieldState::default());
     let app = Router::new()
+        .route("/v1/erp/reservation-products", get(product_catalog))
+        .route(
+            "/v1/erp/reservation-products/:id",
+            axum::routing::put(update_catalog_product),
+        )
+        .route(
+            "/v1/erp/reservation-products/:id/slots",
+            axum::routing::put(update_catalog_slots),
+        )
         .route("/v1/erp/extensions/status", get(extension_status))
         .route(
             "/v1/erp/extensions/golf_course/timezone",
@@ -1914,4 +1979,46 @@ async fn the_export_is_built_here_once_the_close_is_and_keeps_upstreams_columns(
     );
     assert_eq!(rows[11], "res-aug,R-res-aug,confirmed,paid,48000,20000,JPY");
     assert_eq!(rows.len(), 12);
+}
+
+#[tokio::test]
+async fn migrated_products_use_the_catalog_and_keep_master_links_and_slots() {
+    let tenant = tenant_for("migrated_product_master");
+    let field = field_with_course_resources();
+    let legacy = json!({"reservationProducts":[{"id":"old-copy","name":"Do not read"}],"timezone":"Asia/Tokyo"});
+    *field.config.lock().unwrap() = legacy.clone();
+    *field.catalog.lock().unwrap() = Some(vec![json!({
+        "id":"migrated-plan","name":"Master name","enabled":true,"planEnabled":true,
+        "ownerExtensionKey":"golf_course","bookingMode":"slot","durationMinutes":240,
+        "eligibleResourceIds":["resource-a"],
+        "attributesJson":{"productMasterId":"prod_master","playType":"self","holeCount":18,"golfCourseIds":["course-a"],"future":{"keep":true}},
+        "slots":[{"position":0,"slotJson":{"weekday":1,"startTime":"07:00","endTime":"12:00","maxGroups":6,"maxPlayers":24}}]
+    })]);
+    let url = spawn_field(field.clone()).await;
+    let pool = crate::test_support::test_pool().await;
+    let (status, before) = call(
+        &router(&pool, &url),
+        &tenant,
+        "GET",
+        "/v1/course/reservation-products",
+        None,
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK);
+    assert_eq!(before["items"][0]["displayName"], "Master name");
+    assert_eq!(before["items"][0]["productMasterId"], "prod_master");
+    let (status, saved) = call(&router(&pool, &url), &tenant, "POST", "/v1/course/reservation-products/migrated-plan", Some(json!({
+        "displayName":"Master name","playType":"self","holeCount":18,"expectedDurationMinutes":270,"golfCourseIds":["course-a"]
+    }))).await;
+    assert_eq!(status, StatusCode::OK, "{saved}");
+    let items = field.catalog.lock().unwrap().clone().unwrap();
+    assert_eq!(items[0]["durationMinutes"], 270);
+    assert_eq!(items[0]["attributesJson"]["productMasterId"], "prod_master");
+    assert_eq!(items[0]["attributesJson"]["future"], json!({"keep":true}));
+    assert_eq!(items[0]["slots"][0]["slotJson"]["startTime"], "07:00");
+    assert_eq!(*field.config.lock().unwrap(), legacy);
+    let (status, slots) = call(&router(&pool, &url), &tenant, "PUT", "/v1/course/reservation-products/migrated-plan/slots", Some(json!({"slots":[{"weekday":2,"startTime":"08:00","endTime":"12:00","maxGroups":5,"maxPlayers":20}]}))).await;
+    assert_eq!(status, StatusCode::OK, "{slots}");
+    assert_eq!(slots["items"][0]["startTime"], "08:00");
+    assert_eq!(*field.config.lock().unwrap(), legacy);
 }

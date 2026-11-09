@@ -2246,14 +2246,22 @@ pub async fn generate_course_time_slots(
 
 // ─── Reservation products ─────────────────────────────────────────────────────
 
+fn enabled_by_default() -> bool {
+    true
+}
+
 #[derive(Debug, Serialize, Deserialize, PartialEq, Eq, ToSchema)]
 #[serde(rename_all = "camelCase")]
 pub struct ReservationProductDto {
     pub id: String,
+    #[serde(default = "enabled_by_default")]
+    pub enabled: bool,
     pub tenant_id: String,
     pub extension_key: String,
     pub reservation_service_id: String,
     pub display_name: Option<String>,
+    #[serde(default)]
+    pub product_master_id: Option<String>,
     pub play_type: String,
     pub hole_count: i32,
     pub expected_duration_minutes: i32,
@@ -2270,6 +2278,7 @@ impl From<&ReservationProduct> for ReservationProductDto {
     fn from(value: &ReservationProduct) -> Self {
         Self {
             id: value.id().to_string(),
+            enabled: value.enabled(),
             tenant_id: value
                 .tenant_id()
                 .map(ToString::to_string)
@@ -2277,6 +2286,7 @@ impl From<&ReservationProduct> for ReservationProductDto {
             extension_key: "golf_course".to_string(),
             reservation_service_id: value.reservation_service_id().to_string(),
             display_name: value.display_name().map(str::to_string),
+            product_master_id: value.product_master_id().map(str::to_string),
             play_type: value.play_type().as_str().to_string(),
             hole_count: value.hole_count().get(),
             expected_duration_minutes: value.expected_duration_minutes().get(),
@@ -2295,6 +2305,7 @@ impl From<&ReservationProduct> for ReservationProductDto {
 #[serde(rename_all = "camelCase")]
 pub struct UpsertReservationProductRequest {
     pub display_name: Option<String>,
+    pub product_master_id: Option<String>,
     pub play_type: String,
     pub hole_count: Option<i32>,
     pub expected_duration_minutes: Option<i32>,
@@ -2309,6 +2320,7 @@ impl UpsertReservationProductRequest {
     fn into_domain(self, service_id: String) -> Result<UpsertReservationProduct, CourseError> {
         let Self {
             display_name,
+            product_master_id,
             play_type,
             hole_count,
             expected_duration_minutes,
@@ -2339,6 +2351,10 @@ impl UpsertReservationProductRequest {
                 max_players_per_group,
             ),
         }
+        .map(|mut input| {
+            input.product_master_id = product_master_id;
+            input
+        })
     }
 }
 
@@ -2783,6 +2799,7 @@ mod tests {
         golf_course_id: Option<&str>,
     ) -> UpsertReservationProductRequest {
         UpsertReservationProductRequest {
+            product_master_id: None,
             display_name: Some("シーズンパス".to_string()),
             play_type: "self".to_string(),
             hole_count: Some(18),

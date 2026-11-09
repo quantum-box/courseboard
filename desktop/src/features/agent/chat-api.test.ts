@@ -46,6 +46,13 @@ describe('CourseBoard agent tools', () => {
     expect(searchOperations(data, 'reservation').operations.map(op => op.operationId)).toEqual(['get_tee_ledger'])
     expect(searchOperations(data, 'imported reservation report').operations.map(op => op.operationId)).toContain('list_report')
   })
+  it.each(['商品', '商品一覧', '商品を見せて', 'プレー商品', '予約サービス', 'products', 'play plans'])('finds the Products page data for %s', query => {
+    const data: Catalog = { schemas: {}, operations: [
+      { operationId: 'list_reservation_products', method: 'GET', path: '/v1/course/reservation-products' },
+      { operationId: 'list_customers', method: 'GET', path: '/v1/course/customers' },
+    ] }
+    expect(searchOperations(data, query).operations[0].operationId).toBe('list_reservation_products')
+  })
   it('rejects invented operations, paths, extra query keys and path traversal', () => {
     expect(() => describeOperation(catalog, 'delete_everything')).toThrow()
     for (const id of ['../secret', 'x/y', '?foo=1', '']) {

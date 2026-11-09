@@ -9,13 +9,13 @@ import { PageReloadProvider } from '../../lib/pageReload'
 import type { GolfCourse, GolfReservationProduct } from './models'
 import { ReservationProductsPage } from './ReservationProductsPage'
 
-const api = vi.hoisted(() => ({ json: vi.fn() }))
+const api = vi.hoisted(() => ({ json: vi.fn(), field: vi.fn() }))
 const toast = vi.hoisted(() => ({ show: vi.fn() }))
 const router = vi.hoisted(() => ({ navigate: vi.fn() }))
 
 vi.mock('../../api', async importOriginal => {
   const actual = await importOriginal<typeof import('../../api')>()
-  return { ...actual, courseboardApiJson: api.json }
+  return { ...actual, courseboardApiJson: api.json, fieldApiJson: api.field }
 })
 
 vi.mock('../../lib/toast', () => ({ showToast: toast.show }))
@@ -87,6 +87,9 @@ describe('ReservationProductsPage save paths', () => {
     clearResourceCache()
     storedProducts = []
     writes = []
+    api.field.mockImplementation(async (path: string) => path === '/v1/erp/reservation-products'
+      ? { productMastersLinked: true }
+      : { items: [{ id: 'master_1', name: 'シーズンパス' }], hasNextPage: false })
     api.json.mockReset()
     toast.show.mockReset()
     router.navigate.mockReset()
@@ -125,6 +128,8 @@ describe('ReservationProductsPage save paths', () => {
     fireEvent.click((await screen.findAllByRole('button', { name: '予約サービスを追加' }))[0]!)
 
     const dialog = await screen.findByRole('dialog')
+    await within(dialog).findByRole('option', { name: 'シーズンパス' })
+    fireEvent.change(within(dialog).getByRole('combobox', { name: '商品マスタ' }), { target: { value: 'master_1' } })
     fireEvent.change(within(dialog).getByRole('textbox', { name: /プラン名/ }), {
       target: { value: 'シーズンパス' },
     })
@@ -137,9 +142,24 @@ describe('ReservationProductsPage save paths', () => {
 
     await waitFor(() => expect(writes).toHaveLength(1))
     expect(writes[0]!.path).toBe(`${productsPath}/season-pass`)
+    expect(writes[0]!.body.productMasterId).toBe('master_1')
     expect(writes[0]!.body.golfCourseIds).toEqual(['course-east', 'course-west'])
     // The API refuses both shapes in one request.
     expect(writes[0]!.body).not.toHaveProperty('golfCourseId')
+  })
+
+  it('keeps the existing create flow before the tenant migrates', async () => {
+    api.field.mockResolvedValue({ productMastersLinked: false })
+    renderPage()
+    fireEvent.click((await screen.findAllByRole('button', { name: '予約サービスを追加' }))[0]!)
+    const dialog = await screen.findByRole('dialog')
+    fireEvent.change(within(dialog).getByRole('textbox', { name: /プラン名/ }), { target: { value: '移行前プラン' } })
+    fireEvent.change(within(dialog).getByRole('textbox', { name: /予約サービスID/ }), { target: { value: 'legacy-plan' } })
+    fireEvent.click(within(dialog).getByRole('checkbox', { name: '東コース' }))
+    await waitFor(() => expect(within(dialog).getByRole('button', { name: 'プレー設定を保存' })).toHaveProperty('disabled', false))
+    fireEvent.click(within(dialog).getByRole('button', { name: 'プレー設定を保存' }))
+    await waitFor(() => expect(writes).toHaveLength(1))
+    expect(writes[0].body).not.toHaveProperty('productMasterId')
   })
 
   it('ticks and clears every course from the one row above the list', async () => {
