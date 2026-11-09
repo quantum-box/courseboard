@@ -1761,6 +1761,8 @@ fn courseboard_cors_layer() -> CorsLayer {
             HeaderName::from_static("x-operator-id"),
             HeaderName::from_static("x-platform-id"),
             HeaderName::from_static("idempotency-key"),
+            HeaderName::from_static("x-field-agent-app"),
+            HeaderName::from_static("x-field-agent-capabilities"),
         ])
         .expose_headers([
             CONTENT_DISPOSITION,
@@ -2715,6 +2717,39 @@ mod tests {
             response.headers().get("access-control-allow-origin"),
             Some(&HeaderValue::from_static("https://courseboard.txcloud.app"))
         );
+    }
+
+    #[tokio::test]
+    async fn cors_allows_shared_agent_context_in_production_and_preview() {
+        for origin in [
+            "https://courseboard.txcloud.app",
+            "https://pr444--courseboard.txcloud.app",
+        ] {
+            let app = Router::new()
+                .route(
+                    "/field-api/v1/field/agent/sessions",
+                    axum::routing::post(|| async { StatusCode::OK }),
+                )
+                .layer(courseboard_cors_layer());
+            let response = app.oneshot(Request::builder()
+                .method(Method::OPTIONS)
+                .uri("/field-api/v1/field/agent/sessions")
+                .header("origin", origin)
+                .header("access-control-request-method", "POST")
+                .header("access-control-request-headers", "authorization,content-type,x-operator-id,x-platform-id,x-field-agent-app,x-field-agent-capabilities")
+                .body(Body::empty()).unwrap()).await.unwrap();
+            assert_eq!(response.status(), StatusCode::OK);
+            assert_eq!(response.headers()["access-control-allow-origin"], origin);
+            let allowed = response.headers()["access-control-allow-headers"]
+                .to_str()
+                .unwrap();
+            assert!(allowed
+                .split(',')
+                .any(|value| value.trim() == "x-field-agent-app"));
+            assert!(allowed
+                .split(',')
+                .any(|value| value.trim() == "x-field-agent-capabilities"));
+        }
     }
 
     #[tokio::test]

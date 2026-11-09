@@ -47,7 +47,7 @@ spec:
         - name: VITE_COURSEBOARD_API_BASE_URL
           value: https://courseboard-api.txcloud.app
         - name: VITE_COURSEBOARD_AGENT_STREAM_BASE_URL
-          value: https://courseboard-agent-stream.txcloud.app
+          value: https://field-agent-stream.txcloud.app
         - name: VITE_COURSEBOARD_PUBLIC_API_BASE_URL
           value: https://courseboard-api.txcloud.app
         - name: VITE_COURSEBOARD_PLATFORM_ID

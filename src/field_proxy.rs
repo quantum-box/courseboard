@@ -79,7 +79,8 @@ pub async fn proxy_field_api(
     if (is_bridge_export_path(&normalized_path)
         || is_cancellation_fee_path(&normalized_path)
         || is_invoice_path(&normalized_path)
-        || is_field_client_context_path(&normalized_path))
+        || is_field_client_context_path(&normalized_path)
+        || is_field_agent_path(&normalized_path))
         && authorization.is_none()
     {
         return proxy_error(
@@ -98,6 +99,13 @@ pub async fn proxy_field_api(
     for name in ["x-operator-id", "x-platform-id", "idempotency-key"] {
         if let Some(value) = parts.headers.get(name) {
             outbound = outbound.header(name, value.as_bytes());
+        }
+    }
+    if is_field_agent_path(&normalized_path) {
+        for name in ["x-field-agent-app", "x-field-agent-capabilities", "origin"] {
+            if let Some(value) = parts.headers.get(name) {
+                outbound = outbound.header(name, value.as_bytes());
+            }
         }
     }
     if !body.is_empty() {
@@ -168,6 +176,7 @@ fn outbound_authorization<'a>(
         || is_cancellation_fee_path(path)
         || is_invoice_path(path)
         || is_field_client_context_path(path)
+        || is_field_agent_path(path)
     {
         return crate::course::interfaces::http::caller_bearer(inbound_headers).ok();
     }
@@ -213,12 +222,16 @@ fn is_allowed_path(path: &str) -> bool {
         || is_reservation_billing_invoice_path(path)
         || is_order_detail_path(path)
         || is_field_client_context_path(path)
+        || is_field_agent_path(path)
         || is_cancellation_fee_path(path)
         || is_invoice_path(path)
         || is_bridge_export_path(path)
 }
 
 pub(crate) fn is_allowed_route(method: &Method, path: &str) -> bool {
+    if is_field_agent_path(path) {
+        return method == Method::POST;
+    }
     if !is_allowed_path(path) {
         return false;
     }
@@ -437,6 +450,18 @@ fn is_cancellation_fee_path(path: &str) -> bool {
             | (Some(invoice_id), Some("fulfill" | "send"), None)
             if !invoice_id.is_empty()
     )
+}
+
+fn is_field_agent_path(path: &str) -> bool {
+    if path == "/v1/field/agent/sessions" {
+        return true;
+    }
+    let Some(suffix) = path.strip_prefix("/v1/field/agent/sessions/") else {
+        return false;
+    };
+    let parts: Vec<_> = suffix.split('/').collect();
+    matches!(parts.as_slice(), [id, "tool-result" | "tool-call"]
+        if id.starts_with("as_") && id.len() <= 128 && id.bytes().all(|c| c.is_ascii_alphanumeric() || b"_-".contains(&c)))
 }
 
 fn is_field_client_context_path(path: &str) -> bool {
@@ -853,5 +878,30 @@ mod tests {
             *authorization == Some(HeaderValue::from_static("Bearer caller-login"))
         }));
         server.abort();
+    }
+    #[test]
+    fn agent_proxy_is_narrow_and_preserves_the_caller() {
+        for path in [
+            "/v1/field/agent/sessions",
+            "/v1/field/agent/sessions/as_test/tool-result",
+            "/v1/field/agent/sessions/as_test/tool-call",
+        ] {
+            assert!(is_allowed_route(&Method::POST, path));
+            assert!(!is_allowed_route(&Method::GET, path));
+            let mut headers = axum::http::HeaderMap::new();
+            headers.insert(header::AUTHORIZATION, "Bearer user".parse().unwrap());
+            assert_eq!(
+                outbound_authorization(path, Some("Bearer service"), &headers),
+                Some("Bearer user")
+            );
+        }
+        for path in [
+            "/v1/field/agent/sessions/as_test/execute",
+            "/v1/field/agent/sessions/as_test/execute-request",
+            "/v1/field/agent/sessions/../tool-call",
+            "/v1/field/agent/run",
+        ] {
+            assert!(!is_allowed_route(&Method::POST, path));
+        }
     }
 }

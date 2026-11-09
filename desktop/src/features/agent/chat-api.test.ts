@@ -4,10 +4,16 @@ import { agentStreamBaseUrl, describeOperation, operationRequest, searchOperatio
 const operation: Operation = { operationId: 'update_reservation', method: 'PATCH', path: '/v1/course/reservations/{reservation_id}', parameters: [{ name: 'reservation_id', in: 'path' }, { name: 'date', in: 'query', required: true }], requestBody: { content: { 'application/json': { schema: { $ref: '#/components/schemas/Booking' } } } } }
 const catalog: Catalog = { operations: [operation], schemas: { Booking: { properties: { name: { type: 'string' } } }, PrivateUnused: {} } }
 describe('CourseBoard agent tools', () => {
-  it('uses the edge stream only for the production API', () => {
+  it('uses the configured common stream in production, preview and local development', () => {
     expect(agentStreamBaseUrl('https://courseboard-api.txcloud.app', 'https://stream.example')).toBe('https://stream.example')
-    expect(agentStreamBaseUrl('http://127.0.0.1:8080', 'https://stream.example')).toBeUndefined()
-    expect(agentStreamBaseUrl('https://pr10--courseboard-api.txcloud.app', 'https://stream.example')).toBeUndefined()
+    expect(agentStreamBaseUrl('http://127.0.0.1:8080', 'https://stream.example')).toBe('https://stream.example')
+    expect(agentStreamBaseUrl('https://pr10--courseboard-api.txcloud.app', 'https://stream.example')).toBe('https://stream.example')
+  })
+  it('preserves direct API execution for a local legacy rollback', () => {
+    const legacy = 'https://courseboard-agent-stream.txcloud.app'
+    expect(agentStreamBaseUrl('https://courseboard-api.txcloud.app', legacy)).toBe(legacy)
+    expect(agentStreamBaseUrl('http://127.0.0.1:8080', legacy)).toBeUndefined()
+    expect(agentStreamBaseUrl('https://pr444--courseboard-api.txcloud.app', legacy)).toBeUndefined()
   })
   it('discovers operations and only includes schemas used by that operation', () => {
     expect(searchOperations(catalog, 'reservation').operations).toHaveLength(1)

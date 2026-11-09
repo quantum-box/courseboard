@@ -1,3 +1,4 @@
+import { usesSharedAgent } from './chat-api'
 import type { ReservationStatus } from './reservation-status'
 
 export type Entry = {
@@ -44,7 +45,16 @@ export function readConversationHistory(key?: string): ConversationHistory | und
         && (entry.role !== 'reservation' || (entry.reservation && Array.isArray(entry.reservation.courses)
           && entry.reservation.courses.every(course => course && typeof course.courseName === 'string')
           && entry.reservation.remainingCapacity))))
-    if (valid) return value
+    if (valid) {
+      const scope = usesSharedAgent() ? 'field-courseboard-v1' : 'legacy'
+      if ((value.agentScope ?? 'legacy') !== scope) {
+        // Keep the visible transcript, but never reuse a different app's session.
+        value.conversations = value.conversations.map((conversation: Conversation) => ({
+          ...conversation, session: null, needsNew: true,
+        }))
+      }
+      return value
+    }
   } catch {
     // Unavailable storage or an older/corrupt snapshot must not prevent chatting.
   }
@@ -53,7 +63,7 @@ export function readConversationHistory(key?: string): ConversationHistory | und
 export function writeConversationHistory(key: string | undefined, history: ConversationHistory) {
   if (!key) return
   try {
-    sessionStorage.setItem(key, JSON.stringify({ version: 1, ...history }))
+    sessionStorage.setItem(key, JSON.stringify({ version: 1, agentScope: usesSharedAgent() ? 'field-courseboard-v1' : 'legacy', ...history }))
   } catch {
     // The current conversation and in-memory history still work when storage is full.
   }
