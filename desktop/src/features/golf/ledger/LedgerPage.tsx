@@ -242,6 +242,7 @@ export function LedgerPage() {
       courseboardApiJson<
         ListResponse<{
           reservationServiceId: string
+          enabled?: boolean
           displayName?: string | null
           playType?: string | null
           expectedDurationMinutes: number

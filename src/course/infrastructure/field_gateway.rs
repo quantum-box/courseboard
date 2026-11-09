@@ -2021,6 +2021,35 @@ fn map_field_body_error_with_timeout(
     ))
 }
 
+fn catalog_product_config(item: &Value) -> Result<Value, CourseError> {
+    let mut object = item["attributesJson"]
+        .as_object()
+        .cloned()
+        .ok_or_else(|| CourseError::Provider("invalid reservation product attributes".into()))?;
+    for key in [
+        "id",
+        "name",
+        "enabled",
+        "durationMinutes",
+        "bookingMode",
+        "eligibleResourceIds",
+        "ownerExtensionKey",
+    ] {
+        object.insert(key.into(), item[key].clone());
+    }
+    if let Some(enabled) = item.get("planEnabled") {
+        object.insert("planEnabled".into(), enabled.clone());
+    }
+    let slots = item["slots"]
+        .as_array()
+        .ok_or_else(|| CourseError::Provider("invalid reservation product slots".into()))?;
+    object.insert(
+        "slots".into(),
+        Value::Array(slots.iter().map(|slot| slot["slotJson"].clone()).collect()),
+    );
+    Ok(Value::Object(object))
+}
+
 #[cfg(test)]
 fn field_body_error_message(
     method: &reqwest::Method,
@@ -3226,33 +3255,4 @@ mod tests {
         assert_eq!(caddie.display_name(), "参照スタッフ");
         assert_eq!(caddie.staff_id(), Some("staff_ref"));
     }
-}
-
-fn catalog_product_config(item: &Value) -> Result<Value, CourseError> {
-    let mut object = item["attributesJson"]
-        .as_object()
-        .cloned()
-        .ok_or_else(|| CourseError::Provider("invalid reservation product attributes".into()))?;
-    for key in [
-        "id",
-        "name",
-        "enabled",
-        "durationMinutes",
-        "bookingMode",
-        "eligibleResourceIds",
-        "ownerExtensionKey",
-    ] {
-        object.insert(key.into(), item[key].clone());
-    }
-    if let Some(enabled) = item.get("planEnabled") {
-        object.insert("planEnabled".into(), enabled.clone());
-    }
-    let slots = item["slots"]
-        .as_array()
-        .ok_or_else(|| CourseError::Provider("invalid reservation product slots".into()))?;
-    object.insert(
-        "slots".into(),
-        Value::Array(slots.iter().map(|slot| slot["slotJson"].clone()).collect()),
-    );
-    Ok(Value::Object(object))
 }
