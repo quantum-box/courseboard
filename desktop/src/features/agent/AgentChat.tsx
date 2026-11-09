@@ -303,7 +303,7 @@ export function AgentChat({ historyKey }: { historyKey?: string }) {
           : activities.get(entry.turnId)?.[0]?.id === entry.id
           ? <ActivityLog key={entry.id} entries={activities.get(entry.turnId!)!} running={activeTurnId === entry.turnId} />
           : null
-        : <article key={entry.id} className={`agent-message agent-message-${entry.role}`}><strong>{t(entry.role === 'user' ? 'chat.you' : 'chat.assistant')}</strong><div className="agent-markdown"><Markdown remarkPlugins={[remarkGfm]} components={{ a: ({ children, href }) => <a href={href} target="_blank" rel="noopener noreferrer">{children}</a>, img: ({ alt }) => <span>{alt}</span> }}>{entry.text}</Markdown></div></article>)}
+        : <article key={entry.id} className={`agent-message agent-message-${entry.role}`}><strong>{t(entry.role === 'user' ? 'chat.you' : 'chat.assistant')}</strong><div className="agent-markdown"><Markdown remarkPlugins={[remarkGfm]} components={{ a: ({ children, href }) => <a href={href} target="_blank" rel="noopener noreferrer">{children}</a>, img: ({ alt }) => <span>{alt}</span> }}>{entry.role === 'assistant' ? answerText(entry.text) : entry.text}</Markdown></div></article>)}
       {pending ? <div className="agent-confirm" role="region" aria-label={t('chat.confirmTitle')}>
         <h2>{t('chat.confirmTitle')}</h2>
         <p>{pending.args.confirmation || operationLabel(pending.operation, t)}</p>
@@ -341,6 +341,12 @@ export function AgentChat({ historyKey }: { historyKey?: string }) {
       </div>
     </form>
   </section>
+}
+
+function answerText(text: string): string {
+  // Some runtime replies carry the completion envelope inside a say event.
+  const completion = text.match(/^\s*<attempt_completion>\s*<result>([\s\S]*?)(?:<\/result>|$)/)
+  return completion ? completion[1].trim() : text
 }
 
 function ActivityLog({ entries, running }: { entries: Entry[]; running: boolean }) {
