@@ -206,7 +206,7 @@ export function TenantSelectionScreen({ tenants, onSelect, onSignOut }: {
               <span className="tenant-copy">
                 <strong>{tenant.name}</strong>
                 <small>{tenant.slug ?? tenant.id}</small>
-                {tenant.platformUnresolved ? <small role="alert">{t('tenant.platformUnresolved')}</small> : null}
+                {tenant.platformUnresolved ? <small className="tenant-unresolved" role="alert">{t('tenant.platformUnresolved')}</small> : null}
               </span>
               <Badge variant={tenant.mode === 'production' ? 'success' : 'warning'}>
                 {tenant.mode === 'production' ? t('tenant.production') : t('tenant.sandbox')}

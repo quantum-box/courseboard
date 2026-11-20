@@ -3090,7 +3090,12 @@ button,
 
 .tenant-option:disabled {
   cursor: not-allowed;
-  opacity: 0.6;
+  background: hsl(var(--nui-muted));
+}
+
+.tenant-option:disabled > :not(.tenant-copy),
+.tenant-option:disabled .tenant-copy > :not(.tenant-unresolved) {
+  opacity: 0.55;
 }
 
 .tenant-option:not(:disabled):hover,
@@ -3144,6 +3149,16 @@ button,
   color: hsl(var(--nui-muted-foreground));
   font-family: var(--nui-font-mono);
   font-size: 9px;
+}
+
+/* The reason a tenant cannot be opened must be read in full. */
+.tenant-copy small.tenant-unresolved {
+  overflow: visible;
+  color: hsl(var(--nui-destructive));
+  font-family: inherit;
+  font-size: 11px;
+  line-height: 1.45;
+  white-space: normal;
 }
 
 .auth-problem-icon {
