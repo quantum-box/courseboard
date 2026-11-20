@@ -40,6 +40,7 @@ export const auth = {
     sandbox: 'テスト',
     otherAccount: '別のアカウントでログイン',
     select: '施設を選ぶ',
+    platformUnresolved: 'この施設の所属先を確認できないため開けません。時間をおいて再読み込みするか、管理者に連絡してください。',
   },
   problem: {
     forbidden: {

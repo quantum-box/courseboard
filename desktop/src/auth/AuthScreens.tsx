@@ -194,9 +194,20 @@ export function TenantSelectionScreen({ tenants, onSelect, onSignOut }: {
         <p>{t('tenant.description')}</p>
         <div className="tenant-list">
           {tenants.map(tenant => (
-            <button key={`${tenant.mode}:${tenant.id}`} type="button" className="tenant-option" onClick={() => onSelect(tenant)}>
+            <button
+              key={`${tenant.mode}:${tenant.id}`}
+              type="button"
+              className="tenant-option"
+              disabled={tenant.platformUnresolved}
+              aria-disabled={tenant.platformUnresolved}
+              onClick={() => onSelect(tenant)}
+            >
               <span className="tenant-icon"><Building2 /></span>
-              <span className="tenant-copy"><strong>{tenant.name}</strong><small>{tenant.slug ?? tenant.id}</small></span>
+              <span className="tenant-copy">
+                <strong>{tenant.name}</strong>
+                <small>{tenant.slug ?? tenant.id}</small>
+                {tenant.platformUnresolved ? <small role="alert">{t('tenant.platformUnresolved')}</small> : null}
+              </span>
               <Badge variant={tenant.mode === 'production' ? 'success' : 'warning'}>
                 {tenant.mode === 'production' ? t('tenant.production') : t('tenant.sandbox')}
               </Badge>

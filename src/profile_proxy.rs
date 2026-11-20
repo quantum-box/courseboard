@@ -221,8 +221,12 @@ impl ProfileClient {
         Ok(keep_allowed(tenants, &allowed_ids))
     }
 
-    /// Best-effort per-tenant platform lookup: a failed lookup leaves the
-    /// tenant without `platformId` and the client falls back to its default.
+    /// Per-tenant platform lookup. The operator lookup covers the first
+    /// `MAX_OPERATOR_LOOKUPS` tenants; every tenant still without a platform
+    /// (past the cap, or a failed lookup) is filled from the platform's own
+    /// `/v1/me`, which scopes nested operators to their direct parent. A
+    /// tenant neither source resolves is left without `platformId` so the
+    /// client can refuse it instead of guessing.
     async fn attach_platform_ids(&self, profile: &mut ProfileResponse, authorization: &str) {
         let Some(operators_base) = &self.operators_base else {
             return;
@@ -231,6 +235,48 @@ impl ProfileClient {
             tenant.platform_id = self
                 .fetch_operator_platform_id(operators_base, &tenant.id, authorization)
                 .await;
+        }
+        if profile
+            .tenants
+            .iter()
+            .all(|tenant| tenant.platform_id.is_some())
+        {
+            return;
+        }
+        let platform_tenants = match tokio::time::timeout(
+            OPERATOR_LOOKUP_TIMEOUT,
+            self.fetch_platform_profile(operators_base, authorization),
+        )
+        .await
+        {
+            Ok(Ok((_, tenants))) => tenants,
+            Ok(Err(error)) => {
+                tracing::warn!(
+                    reason = error.reason(),
+                    "platform profile unavailable; unresolved tenants keep no platformId"
+                );
+                return;
+            }
+            Err(_) => {
+                tracing::warn!("platform profile timed out; unresolved tenants keep no platformId");
+                return;
+            }
+        };
+        for tenant in profile
+            .tenants
+            .iter_mut()
+            .filter(|tenant| tenant.platform_id.is_none())
+        {
+            tenant.platform_id = platform_tenants
+                .iter()
+                .find(|platform_tenant| platform_tenant.id == tenant.id)
+                .map(|platform_tenant| platform_tenant.platform_id.clone());
+            if tenant.platform_id.is_none() {
+                tracing::warn!(
+                    tenant_id = tenant.id,
+                    "no source resolved the tenant platform; platformId omitted"
+                );
+            }
         }
     }
 
@@ -2326,6 +2372,281 @@ mod tests {
             started.elapsed()
         );
         assert_eq!(listed_ids(&profile), vec![golf.as_str()]);
+    }
+
+    /// Platform → operator → child operator, as Core's `/v1/me` reports it:
+    /// every member carries the root platform in `platform_id`, and only
+    /// `parent_tenant_id` names the direct parent Tachyon checks against.
+    struct NestedFixture {
+        platform: String,
+        operator: String,
+        child: String,
+    }
+
+    impl NestedFixture {
+        fn new() -> Self {
+            Self {
+                platform: tenant_id('p'),
+                operator: tenant_id('o'),
+                child: tenant_id('c'),
+            }
+        }
+
+        fn me_tenants(&self) -> serde_json::Value {
+            json!([
+                {
+                    "id": self.platform,
+                    "name": "Platform",
+                    "parent_tenant_id": null,
+                    "depth": 1,
+                    "platform_id": null,
+                    "switchable": false
+                },
+                {
+                    "id": self.operator,
+                    "name": "Operator",
+                    "parent_tenant_id": self.platform,
+                    "depth": 2,
+                    "platform_id": self.platform,
+                    "switchable": true
+                },
+                {
+                    "id": self.child,
+                    "name": "Child operator",
+                    "parent_tenant_id": self.operator,
+                    "depth": 3,
+                    "platform_id": self.platform,
+                    "switchable": true
+                }
+            ])
+        }
+    }
+
+    /// One Tachyon fake for every `/v1/me`-backed path: the operator lookup
+    /// (answers only the listed tenants, 404 otherwise), the platform
+    /// profile, and `check-tenants` granting per action. Records every
+    /// `check-tenants` body so the scope sent per tenant can be asserted.
+    async fn spawn_nested_tachyon(
+        me_tenants: serde_json::Value,
+        operator_platforms: Vec<(String, String)>,
+        grants: Vec<(&'static str, Vec<String>)>,
+    ) -> (String, Arc<std::sync::Mutex<Vec<serde_json::Value>>>) {
+        use axum::{extract::Path, Json};
+        let me_body = json!({
+            "user": {"id": "us_fixture", "username": "courseboard-user"},
+            "tenants": me_tenants,
+        });
+        let operator_platforms = Arc::new(operator_platforms);
+        let grants = Arc::new(grants);
+        let check_bodies = Arc::new(std::sync::Mutex::new(Vec::new()));
+        let recorded = check_bodies.clone();
+        let app = Router::new()
+            .route(
+                "/v1/auth/operators/:tenant_id",
+                get(move |Path(tenant_id): Path<String>| {
+                    let operator_platforms = operator_platforms.clone();
+                    async move {
+                        match operator_platforms.iter().find(|(id, _)| *id == tenant_id) {
+                            Some((id, platform_id)) => {
+                                Json(json!({"id": id, "platformId": platform_id})).into_response()
+                            }
+                            None => StatusCode::NOT_FOUND.into_response(),
+                        }
+                    }
+                }),
+            )
+            .route(
+                PLATFORM_PROFILE_PATH,
+                get(move |headers: HeaderMap| {
+                    let me_body = me_body.clone();
+                    async move {
+                        assert!(headers.get("x-operator-id").is_none());
+                        assert!(headers.get("x-platform-id").is_none());
+                        Json(me_body)
+                    }
+                }),
+            )
+            .route(
+                CHECK_TENANTS_PATH,
+                axum::routing::post(move |Json(body): Json<serde_json::Value>| {
+                    let grants = grants.clone();
+                    let recorded = recorded.clone();
+                    async move {
+                        let action = body["action"].as_str().unwrap().to_string();
+                        recorded.lock().unwrap().push(body);
+                        let allowed = grants
+                            .iter()
+                            .find(|(granted, _)| *granted == action)
+                            .map(|(_, tenants)| tenants.clone())
+                            .unwrap_or_default();
+                        Json(json!({"allowedTenantIds": allowed}))
+                    }
+                }),
+            );
+        let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let address = listener.local_addr().unwrap();
+        tokio::spawn(async move {
+            axum::serve(listener, app).await.unwrap();
+        });
+        (format!("http://{address}"), check_bodies)
+    }
+
+    fn platform_of<'a>(profile: &'a ProfileResponse, id: &str) -> Option<&'a str> {
+        profile
+            .tenants
+            .iter()
+            .find(|tenant| tenant.id == id)
+            .and_then(|tenant| tenant.platform_id.as_deref())
+    }
+
+    #[tokio::test]
+    async fn extension_source_fills_tenants_past_the_lookup_cap_from_the_platform_profile() {
+        let nested = NestedFixture::new();
+        // Enough filler tenants ahead of the nested ones to push them past
+        // the operator lookup cap.
+        let fillers: Vec<String> = (0..MAX_OPERATOR_LOOKUPS)
+            .map(|index| format!("tn_01{index:024}"))
+            .collect();
+        let mut me_tenants = nested.me_tenants();
+        let mut field_tenants = Vec::new();
+        for filler in &fillers {
+            me_tenants
+                .as_array_mut()
+                .unwrap()
+                .push(platform_me_tenant(filler, Some(&nested.platform)));
+            field_tenants.push(field_tenant(filler, true));
+        }
+        field_tenants.push(field_tenant(&nested.operator, true));
+        field_tenants.push(field_tenant(&nested.child, true));
+        let operator_platforms = fillers
+            .iter()
+            .map(|filler| (filler.clone(), nested.platform.clone()))
+            .collect();
+        let (origin, _) = spawn_nested_tachyon(me_tenants, operator_platforms, Vec::new()).await;
+
+        let profile = extension_profile_against(json!(field_tenants), &origin).await;
+
+        assert_eq!(profile.tenants.len(), MAX_OPERATOR_LOOKUPS + 2);
+        assert!(fillers
+            .iter()
+            .all(|filler| platform_of(&profile, filler) == Some(nested.platform.as_str())));
+        assert_eq!(
+            platform_of(&profile, &nested.operator),
+            Some(nested.platform.as_str())
+        );
+        // Not the root platform: Tachyon would answer 403 to that.
+        assert_eq!(
+            platform_of(&profile, &nested.child),
+            Some(nested.operator.as_str())
+        );
+    }
+
+    #[tokio::test]
+    async fn extension_source_fills_a_failed_lookup_with_the_direct_parent() {
+        let nested = NestedFixture::new();
+        // The operator lookup answers the parent but not the child.
+        let (origin, _) = spawn_nested_tachyon(
+            nested.me_tenants(),
+            vec![(nested.operator.clone(), nested.platform.clone())],
+            Vec::new(),
+        )
+        .await;
+
+        let profile = extension_profile_against(
+            json!([
+                field_tenant(&nested.operator, true),
+                field_tenant(&nested.child, true)
+            ]),
+            &origin,
+        )
+        .await;
+
+        assert_eq!(
+            platform_of(&profile, &nested.operator),
+            Some(nested.platform.as_str())
+        );
+        assert_eq!(
+            platform_of(&profile, &nested.child),
+            Some(nested.operator.as_str())
+        );
+    }
+
+    #[tokio::test]
+    async fn a_tenant_no_source_resolves_keeps_no_platform_id() {
+        let nested = NestedFixture::new();
+        let unknown = tenant_id('u');
+        let (origin, _) = spawn_nested_tachyon(nested.me_tenants(), Vec::new(), Vec::new()).await;
+
+        let profile =
+            extension_profile_against(json!([field_tenant(&unknown, true)]), &origin).await;
+
+        assert_eq!(listed_ids(&profile), vec![unknown.as_str()]);
+        assert_eq!(platform_of(&profile, &unknown), None);
+    }
+
+    #[tokio::test]
+    async fn policy_source_scopes_a_nested_operator_to_its_direct_parent() {
+        let nested = NestedFixture::new();
+        let (origin, check_bodies) = spawn_nested_tachyon(
+            nested.me_tenants(),
+            Vec::new(),
+            vec![(
+                REPRESENTATIVE_ACTION,
+                vec![nested.operator.clone(), nested.child.clone()],
+            )],
+        )
+        .await;
+        let client = ProfileClient::with_timeout("http://field.invalid", Duration::from_secs(1))
+            .unwrap()
+            .with_operators_base(&origin)
+            .unwrap()
+            .with_tenant_source(TenantSource::Policy);
+
+        let profile = client.get_profile("Bearer accepted-fixture").await.unwrap();
+
+        assert_eq!(
+            listed_ids(&profile),
+            vec![nested.operator.as_str(), nested.child.as_str()]
+        );
+        assert_eq!(
+            platform_of(&profile, &nested.operator),
+            Some(nested.platform.as_str())
+        );
+        assert_eq!(
+            platform_of(&profile, &nested.child),
+            Some(nested.operator.as_str())
+        );
+        // check-tenants is asked per direct parent, so the child is checked
+        // under the operator rather than under the root platform.
+        let bodies = check_bodies.lock().unwrap();
+        assert!(bodies
+            .iter()
+            .any(|body| body["platformId"] == json!(nested.operator)
+                && body["tenantIds"] == json!([nested.child])));
+        assert!(bodies
+            .iter()
+            .any(|body| body["platformId"] == json!(nested.platform)
+                && body["tenantIds"] == json!([nested.operator])));
+    }
+
+    #[tokio::test]
+    async fn fee_discovery_adds_a_nested_operator_under_its_direct_parent() {
+        let nested = NestedFixture::new();
+        let (origin, _) = spawn_nested_tachyon(
+            nested.me_tenants(),
+            Vec::new(),
+            vec![(CANCELLATION_FEE_LIST_ACTION, vec![nested.child.clone()])],
+        )
+        .await;
+
+        let profile = extension_profile_against(json!([]), &origin).await;
+
+        assert_eq!(listed_ids(&profile), vec![nested.child.as_str()]);
+        assert_eq!(
+            platform_of(&profile, &nested.child),
+            Some(nested.operator.as_str())
+        );
+        assert_eq!(profile.default_tenant_id, Some(nested.child));
     }
 
     #[test]

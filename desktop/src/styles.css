@@ -3088,7 +3088,12 @@ button,
   cursor: pointer;
 }
 
-.tenant-option:hover,
+.tenant-option:disabled {
+  cursor: not-allowed;
+  opacity: 0.6;
+}
+
+.tenant-option:not(:disabled):hover,
 .tenant-option:focus-visible {
   border-color: hsl(var(--nui-primary));
   background: hsl(var(--nui-selected));

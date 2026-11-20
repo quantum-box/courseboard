@@ -40,4 +40,28 @@ describe('resolveTenantSelection', () => {
       requestedMissing: false,
     })
   })
+
+  it('never auto-selects a tenant whose platform is unresolved', () => {
+    const unresolved: AuthTenant = {
+      id: 'tenant-c',
+      name: 'C',
+      mode: 'production',
+      operatorId: 'tenant-c',
+      platformId: '',
+      platformUnresolved: true,
+    }
+    expect(resolveTenantSelection([unresolved], null, null)).toEqual({
+      tenant: undefined,
+      requestedMissing: false,
+    })
+    expect(resolveTenantSelection([...tenants, unresolved], null, 'tenant-c')).toEqual({
+      tenant: undefined,
+      requestedMissing: false,
+    })
+    // Requested but unresolved goes to the picker, not to "no access".
+    expect(resolveTenantSelection([...tenants, unresolved], 'tenant-c', null)).toEqual({
+      tenant: undefined,
+      requestedMissing: false,
+    })
+  })
 })

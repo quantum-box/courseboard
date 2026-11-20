@@ -39,6 +39,7 @@ export const auth: DeepPartial<typeof source> = {
     sandbox: 'Test',
     otherAccount: 'Sign in with another account',
     select: 'Choose a course',
+    platformUnresolved: 'This course cannot be opened because its platform could not be confirmed. Reload later or contact an administrator.',
   },
   problem: {
     forbidden: {

@@ -273,14 +273,20 @@ function nativeTenant(payload: NativeTenantPayload) {
   const rawSlug = payload.slug?.trim() || payload.alias?.trim() || undefined
   const fallback = envTenant(payload.id, rawName || labels.name || payload.id)
   const distinctName = rawName && rawName !== payload.id ? rawName : undefined
+  const resolvedPlatformId = payload.platformId?.trim() || undefined
+  // A production build never guesses the platform: the bundle default is the
+  // root platform, and Tachyon answers 403 for an operator nested under
+  // another operator. Local dev keeps the default so fixtures stay usable.
+  const platformUnresolved = !resolvedPlatformId && !import.meta.env.DEV
   return {
     ...fallback,
     name: distinctName || labels.name || rawName || fallback.name,
     slug: rawSlug || labels.slug || fallback.slug,
     // Only the Tachyon-resolved platform decides production vs sandbox; the
     // bundle default applies when the operator lookup returned nothing.
-    mode: payload.mode ?? platformMode(payload.platformId) ?? fallback.mode,
-    platformId: payload.platformId ?? fallback.platformId,
+    mode: payload.mode ?? platformMode(resolvedPlatformId) ?? fallback.mode,
+    platformId: platformUnresolved ? '' : resolvedPlatformId ?? fallback.platformId,
+    ...(platformUnresolved ? { platformUnresolved: true as const } : {}),
     // A profile tenant is selected independently; a global development
     // operator override must never be reused for a different tenant.
     operatorId: payload.operatorId ?? payload.id,
