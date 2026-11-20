@@ -747,6 +747,8 @@ struct PlatformTenantWire {
     name: Option<String>,
     #[serde(default, alias = "platformId")]
     platform_id: Option<String>,
+    #[serde(default, alias = "parentTenantId")]
+    parent_tenant_id: Option<String>,
     /// Core includes host/root and other non-landing memberships in `/v1/me`.
     /// Only an explicit `true` is eligible for tenant selection; missing or
     /// false is fail-closed so an incomplete response cannot expose a parent.
@@ -850,6 +852,13 @@ fn decode_platform_profile(
             .filter(|platform_id| is_valid_tenant_id(platform_id))
         else {
             continue;
+        };
+        // Core's `platform_id` is the root platform, but Tachyon binds
+        // `x-platform-id` to the operator's direct parent. They differ for an
+        // operator nested under another operator, so that parent is the scope.
+        let platform_id = match tenant.parent_tenant_id {
+            Some(parent) if id != platform_id && is_valid_tenant_id(&parent) => parent,
+            _ => platform_id,
         };
         kept.push(PlatformTenant {
             id,
@@ -1679,6 +1688,49 @@ mod tests {
             vec![
                 (platform.as_str(), platform.as_str()),
                 (child.as_str(), platform.as_str())
+            ]
+        );
+    }
+
+    #[test]
+    fn nested_operator_is_scoped_to_its_direct_parent() {
+        let platform = tenant_id('p');
+        let parent_operator = tenant_id('o');
+        let nested = tenant_id('n');
+        let body = json!({
+            "user": {"id": "us_fixture", "username": "courseboard-user"},
+            "tenants": [
+                {
+                    "id": parent_operator,
+                    "name": "Parent operator",
+                    "parent_tenant_id": platform,
+                    "depth": 2,
+                    "platform_id": platform,
+                    "switchable": true
+                },
+                {
+                    // Core reports the root platform, but Tachyon checks
+                    // x-platform-id against the direct parent operator.
+                    "id": nested,
+                    "name": "Nested operator",
+                    "parent_tenant_id": parent_operator,
+                    "depth": 3,
+                    "platform_id": platform,
+                    "switchable": true
+                }
+            ]
+        });
+
+        let (_, tenants) = decode_platform_profile(body.to_string().as_bytes()).unwrap();
+
+        assert_eq!(
+            tenants
+                .iter()
+                .map(|tenant| (tenant.id.as_str(), tenant.platform_id.as_str()))
+                .collect::<Vec<_>>(),
+            vec![
+                (parent_operator.as_str(), platform.as_str()),
+                (nested.as_str(), parent_operator.as_str())
             ]
         );
     }
