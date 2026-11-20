@@ -12,6 +12,12 @@ export type AuthTenant = {
   mode: 'production' | 'sandbox'
   platformId: string
   operatorId: string
+  /**
+   * `/v1/me` resolved no platform for this tenant. A production build never
+   * guesses one (a nested operator's platform is its direct parent, which no
+   * bundle default can know), so the tenant is listed but cannot be selected.
+   */
+  platformUnresolved?: true
 }
 
 export type AuthReason = 'expired' | 'logout'

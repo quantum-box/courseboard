@@ -19,7 +19,7 @@ import {
   type AuthTenant,
   type AuthUser,
 } from './types'
-import { resolveTenantSelection } from './tenant-selection'
+import { isSelectableTenant, resolveTenantSelection } from './tenant-selection'
 import { i18next } from '../i18n'
 import { clearResourceCache } from '../hooks/useResource'
 import { currentTenantId, replaceTenantId } from '../lib/router'
@@ -265,6 +265,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   const selectTenant = useCallback((tenant: AuthTenant) => {
     if (state.status !== 'selecting-tenant' && state.status !== 'forbidden') return
     if (!state.user || !availableTenants.some(available => available.id === tenant.id)) return
+    if (!isSelectableTenant(tenant)) return
     localStorage.setItem(`courseboard.auth.tenant.${state.user.id}`, tenant.id)
     replaceTenantId(tenant.id)
     activateTenant(state.user, tenant)

@@ -34,6 +34,7 @@ export const auth: DeepPartial<typeof source> = {
     sandbox: '練習用',
     otherAccount: '別のアカウントでログインする',
     select: 'ゴルフ場を選ぶ',
+    platformUnresolved: 'このゴルフ場は今は開けません。少し待ってから読みこみ直すか、担当の人に連絡してください。',
   },
   problem: {
     forbidden: {

@@ -236,7 +236,7 @@ describe('BrowserPkceAdapter', () => {
       String(url) === 'https://courseboard-api.example.test/v1/me')).toBe(true)
   })
 
-  it('binds each tenant to its profile platformId and falls back to the runtime default', async () => {
+  it('binds each tenant to its profile platformId and falls back to the runtime default in dev', async () => {
     const { BROWSER_PKCE_SESSION_KEY, createAuthAdapter } = await import('./adapters')
     localStorageMock.setItem(BROWSER_PKCE_SESSION_KEY, JSON.stringify({
       accessToken: 'persisted-access-token',
@@ -261,6 +261,36 @@ describe('BrowserPkceAdapter', () => {
         { id: 'tn_01prodchild', platformId: 'tn_01hjjn348rn3t49zz6hvmfq67p' },
       ],
     })
+  })
+
+  it('never guesses a platform in a production build and marks the tenant unselectable', async () => {
+    vi.stubEnv('DEV', false)
+    const { BROWSER_PKCE_SESSION_KEY, createAuthAdapter } = await import('./adapters')
+    localStorageMock.setItem(BROWSER_PKCE_SESSION_KEY, JSON.stringify({
+      accessToken: 'persisted-access-token',
+      accessTokenExpiresAt: Date.now() + 60 * 60 * 1000,
+    }))
+    // A nested operator's platform is its direct parent; the bundle default
+    // (the root platform) would be answered with 403 by Tachyon.
+    vi.stubGlobal('fetch', vi.fn(async () => new Response(JSON.stringify({
+      user: { id: 'user-1', username: 'operator' },
+      tenants: [
+        { id: 'tn_01nestedchild', name: '入れ子施設', platformId: 'tn_01parentoperator' },
+        { id: 'tn_01unresolved', name: '未解決施設' },
+      ],
+    }), { status: 200, headers: { 'Content-Type': 'application/json' } })))
+
+    const result = await createAuthAdapter().bootstrap()
+
+    expect(result).toMatchObject({
+      kind: 'authenticated',
+      tenants: [
+        { id: 'tn_01nestedchild', platformId: 'tn_01parentoperator' },
+        { id: 'tn_01unresolved', platformId: '', platformUnresolved: true },
+      ],
+    })
+    if (result.kind !== 'authenticated') throw new Error('expected an authenticated result')
+    expect(result.tenants[0]).not.toHaveProperty('platformUnresolved')
   })
 
   it('labels each tenant by its Tachyon platform instead of the bundle mode', async () => {
