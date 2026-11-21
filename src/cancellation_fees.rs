@@ -366,6 +366,11 @@ pub struct CancellationFeeCollectionResponse {
     pub status: String,
     pub sms_status: String,
     pub paid_at: Option<String>,
+    /// Who is asking for the money, as Field knows the tenant. Only the public
+    /// payment page fills it in: the payer arrives from an SMS link and has no
+    /// other way to tell which facility the bill is from.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub issuer_name: Option<String>,
 }
 
 impl From<CancellationFeeCollection> for CancellationFeeCollectionResponse {
@@ -384,6 +389,7 @@ impl From<CancellationFeeCollection> for CancellationFeeCollectionResponse {
             status: value.status,
             sms_status: value.sms_status,
             paid_at: value.paid_at,
+            issuer_name: None,
         }
     }
 }
@@ -546,10 +552,12 @@ pub async fn get_public_collection(
         .find_by_token(&token)
         .await?
         .ok_or(AppError::NotFound("cancellation fee collection not found"))?;
-    let collection =
+    let (collection, issuer_name) =
         maybe_sync_paid_status_from_field(&repository, &http_client, &config, collection).await?;
 
-    Ok(Json(collection.into()))
+    let mut response = CancellationFeeCollectionResponse::from(collection);
+    response.issuer_name = issuer_name;
+    Ok(Json(response))
 }
 
 pub async fn create_stripe_payment_intent(
@@ -616,7 +624,7 @@ pub async fn confirm_stripe_payment(
             "Stripe PaymentIntent does not match collection",
         ));
     }
-    let updated =
+    let (updated, _issuer_name) =
         maybe_sync_paid_status_from_field(&repository, &http_client, &config, collection).await?;
 
     Ok(Json(ConfirmStripePaymentResponse {
@@ -850,17 +858,22 @@ async fn field_invoice_stripe_publishable_key(
     Ok(config.publishable_key)
 }
 
+/// Reads the Field invoice behind a collection once, for the two things the
+/// public page needs from it: whether it has been paid, and who issued it.
+///
+/// The issuer name is `None` whenever Field is not asked (already paid, or no
+/// invoice attached) or does not answer; the page then simply omits it.
 async fn maybe_sync_paid_status_from_field(
     repository: &MySqlCancellationFeeRepository,
     http_client: &reqwest::Client,
     config: &CancellationFeeConfig,
     collection: CancellationFeeCollection,
-) -> Result<CancellationFeeCollection, AppError> {
+) -> Result<(CancellationFeeCollection, Option<String>), AppError> {
     if collection.status == "paid"
         || config.field_api_url.is_none()
         || collection.field_invoice_id.is_none()
     {
-        return Ok(collection);
+        return Ok((collection, None));
     }
     let invoice = match fetch_field_public_invoice(http_client, config, &collection).await {
         Ok(invoice) => invoice,
@@ -871,18 +884,20 @@ async fn maybe_sync_paid_status_from_field(
                 %error,
                 "failed to sync Field invoice payment status"
             );
-            return Ok(collection);
+            return Ok((collection, None));
         }
     };
+    let issuer_name = invoice.issuer_name();
     if !invoice.status.eq_ignore_ascii_case("paid") {
-        return Ok(collection);
+        return Ok((collection, issuer_name));
     }
 
     repository.mark_paid(&collection.id).await?;
-    repository
+    let collection = repository
         .find_by_token(&collection.public_token)
         .await?
-        .ok_or(AppError::NotFound("cancellation fee collection not found"))
+        .ok_or(AppError::NotFound("cancellation fee collection not found"))?;
+    Ok((collection, issuer_name))
 }
 
 async fn fetch_field_public_invoice(
@@ -1049,6 +1064,20 @@ struct FieldInvoiceResponse {
 #[serde(rename_all = "camelCase")]
 struct FieldPublicInvoiceResponse {
     status: String,
+    /// Name of the tenant issuing the bill. Absent when the tenant has not set
+    /// one in Field, and on a Field API that predates the field.
+    #[serde(default)]
+    issuer_name: Option<String>,
+}
+
+impl FieldPublicInvoiceResponse {
+    fn issuer_name(&self) -> Option<String> {
+        self.issuer_name
+            .as_deref()
+            .map(str::trim)
+            .filter(|name| !name.is_empty())
+            .map(str::to_string)
+    }
 }
 
 #[derive(Debug, Deserialize)]
@@ -1178,6 +1207,32 @@ mod tests {
         assert_eq!(seen.content_type.as_deref(), Some("application/json"));
         assert_eq!(seen.body, "{}");
         server.abort();
+    }
+
+    #[test]
+    fn the_field_invoice_issuer_is_read_trimmed_and_optional() {
+        let named: FieldPublicInvoiceResponse = serde_json::from_value(serde_json::json!({
+            "status": "Sent",
+            "issuerName": " 札幌カントリー倶楽部 "
+        }))
+        .unwrap();
+        assert_eq!(named.issuer_name().as_deref(), Some("札幌カントリー倶楽部"));
+
+        for body in [
+            serde_json::json!({ "status": "Sent" }),
+            serde_json::json!({ "status": "Sent", "issuerName": null }),
+            serde_json::json!({ "status": "Sent", "issuerName": "  " }),
+        ] {
+            let unnamed: FieldPublicInvoiceResponse = serde_json::from_value(body).unwrap();
+            assert_eq!(unnamed.issuer_name(), None);
+        }
+    }
+
+    #[test]
+    fn the_issuer_is_left_out_of_responses_that_do_not_carry_one() {
+        let response = CancellationFeeCollectionResponse::from(payment_intent_collection());
+        let json = serde_json::to_value(&response).unwrap();
+        assert!(json.get("issuer_name").is_none());
     }
 
     #[test]

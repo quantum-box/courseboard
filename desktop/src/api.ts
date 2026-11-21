@@ -22,6 +22,8 @@ export type CancellationFeeCollection = {
   status: 'pending' | 'paid' | 'cancelled' | 'expired' | string
   sms_status: 'not_requested' | 'skipped' | 'sent' | 'failed' | string
   paid_at?: string | null
+  /** Who issued the bill. Only the public payment page receives it. */
+  issuer_name?: string | null
   created_at?: string | null
   updated_at?: string | null
 }

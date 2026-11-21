@@ -20,6 +20,7 @@ export const payment: DeepPartial<typeof source> = {
   termsOfService: 'Terms of Service',
   legalLinksLabel: 'Legal information',
   field: {
+    issuer: 'Billed by',
     client: 'Name',
     reference: 'For',
     due: 'Due date',
