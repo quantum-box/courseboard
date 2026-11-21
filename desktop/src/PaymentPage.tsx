@@ -120,6 +120,12 @@ export function PaymentPage({ token }: PaymentPageProps) {
         <h1>{t('payment:title')}</h1>
         <div className="payment-amount">{yen(collection.amount)}</div>
         <dl>
+          {collection.issuer_name ? (
+            <div>
+              <dt>{t('payment:field.issuer')}</dt>
+              <dd>{collection.issuer_name}</dd>
+            </div>
+          ) : null}
           <div>
             <dt>{t('payment:field.client')}</dt>
             <dd>{collection.customer_name}</dd>

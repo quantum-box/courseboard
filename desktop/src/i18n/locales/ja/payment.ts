@@ -18,6 +18,7 @@ export const payment = {
   termsOfService: '利用規約',
   legalLinksLabel: '法的情報',
   field: {
+    issuer: '請求元',
     client: 'お名前',
     reference: '対象',
     due: 'お支払い期限',

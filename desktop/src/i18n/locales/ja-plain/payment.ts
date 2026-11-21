@@ -23,6 +23,7 @@ export const payment: DeepPartial<typeof source> = {
   termsOfService: '利用規約',
   legalLinksLabel: '法的情報',
   field: {
+    issuer: '請求元',
     client: 'お名前',
     reference: '対象の予約',
     due: 'お支払いの期限',
