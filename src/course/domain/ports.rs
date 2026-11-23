@@ -9,8 +9,8 @@ use super::{
     CaddieAssignment, CaddieAssignmentQuery, CaddieAvailability, CaddieCourseMembership,
     CaddieDutyAssignment, CaddieDutyOptions, CaddieFeeChange, CaddieId, CaddieRankFeeChange,
     CaddieRankFeeChangeContext, CaddieRankFees, CaddieRating, CaddieRoster, CaddieShift,
-    CaddieStaff, CancellationFeeDecision, CancellationQuery, Course, CourseError, CourseId,
-    CourseOrder, CreateCustomerConsentItem, Customer, CustomerConsentItem,
+    CaddieStaff, CaddieSurveyForm, CancellationFeeDecision, CancellationQuery, Course, CourseError,
+    CourseId, CourseOrder, CreateCustomerConsentItem, Customer, CustomerConsentItem,
     CustomerConsentItemPatch, CustomerGradeRules, CustomerId, CustomerMembership, CustomerPage,
     CustomerReceptionField, CustomerRegistration, CustomerSearchQuery, CustomerSummary,
     CustomerSummaryQuery, CustomerSummaryRun, CustomerSummaryRunStatus, DailyBudget,
@@ -26,10 +26,11 @@ use super::{
     ReplaceCaddieMemberships, Reservation, ReservationBookingUpdate, ReservationCancellation,
     ReservationId, ReservationPolicy, ReservationProduct, ReservationServiceId, Resource,
     ResourceId, ResourceTimeSlot, SaveCourseResource, SeededReservation, SetMemberNumber,
-    ShiftPolicy, SlotOverride, SlotOverrideQuery, TaxRuleSnapshot, UnsyncedShift,
-    UpdateExtensionConfig, UpdateReservationPolicy, UpsertCaddie, UpsertCaddieAssignment,
-    UpsertCaddieAvailability, UpsertCourse, UpsertDailyBudget, UpsertMembershipPlan,
-    UpsertReservationProduct, VisitCheckin, VisitCheckinRequest, WorkedMinutes, YearMonth,
+    ShiftPolicy, SlotOverride, SlotOverrideQuery, SurveyCaddieChoice, TaxRuleSnapshot,
+    UnsyncedShift, UpdateExtensionConfig, UpdateReservationPolicy, UpsertCaddie,
+    UpsertCaddieAssignment, UpsertCaddieAvailability, UpsertCourse, UpsertDailyBudget,
+    UpsertMembershipPlan, UpsertReservationProduct, VisitCheckin, VisitCheckinRequest,
+    WorkedMinutes, YearMonth,
 };
 
 /// Answers whether the caller may perform one CourseBoard action.
@@ -1702,6 +1703,67 @@ pub trait GolfOpsGateway: Send + Sync {
         credentials: GatewayCredentials<'_>,
         caddie_id: Option<&CaddieId>,
     ) -> Result<Vec<CaddieRating>, CourseError>;
+}
+
+/// Port for the caddie survey form in Field Forms (see `caddie_survey.rs`).
+///
+/// The form's definition is Field's JSON and stays behind this port: the use
+/// cases decide when to build, rebuild, and publish, the gateway knows how a
+/// survey definition is put together.
+#[async_trait]
+pub trait CaddieSurveyGateway: Send + Sync {
+    /// The survey this tenant made, if CourseBoard remembers one.
+    async fn remembered_form_id(
+        &self,
+        credentials: GatewayCredentials<'_>,
+    ) -> Result<Option<String>, CourseError>;
+
+    async fn remember_form_id(
+        &self,
+        credentials: GatewayCredentials<'_>,
+        form_id: &str,
+    ) -> Result<(), CourseError>;
+
+    /// `None` when Field no longer has it (deleted, or another tenant's id).
+    async fn find_form(
+        &self,
+        credentials: GatewayCredentials<'_>,
+        form_id: &str,
+    ) -> Result<Option<CaddieSurveyForm>, CourseError>;
+
+    /// The caddies Field would list in the survey right now. `None` when
+    /// Field offers none at all — no active caddie, or the golf extension
+    /// is off.
+    async fn current_caddies(
+        &self,
+        credentials: GatewayCredentials<'_>,
+    ) -> Result<Option<Vec<SurveyCaddieChoice>>, CourseError>;
+
+    /// Make the survey from Field's template with the current caddies in it,
+    /// as a draft. Publishing is a separate step so that the form can be
+    /// remembered first: a publish that fails then leaves a survey the screen
+    /// can still find and publish, not an orphan in Field's form list.
+    async fn create_survey_draft(
+        &self,
+        credentials: GatewayCredentials<'_>,
+    ) -> Result<CaddieSurveyForm, CourseError>;
+
+    async fn publish_form(
+        &self,
+        credentials: GatewayCredentials<'_>,
+        form_id: &str,
+    ) -> Result<CaddieSurveyForm, CourseError>;
+
+    /// Put the current caddies into the survey and publish it again,
+    /// leaving every other question as the club left it.
+    async fn refresh_caddies(
+        &self,
+        credentials: GatewayCredentials<'_>,
+        form_id: &str,
+    ) -> Result<CaddieSurveyForm, CourseError>;
+
+    /// The answer page a guest opens from the QR.
+    fn public_url(&self, public_id: &str) -> String;
 }
 
 /// Port for budgets, settlement, reservation policy, and extension config.

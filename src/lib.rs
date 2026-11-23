@@ -1471,6 +1471,21 @@ pub fn build_router(state: AppState) -> Router {
             ),
         )
         .route(
+            "/v1/course/caddie-survey",
+            get(course::interfaces::http_caddie_survey::get_caddie_survey)
+                .post(course::interfaces::http_caddie_survey::create_caddie_survey)
+                .route_layer(middleware::from_fn_with_state(
+                    state.clone(),
+                    require_valid_token,
+                )),
+        )
+        .route(
+            "/v1/course/caddie-survey/refresh",
+            post(course::interfaces::http_caddie_survey::refresh_caddie_survey).route_layer(
+                middleware::from_fn_with_state(state.clone(), require_valid_token),
+            ),
+        )
+        .route(
             "/v1/course/reservation-policy",
             get(course::interfaces::http_commercial::get_reservation_policy)
                 .patch(course::interfaces::http_commercial::update_reservation_policy)

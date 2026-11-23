@@ -378,6 +378,16 @@ const ROUTE_RULES: &[(&str, &str, FeatureRoute)] = &[
     ),
     (
         "*",
+        "/v1/course/caddie-survey",
+        Feature("courseboard.caddies.insights"),
+    ),
+    (
+        "*",
+        "/v1/course/caddie-survey/refresh",
+        Feature("courseboard.caddies.insights"),
+    ),
+    (
+        "*",
         "/v1/course/caddie-rank-fees",
         Feature("courseboard.caddies.rank_fees"),
     ),

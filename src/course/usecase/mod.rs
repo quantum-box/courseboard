@@ -14,6 +14,7 @@ mod caddie_duties;
 mod caddie_fee_alignment;
 mod caddie_rank_fees;
 mod caddie_round_guards;
+mod caddie_survey;
 mod cancel_reservation;
 mod change_reservation_plan;
 mod course_order;
@@ -122,6 +123,9 @@ pub use caddie_fee_alignment::{
 };
 pub use caddie_rank_fees::{
     GetCaddieRankFeesUseCase, ListCaddieRankFeeChangesUseCase, ReplaceCaddieRankFeesUseCase,
+};
+pub use caddie_survey::{
+    CreateCaddieSurveyUseCase, GetCaddieSurveyUseCase, RefreshCaddieSurveyUseCase,
 };
 pub use cancel_reservation::CancelReservationUseCase;
 pub use change_reservation_plan::ChangeReservationPlanUseCase;

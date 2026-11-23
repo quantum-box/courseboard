@@ -10,6 +10,7 @@ use utoipa::{
 
 use super::http;
 use super::http_caddie_fee_alignment;
+use super::http_caddie_survey;
 use super::http_cancellations;
 use super::http_commercial;
 use super::http_customers;
@@ -176,6 +177,9 @@ impl Modify for SecurityAddon {
         http_ops::get_payroll_summary,
         http_ops::export_payroll_csv,
         http_ops::list_caddie_ratings,
+        http_caddie_survey::get_caddie_survey,
+        http_caddie_survey::create_caddie_survey,
+        http_caddie_survey::refresh_caddie_survey,
         http_commercial::get_reservation_policy,
         http_commercial::update_reservation_policy,
         crate::course::interfaces::http_weather::list_weather,
@@ -353,6 +357,8 @@ impl Modify for SecurityAddon {
             http_ops::YearMonthQuery,
             http_ops::RatingDto,
             http_ops::RatingsQueryParams,
+            http_caddie_survey::CaddieSurveyResponse,
+            http_caddie_survey::CaddieSurveyFormDto,
             http_commercial::ReservationPolicyDto,
             http_commercial::ReservationPolicyReadDto,
             http_commercial::UpdateReservationPolicyRequest,

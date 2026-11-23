@@ -22,6 +22,7 @@ describe('getPageHelp', () => {
     expect(getPageHelp('golf/caddies/profile-1').title).toBe('キャディ名簿')
     expect(getPageHelp('golf/caddies/dispatch').title).toBe('キャディの配置')
     expect(getPageHelp('golf/caddies/attendance').title).toBe('出勤')
+    expect(getPageHelp('golf/caddies/survey').title).toBe('キャディアンケート')
     expect(getPageHelp('golf/caddies/payroll').title).toBe('給与')
   })
 

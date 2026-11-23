@@ -30,6 +30,7 @@ describe('metadataForRoute', () => {
     'golf/caddies/caddie-1',
     'golf/caddies/dispatch',
     'golf/caddies/attendance',
+    'golf/caddies/survey',
     'golf/caddies/shifts',
     'golf/caddies/payroll',
     'golf/customers',

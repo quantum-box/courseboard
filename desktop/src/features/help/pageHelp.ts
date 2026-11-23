@@ -11,7 +11,7 @@ const catalogs: Record<string, HelpCatalog> = {
   'ja-plain': helpJaPlain,
 }
 
-const CADDIE_SUBVIEWS = ['dispatch', 'attendance', 'shifts', 'payroll']
+const CADDIE_SUBVIEWS = ['dispatch', 'attendance', 'survey', 'shifts', 'payroll']
 
 /** Detail routes (a caddie id, an invoice id) reuse their list page's guide. */
 function normalizeHelpRoute(route: string, routes: Record<string, PageHelp>) {

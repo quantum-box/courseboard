@@ -71,6 +71,7 @@ export const appRoutes: AppRoute[] = [
   { path: 'golf/caddies/duties', title: 'キャディの別業務', sidebarLabel: 'キャディの別業務' },
   // attendance は名簿画面内のタブなのでタイトルは名簿のまま
   { path: 'golf/caddies/attendance', title: 'キャディ名簿' },
+  { path: 'golf/caddies/survey', title: 'キャディ名簿' },
   { path: 'golf/caddies/shifts', title: 'シフト表', sidebarLabel: 'シフト表' },
   { path: 'golf/caddies/payroll', title: '給与', sidebarLabel: '給与' },
   { path: 'staff', title: '社員名簿', sidebarLabel: '社員名簿' },

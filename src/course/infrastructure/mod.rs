@@ -18,6 +18,7 @@ mod customer_reception_fields_repository;
 mod customer_reception_values_repository;
 mod customer_registration_repository;
 mod customer_summary_repository;
+mod field_caddie_survey_gateway;
 mod field_commercial_gateway;
 mod field_customer_consent_gateway;
 mod field_customer_gateway;
@@ -59,6 +60,7 @@ pub use customer_reception_fields_repository::MySqlCustomerReceptionFieldsReposi
 pub use customer_reception_values_repository::MySqlCustomerReceptionValuesRepository;
 pub use customer_registration_repository::MySqlCustomerRegistrationRepository;
 pub use customer_summary_repository::MySqlCustomerSummaryRepository;
+pub use field_caddie_survey_gateway::FieldCaddieSurveyGateway;
 pub use field_commercial_gateway::FieldGolfCommercialGateway;
 pub use field_customer_consent_gateway::FieldCustomerConsentGateway;
 pub use field_customer_gateway::FieldCustomerGateway;

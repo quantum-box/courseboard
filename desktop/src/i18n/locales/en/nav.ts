@@ -60,6 +60,10 @@ export const nav: DeepPartial<typeof source> = {
       label: 'Attendance',
       description: 'Clock-ins and what actually happened',
     },
+    'golf/caddies/survey': {
+      label: 'Caddie survey',
+      description: 'A QR survey where guests rate their caddie',
+    },
     'golf/caddies/shifts': {
       label: 'Shift board',
       description: 'A month of schedules and working streaks',

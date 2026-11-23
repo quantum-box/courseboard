@@ -21,6 +21,7 @@ import {
   MapPin,
   Pencil,
   Plus,
+  QrCode,
   Search,
   Shuffle,
   Sparkles,
@@ -72,6 +73,7 @@ import {
   type DataTableColumn,
 } from '../../components/Page'
 import { SectionErrorBoundary } from '../../components/SectionErrorBoundary'
+import { CaddieSurveyPanel } from './CaddieSurveyPanel'
 import { YearMonthPicker, useRouteYearMonthValue } from '../../components/YearMonthPicker'
 import { weekdayIndexes, weekdayLabel } from './models'
 import {
@@ -143,7 +145,7 @@ const PAYROLL_PAGE_SIZE = 20
 
 type ListResponse<T> = { items: T[] }
 type CaddieRosterResponse = ListResponse<CaddieProfile> & { staff?: StaffMember[] }
-type View = 'roster' | 'dispatch' | 'duties' | 'attendance' | 'payroll'
+type View = 'roster' | 'dispatch' | 'duties' | 'attendance' | 'survey' | 'payroll'
 
 type SkillLevel = 'rookie' | 'regular' | 'veteran'
 type AvailabilityStatus =
@@ -760,17 +762,20 @@ export function CaddiesPage({
     recommendationsResource.refresh,
   ])
 
-  useRegisterPageReload(view === 'payroll' ? null : refreshCurrentView)
+  // Payroll and the survey each register their own reload.
+  useRegisterPageReload(view === 'payroll' || view === 'survey' ? null : refreshCurrentView)
 
   const showingProfileDetail = view === 'roster' && Boolean(selectedProfileId)
   // Attendance is a tab of the roster, not a separate destination, so the
   // switcher shows whenever we're on either side of that split.
-  const showingRosterTabs = (view === 'roster' && !showingProfileDetail) || view === 'attendance'
+  const showingRosterTabs = (view === 'roster' && !showingProfileDetail)
+    || view === 'attendance'
+    || view === 'survey'
 
   return (
     <div className="page-stack">
       {showingRosterTabs ? (
-        <div className="grid w-fit grid-cols-2 gap-1 rounded-lg border border-border bg-surface p-1" role="tablist" aria-label={t('caddies:tabs.label')}>
+        <div className="grid w-fit grid-cols-3 gap-1 rounded-lg border border-border bg-surface p-1" role="tablist" aria-label={t('caddies:tabs.label')}>
           {/* Both tabs carry the day: this screen is not remounted by the
               switch, but `navigate` rebuilds the hash from the route alone, so
               a bare route would drop the operator back onto today. */}
@@ -779,6 +784,9 @@ export function CaddiesPage({
           </DetailTabButton>
           <DetailTabButton active={view === 'attendance'} onClick={() => navigate(dayRoute('golf/caddies/attendance'))}>
             <Clock /> {t('caddies:tabs.attendance')}
+          </DetailTabButton>
+          <DetailTabButton active={view === 'survey'} onClick={() => navigate(dayRoute('golf/caddies/survey'))}>
+            <QrCode /> {t('caddies:tabs.survey')}
           </DetailTabButton>
         </div>
       ) : null}
@@ -859,6 +867,12 @@ export function CaddiesPage({
           }}
           setFlash={setFlash}
         />
+      ) : null}
+
+      {view === 'survey' ? (
+        <SectionErrorBoundary resetKey={view}>
+          <CaddieSurveyPanel />
+        </SectionErrorBoundary>
       ) : null}
 
       {view === 'payroll' ? (
@@ -3942,6 +3956,11 @@ export function AvailabilityCalendar({
   )
 }
 
+/** An answer to the caddie survey, as opposed to a rating taken with a booking. */
+export function isSurveyRating(rating: Pick<CaddieRating, 'customerId'>) {
+  return rating.customerId.startsWith('field-form:')
+}
+
 function RatingsPanel({ resource }: { resource: ResourceValue<ListResponse<CaddieRating>> }) {
   const { t } = useTranslation(['caddies', 'common'])
   const timezone = useTenantTimezone()
@@ -3969,7 +3988,16 @@ function RatingsPanel({ resource }: { resource: ResourceValue<ListResponse<Caddi
     },
     // No customer column: the rating carries only the customer id, and a raw
     // id names nobody. The score, the comment and when it landed are what the
-    // caddie's record is read for.
+    // caddie's record is read for. Where it came from is worth one word: an
+    // answer to the survey carries an anonymous `field-form:` marker instead.
+    {
+      key: 'source',
+      header: t('caddies:ratings.table.source'),
+      mobileLabel: t('caddies:ratings.table.source'),
+      cell: row => (isSurveyRating(row)
+        ? <Badge variant="outline">{t('caddies:ratings.source.survey')}</Badge>
+        : t('caddies:ratings.source.booking')),
+    },
     {
       key: 'created',
       header: t('caddies:ratings.table.created'),

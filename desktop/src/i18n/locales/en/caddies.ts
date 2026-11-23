@@ -24,6 +24,7 @@ export const caddies: DeepPartial<typeof source> = {
     label: 'Switch view',
     list: 'List',
     attendance: 'Attendance',
+    survey: 'Survey',
   },
   add: 'Add a caddie',
   added: {
@@ -530,11 +531,70 @@ export const caddies: DeepPartial<typeof source> = {
     table: {
       rating: 'Rating',
       comment: 'Comment',
+      source: 'From',
       created: 'When',
+    },
+    source: {
+      survey: 'Survey',
+      booking: 'Booking',
     },
     empty: {
       title: 'No ratings yet',
       description: 'Post-round customer ratings will appear here.',
+    },
+  },
+  survey: {
+    loading: 'Loading the survey',
+    unavailable: {
+      title: 'The survey is not available yet',
+      description: 'The survey is built with TACHYON Field Forms, which is not included in this company\'s plan. Contact your account representative to add it.',
+    },
+    noCaddies: {
+      title: 'No caddies to choose from',
+      description: 'Register caddies who can work on the roster, then create the survey.',
+    },
+    create: {
+      title: 'Create the caddie survey',
+      description: 'Guests scan a QR code, pick the caddie who looked after them, and rate them out of 5. {{n}} caddies from the current roster will be listed.',
+      action: 'Create and publish the survey',
+      busy: 'Creating…',
+    },
+    ready: {
+      title: 'Caddie survey',
+      description: 'Print this QR code and put it in the starter\'s room or on the carts. One QR code takes ratings for every caddie.',
+      qrLabel: 'Caddie survey QR code',
+      url: 'Answer page address',
+      copy: 'Copy address',
+      open: 'Open answer page',
+      saveQr: 'Save QR code as image',
+      caddieCount: 'The survey currently lists {{n}} caddies.',
+    },
+    status: {
+      accepting: 'Accepting answers',
+      notAccepting: 'Not accepting answers',
+    },
+    changed: {
+      title: 'The caddie list has changed',
+      description: 'The survey lists {{published}} caddies, but the roster now has {{current}}. Updating adds new caddies and removes those who left.',
+    },
+    notAccepting: {
+      title: 'This survey is not accepting answers right now',
+      description: 'Press "Update from roster and republish" to accept answers again.',
+    },
+    refresh: 'Update from roster and republish',
+    about: {
+      title: 'Where answers show up',
+      flow: 'Guests pick the caddie who looked after them, rate them out of 5, and can leave a comment.',
+      ratings: 'Each answer becomes a rating for that caddie: it counts toward the roster\'s rating average, shows in the caddie\'s Ratings tab, and feeds auto-assign recommendations.',
+      privacy: 'No names or contact details are asked. Answers show as "Survey" in the Ratings tab.',
+      roster: 'When caddies join or leave, press "Update from roster and republish". The QR code stays the same.',
+    },
+    toast: {
+      created: 'Survey created and published',
+      refreshed: 'Survey updated from the roster and republished',
+      failed: 'Could not update the survey',
+      copied: 'Address copied',
+      copyFailed: 'Could not copy. Select the address and copy it',
     },
   },
   payroll: {

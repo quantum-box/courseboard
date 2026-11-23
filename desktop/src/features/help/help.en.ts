@@ -214,6 +214,27 @@ export const helpEn: HelpCatalog = {
       ],
     },
 
+    'golf/caddies/survey': {
+      title: 'Caddie survey',
+      summary: 'Create the survey guests open from a QR code to pick and rate their caddie, and get the QR code.',
+      usage: [
+        {
+          heading: 'Create and put it out',
+          body: 'Press “Create and publish the survey”, then print the QR code for the starter’s room or the carts.',
+        },
+        {
+          heading: 'Keep it in step with the roster',
+          body: 'When caddies join or leave, press “Update from roster and republish”. The QR code stays the same.',
+        },
+      ],
+      data: [
+        {
+          heading: 'Where answers go',
+          body: 'Each answer becomes a rating for the chosen caddie, shown in the roster and as “Survey” in the Ratings tab.',
+        },
+      ],
+    },
+
     'golf/caddies/shifts': {
       title: 'Shift board',
       summary: 'A month of caddie schedules in one table — requested days off and assignments together, so long working streaks stand out.',

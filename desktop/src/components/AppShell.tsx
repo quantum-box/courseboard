@@ -112,6 +112,7 @@ export type NavigationRoute =
   | 'golf/caddies/dispatch'
   | 'golf/caddies/duties'
   | 'golf/caddies/attendance'
+  | 'golf/caddies/survey'
   | 'golf/caddies/shifts'
   | 'golf/caddies/payroll'
   | 'golf/budgets'
