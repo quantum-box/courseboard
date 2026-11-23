@@ -25,6 +25,7 @@ export const caddies: DeepPartial<typeof source> = {
     label: '表示の切り替え',
     list: '一覧',
     attendance: '出勤',
+    survey: 'アンケート',
   },
   add: 'キャディを登録する',
   added: {
@@ -514,11 +515,36 @@ export const caddies: DeepPartial<typeof source> = {
     table: {
       rating: '評価',
       comment: 'コメント',
+      source: '受け取り方',
       created: '日時',
+    },
+    source: {
+      survey: 'アンケート',
+      booking: '予約から',
     },
     empty: {
       title: '評価はまだありません',
       description: 'プレーのあとにお客さまが付けた評価が、ここに出ます。',
+    },
+  },
+  survey: {
+    unavailable: {
+      description: 'アンケートは TACHYON Field の「フォーム」で作ります。今のご契約には「フォーム」が入っていないので、作れません。使いたいときは、ご契約の窓口に相談してください。',
+    },
+    noCaddies: {
+      description: '名簿に、出勤できるキャディを登録すると、作れるようになります。',
+    },
+    create: {
+      description: 'お客さまがQRコードを読んで、担当したキャディを選び、5段階で評価します。今の名簿の {{n}} 人から選べるようにします。',
+    },
+    ready: {
+      description: 'このQRコードを印刷して、スタート室やカートに置いてください。QRコードは1つだけで、どのキャディの評価も受け付けます。',
+    },
+    changed: {
+      description: 'アンケートで選べるのは {{published}} 人ですが、今の名簿には {{current}} 人います。名簿に合わせると、新しく入った人が選べるようになり、辞めた人は出なくなります。',
+    },
+    notAccepting: {
+      description: '「名簿に合わせて公開し直す」を押すと、また回答を受け付けるようになります。',
     },
   },
   payroll: {

@@ -69,6 +69,7 @@ export const ROUTE_FEATURES: Readonly<Record<string, FeatureKey>> = Object.freez
   'settings/caddie-duties': 'courseboard.caddies.dispatch',
   'golf/caddies/shifts': 'courseboard.caddies.shifts',
   'golf/caddies/attendance': 'courseboard.caddies.insights',
+  'golf/caddies/survey': 'courseboard.caddies.insights',
   'golf/caddies/payroll': 'courseboard.caddies.payroll',
   'staff': 'courseboard.staff',
   'staff/:staffId': 'courseboard.staff',

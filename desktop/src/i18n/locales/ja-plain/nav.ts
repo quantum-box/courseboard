@@ -59,6 +59,10 @@ export const nav: DeepPartial<typeof source> = {
       label: '出勤の記録',
       description: '出勤・退勤の記録と、その日の実績',
     },
+    'golf/caddies/survey': {
+      label: 'キャディアンケート',
+      description: 'お客さまがQRコードを読んで、キャディを評価するアンケート',
+    },
     'golf/caddies/shifts': {
       label: 'シフト表',
       description: 'ひと月の出勤の予定と、休みなしの続きぐあい',

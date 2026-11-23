@@ -730,6 +730,19 @@ const ROUTES: &[(&str, &str, RouteAuthorization)] = &[
         "/v1/course/caddie-ratings",
         RouteAuthorization::UpstreamEnforced,
     ),
+    // The survey form is Field's (Field Forms enforces its own actions on the
+    // caller's bearer); the use cases also require the golf actions for
+    // reading insights and for managing the roster.
+    (
+        "*",
+        "/v1/course/caddie-survey",
+        RouteAuthorization::UpstreamEnforced,
+    ),
+    (
+        "POST",
+        "/v1/course/caddie-survey/refresh",
+        RouteAuthorization::UpstreamEnforced,
+    ),
     // The fee table is CourseBoard's own row now (ADR-0009). Field no longer
     // answers for it, and it decides what people are paid, so the check has to
     // happen here.
@@ -2090,6 +2103,9 @@ mod tests {
             ("GET", "/v1/course/caddie-course-supply"),
             ("GET", "/v1/course/caddie-reinforcements"),
             ("GET", "/v1/course/caddie-ratings"),
+            ("GET", "/v1/course/caddie-survey"),
+            ("POST", "/v1/course/caddie-survey"),
+            ("POST", "/v1/course/caddie-survey/refresh"),
             ("GET", "/v1/course/caddie-rank-fees"),
             ("PUT", "/v1/course/caddie-rank-fees"),
             ("GET", "/v1/course/caddie-rank-fees/history"),

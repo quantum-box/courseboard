@@ -85,7 +85,7 @@ key は `courseboard.` で始める。Core に渡す delivery key は、Field �
 | 12 | `courseboard.caddies.dispatch` | `golf/caddies/dispatch`, `settings/caddie-duties` | caddie-assignments, reassignment, recommendations, auto-assignments, duties | `ListCaddieAssignments` | `ManageCaddieAssignments` | 候補（自動配置） | caddies, tee_sheet |
 | 13 | `courseboard.caddies.availability` | シフト・タイムラインの出勤可否 | caddie-availabilities, submissions, deadlines | `ListCaddieAvailability` | `ManageCaddieAvailability` | なし | caddies |
 | 14 | `courseboard.caddies.shifts` | `golf/caddies/shifts` | shift-rules, shifts, shift-plans, field-sync | `ListShifts` | `ManageShifts` | なし | caddies, caddies.availability |
-| 15 | `courseboard.caddies.insights` | `golf/caddies/attendance` | attendance-snapshot(s), supply, course-supply, reinforcements, ratings | `ListCaddieInsights` | — | なし | caddies |
+| 15 | `courseboard.caddies.insights` | `golf/caddies/attendance`, `golf/caddies/survey` | attendance-snapshot(s), supply, course-supply, reinforcements, ratings, caddie-survey | `ListCaddieInsights` | `ManageCaddies`（アンケートの作成・公開し直し） | なし | caddies |
 | 16 | `courseboard.caddies.rank_fees` | 精算・配置の単価 | caddie-rank-fees, history, fee-alignment | `ListCaddieRankFees` | `ManageCaddieRankFees` | なし | caddies |
 | 17 | `courseboard.caddies.payroll` | `golf/caddies/payroll` | caddie-payroll-summary, export.csv | `ListPayroll` | — | なし | caddies.rank_fees |
 | 18 | `courseboard.staff` | `staff(/:id)` | Field `/v1/erp/staff`（`/field-api` 経由。キャディ登録・打刻も含む） | `field:ListHrm` | `field:ManageHrm` | なし | — |
@@ -238,6 +238,7 @@ IAM の列は `auth/capabilityRoutes.ts` の `routeActionRequirement` にある�
 | `golf/caddies(/:id)` | `courseboard.caddies` | all: ListCaddies, ListCaddieAssignments, ListCaddieInsights, ListCourses | なし |
 | `golf/caddies/dispatch` | `courseboard.caddies.dispatch` | all: ListCaddies, ListCaddieAssignments, ListCaddieInsights, ListTeeSheet, ListCaddieAvailability | なし |
 | `golf/caddies/attendance` | `courseboard.caddies.insights` | all: ListCaddies, ListCaddieInsights | なし |
+| `golf/caddies/survey` | `courseboard.caddies.insights` | all: ListCaddies, ListCaddieInsights | なし |
 | `golf/caddies/shifts` | `courseboard.caddies.shifts` | all: ListShifts, ListCaddies, ListCaddieAssignments, ListCaddieAvailability, ListCourses | なし |
 | `golf/caddies/payroll` | `courseboard.caddies.payroll` | all: ListPayroll, ListCaddieRankFees | なし |
 | `staff(/:id)` | `courseboard.staff` | all: field:ListHrm, ListCaddies, ListCaddieInsights | なし |

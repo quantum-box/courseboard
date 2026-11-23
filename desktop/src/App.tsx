@@ -176,7 +176,7 @@ function RouteContent({ route }: { route: string }) {
       : decodeRouteSegment(route.slice('golf/caddies/'.length).split('/')[0] ?? '')
     // Keep a stable key so selecting a caddie (or switching roster/dispatch tabs)
     // updates props instead of remounting and flashing every useResource loader.
-    if (segment === 'dispatch' || segment === 'duties' || segment === 'attendance' || segment === 'payroll') {
+    if (segment === 'dispatch' || segment === 'duties' || segment === 'attendance' || segment === 'survey' || segment === 'payroll') {
       return <CaddiesPage key="golf/caddies" initialView={segment === 'dispatch' && legacyTab === 'duties' ? 'duties' : segment} />
     }
     return (

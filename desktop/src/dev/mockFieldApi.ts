@@ -2314,6 +2314,9 @@ function normalizeMockPath(pathname: string): string {
     || pathname === '/v1/course/caddie-rank-fees'
     // Moving caddies onto their rank fee writes CourseBoard's own change log.
     || pathname === '/v1/course/caddie-fee-alignment'
+    // The caddie survey is a Field Forms form CourseBoard builds; the mock
+    // shows it as not made yet.
+    || pathname === '/v1/course/caddie-survey'
     // Pricing inputs are CourseBoard's own row (ADR-0009).
     || pathname === '/v1/course/pricing-settings'
     // So are the booking form's visitor categories, and the grade ladder.
@@ -2924,6 +2927,10 @@ function resolveGet(path: string): Json | null | undefined {
       // 平日会員: Monday to Friday, mornings only.
       { planId: 'plan_weekday', days: [true, true, true, true, true, false, false], from: '06:00', to: '12:00' },
     ])
+  }
+
+  if (pathname === '/v1/course/caddie-survey') {
+    return { state: 'notCreated', caddieCount: mockCaddies.filter(profile => profile.active).length, form: null }
   }
 
   if (pathname === '/v1/course/membership-discounts') {

@@ -237,6 +237,13 @@ export function routeActionRequirement(route: string): RouteActionRequirement | 
       FIELD_ACTIONS.listCaddieInsights,
     )
   }
+  // The survey tab loads the roster beside the survey itself.
+  if (route === 'golf/caddies/survey') {
+    return allRequirements(
+      FIELD_ACTIONS.listCaddies,
+      FIELD_ACTIONS.listCaddieInsights,
+    )
+  }
   if (route === 'golf/caddies/payroll') {
     return allRequirements(FIELD_ACTIONS.listPayroll, FIELD_ACTIONS.listCaddieRankFees)
   }

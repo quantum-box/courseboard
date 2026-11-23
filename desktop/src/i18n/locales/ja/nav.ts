@@ -58,6 +58,10 @@ export const nav = {
       label: '出勤',
       description: '出勤の打刻と実績の確認',
     },
+    'golf/caddies/survey': {
+      label: 'キャディアンケート',
+      description: 'お客さまがQRコードからキャディを評価するアンケート',
+    },
     'golf/caddies/shifts': {
       label: 'シフト表',
       description: 'ひと月の出勤予定と連続出勤',
